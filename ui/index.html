@@ -1,0 +1,166 @@
+<!doctype html>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Volunteers</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 720px; }
+  .card { border: 1px solid #ddd; border-radius: 12px; padding: 1rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  label { display:block; margin:.5rem 0 .25rem; }
+  input[type=text], select, textarea { width: 100%; padding:.6rem; border:1px solid #ccc; border-radius:8px; }
+  button { padding:.6rem 1rem; border-radius:8px; border:0; background:#0ea5e9; color:white; font-weight:600; cursor:pointer; }
+  button.secondary { background:#e2e8f0; color:#0f172a; }
+  .row { display:flex; gap:.75rem; flex-wrap: wrap; }
+  .row > * { flex:1 1 200px; }
+</style>
+
+<h1>Volunteer Call</h1>
+<div class="card" id="whoami">Checking login…</div>
+
+<div class="card" id="voterCard" hidden>
+  <div id="voterInfo"></div>
+
+  <h3>Call outcome</h3>
+  <label>Outcome</label>
+  <select id="outcome">
+    <option value="">— choose —</option>
+    <option>connected</option><option>vm</option><option>no_answer</option>
+    <option>wrong_number</option><option>refused</option><option>follow_up</option>
+  </select>
+
+  <div class="row">
+    <label><input type="checkbox" id="ok_callback"> OK to call back</label>
+    <label><input type="checkbox" id="requested_info"> Requested info</label>
+    <label><input type="checkbox" id="dnc"> Do not call</label>
+  </div>
+  <div class="row">
+    <div>
+      <label>Best day</label>
+      <select id="best_day"><option value="">—</option>
+        <option>Mon</option><option>Tue</option><option>Wed</option>
+        <option>Thu</option><option>Fri</option><option>Sat</option><option>Sun</option>
+      </select>
+    </div>
+    <div>
+      <label>Best time</label>
+      <select id="best_time_window"><option value="">—</option>
+        <option>Morning</option><option>Afternoon</option><option>Evening</option>
+        <option>6–8pm</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="row">
+    <label><input type="checkbox" id="optin_sms"> Opt-in SMS</label>
+    <label><input type="checkbox" id="optin_email"> Opt-in Email</label>
+  </div>
+  <label>Email address (if provided)</label>
+  <input type="text" id="email" placeholder="name@example.com"/>
+
+  <div class="row">
+    <label><input type="checkbox" id="wants_volunteer"> Wants to volunteer</label>
+    <label><input type="checkbox" id="share_insights_ok"> OK to share insights</label>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="for_term_limits"> For term limits</label>
+    <label><input type="checkbox" id="issue_public_lands"> Interested: public land sales</label>
+  </div>
+  <label>Comments</label>
+  <textarea id="comments" rows="3"></textarea>
+
+  <div class="row" style="margin-top:.75rem;">
+    <button id="saveBtn">Save & Next</button>
+    <button class="secondary" id="skipBtn">Skip</button>
+  </div>
+</div>
+
+<div class="card" id="empty" hidden>No eligible voters (or not logged in).</div>
+
+<script>
+const API = (path) => {
+  const isLocal = location.hostname === "localhost" || location.hostname.endsWith(".pages.dev");
+  if (isLocal) {
+    let base = localStorage.getItem("API_BASE");
+    if (!base) {
+      base = prompt("Enter API base (e.g., https://your-worker.workers.dev)") || "";
+      localStorage.setItem("API_BASE", base);
+    }
+    return base + path;
+  }
+  return "https://api.grassrootsmvt.org" + path;
+};
+
+const who = document.getElementById("whoami");
+const voterCard = document.getElementById("voterCard");
+const voterInfo = document.getElementById("voterInfo");
+const empty = document.getElementById("empty");
+
+async function loadWho() {
+  try {
+    const r = await fetch(API("/whoami"));
+    const j = await r.json();
+    who.textContent = j.email ? ("Signed in as: " + j.email) : "Not signed in (Access required)";
+  } catch {
+    who.textContent = "Unable to reach API";
+  }
+}
+
+async function nextVoter() {
+  try {
+    const r = await fetch(API("/call/next"), { method:"POST" });
+    const v = await r.json();
+    if (!v || !v.voter_id) {
+      voterCard.hidden = true; empty.hidden = false; return;
+    }
+    empty.hidden = true; voterCard.hidden = false;
+    voterCard.dataset.voter = v.voter_id;
+    voterInfo.innerHTML = "<strong>" + (v.first_name || "") + " " + (v.last_name || "") + "</strong><br/>"
+      + (v.ra_city || "") + " " + (v.ra_zip || "") + " • Party: " + (v.party || "") + "<br/>"
+      + "Phone: " + (v.phone_e164 || "—");
+  } catch {
+    voterCard.hidden = true; empty.hidden = false;
+  }
+}
+
+async function saveAndNext() {
+  const payload = {
+    voter_id: voterCard.dataset.voter || "",
+    outcome: document.getElementById("outcome").value,
+    ok_callback: document.getElementById("ok_callback").checked ? 1 : 0,
+    requested_info: document.getElementById("requested_info").checked ? 1 : 0,
+    dnc: document.getElementById("dnc").checked ? 1 : 0,
+    best_day: document.getElementById("best_day").value || null,
+    best_time_window: document.getElementById("best_time_window").value || null,
+    optin_sms: document.getElementById("optin_sms").checked ? 1 : 0,
+    optin_email: document.getElementById("optin_email").checked ? 1 : 0,
+    email: document.getElementById("email").value || null,
+    wants_volunteer: document.getElementById("wants_volunteer").checked ? 1 : 0,
+    share_insights_ok: document.getElementById("share_insights_ok").checked ? 1 : 0,
+    for_term_limits: document.getElementById("for_term_limits").checked ? 1 : 0,
+    issue_public_lands: document.getElementById("issue_public_lands").checked ? 1 : 0,
+    comments: document.getElementById("comments").value || null
+  };
+  if (!payload.voter_id || !payload.outcome) { alert("Choose an outcome."); return; }
+
+  await fetch(API("/call/complete"), {
+    method:"POST",
+    headers:{ "content-type":"application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  // reset form and go next
+  document.getElementById("outcome").value = "";
+  document.getElementById("best_day").value = "";
+  document.getElementById("best_time_window").value = "";
+  document.getElementById("email").value = "";
+  document.getElementById("comments").value = "";
+  ["ok_callback","requested_info","dnc","optin_sms","optin_email",
+   "wants_volunteer","share_insights_ok","for_term_limits","issue_public_lands"]
+   .forEach(id => document.getElementById(id).checked = false);
+
+  nextVoter();
+}
+
+document.getElementById("saveBtn").addEventListener("click", saveAndNext);
+document.getElementById("skipBtn").addEventListener("click", nextVoter);
+
+loadWho().then(nextVoter);
+</script>
