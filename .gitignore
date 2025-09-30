@@ -1,0 +1,15 @@
+*.sqlite
+*.db
+*.db-journal
+exports/
+originals/
+backups/
+*.csv
+*.tsv
+*.xlsx
+*.pdf
+.env
+.env.*
+node_modules/
+dist/
+.next/
