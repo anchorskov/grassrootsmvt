@@ -1,6 +1,8 @@
+# Never commit data or secrets
 *.sqlite
 *.db
 *.db-journal
+*.sqlitedb
 exports/
 originals/
 backups/
@@ -10,6 +12,8 @@ backups/
 *.pdf
 .env
 .env.*
+# Node / build
 node_modules/
 dist/
+.out/
 .next/
