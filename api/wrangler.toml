@@ -12,6 +12,10 @@ database_id = "4b4227f1-bf30-4fcf-8a08-6967b536a5ab"
 # Cloudflare Access header (Zero Trust) used to identify volunteers
 ACCESS_HEADER = "Cf-Access-Authenticated-User-Email"
 
+[[routes]]
+pattern = "api.grassrootsmvt.org/*"
+zone_name = "grassrootsmvt.org"
+
 # When DNS is active, you can route your custom domain to this worker:
 # [routes]
 # pattern = "api.grassrootsmvt.org/*"

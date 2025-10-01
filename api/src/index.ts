@@ -1,3 +1,5 @@
+/// <reference path="./globals.d.ts" />
+
 export interface Env {
   wy: D1Database;
   ACCESS_HEADER: string;
@@ -14,7 +16,7 @@ const json = (body: unknown, init: ResponseInit = {}) =>
   });
 
 const cors = {
-  "access-control-allow-origin": "*",  // tighten to volunteers.grassrootsmvt.org later
+  "access-control-allow-origin": "https://volunteers.grassrootsmvt.org",
   "access-control-allow-methods": "GET,POST,OPTIONS",
   "access-control-allow-headers": "content-type, cf-access-jwt-assertion"
 };
@@ -117,4 +119,4 @@ export default {
 
     return new Response("ok", { headers: cors });
   }
-} satisfies ExportedHandler<Env>;
+} as any;
