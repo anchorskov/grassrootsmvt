@@ -1,0 +1,15 @@
+name: Deploy UI (Pages)
+on:
+  push:
+    branches: [ main ]
+    paths: [ 'ui/**' ]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm i -g wrangler@latest
+      - run: wrangler pages deploy ./ui --project-name volunteers-ui
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ yhx4ymsmpmpPPBL5OsDEwQ5g-C5uV-zMrKMqsF1h }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ 8bfd3f60fbdcc89183e9e312fb03e86e }}
