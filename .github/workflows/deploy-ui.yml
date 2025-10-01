@@ -1,3 +1,4 @@
+# .github/workflows/deploy-ui.yml
 name: Deploy UI (Pages)
 
 on:
@@ -13,10 +14,7 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Install Wrangler
         run: npm i -g wrangler@latest
-
-      # Deploy the static UI from /ui to Cloudflare Pages
       - name: Deploy to Pages
-        run: wrangler pages deploy ./ui --project-name volunteers-ui
+        run: wrangler pages deploy ./ui --project-name grassrootsmvt
