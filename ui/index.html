@@ -20,7 +20,7 @@
 <h1 style="display:flex;justify-content:space-between;align-items:center;">
   <span>Volunteer Call</span>
   <span class="toolbar">
-    <button id="getNextBtn" type="button" title="N">Get Next</button>
+    <button id="getNextBtn" onclick="nextVoter()" style="padding:8px 12px;border-radius:6px;background:#6aa9ff;color:#fff;border:none;">Get Next</button>
   </span>
 </h1>
 
@@ -87,19 +87,8 @@
 <div class="card" id="empty" hidden>No eligible voters (or not logged in).</div>
 
 <script>
-function API(path) {
-  const host = location.hostname;
-  const isDev = host === "localhost" || host.endsWith(".pages.dev");
-  if (isDev) {
-    let base = localStorage.getItem("API_BASE");
-    if (!base) {
-      base = prompt("Enter API base (e.g., https://api.grassrootsmvt.org)") || "";
-      localStorage.setItem("API_BASE", base);
-    }
-    return base + path;
-  }
-  return "https://api.grassrootsmvt.org" + path;
-}
+// Use same-origin Pages Functions API path.
+window.API = (p) => '/api' + p;
 
 const who = document.getElementById("whoami");
 const voterCard = document.getElementById("voterCard");
@@ -208,3 +197,11 @@ window.addEventListener("keydown", (e) => {
 
 loadWho().then(nextVoter);
 </script>
+<script>
+document.addEventListener("DOMContentLoaded", () => {
+  const btn = document.getElementById("getNextBtn");
+});
+</script>
+<script>window.getNext = typeof nextVoter!=="undefined" ? nextVoter : ()=>{};</script>
+
+

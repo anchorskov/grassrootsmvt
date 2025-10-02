@@ -1,0 +1,49 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Canvassing</title>
+<style>
+  body{font-family:system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;margin:1rem;max-width:900px}
+  .card{border:1px solid #e6e6e6;border-radius:12px;padding:1rem;margin:1rem 0}
+  .muted{color:#64748b}
+  button{padding:.6rem 1rem;border-radius:8px;border:0;background:#0ea5e9;color:#fff;font-weight:600}
+  .badge{display:inline-block;padding:.25rem .5rem;border-radius:999px;background:#f1f5f9;margin-right:.5rem}
+  table{width:100%;border-collapse:collapse;margin-top:.75rem}
+  td,th{padding:.5rem;border-bottom:1px solid #eee}
+</style>
+
+<h1>Canvass Walk List</h1>
+<div class="card">
+  <div id="identity" class="muted">Loading…</div>
+  <div id="filters" style="margin-top:.5rem"></div>
+  <div style="margin-top:.75rem">
+    <button id="walkList">Get Walk List</button>
+    <a href="/" style="margin-left:1rem">Back to landing</a>
+  </div>
+  <div id="tableWrap"></div>
+</div>
+
+<script>
+window.API = (p) => '/api' + p;
+function el(id){return document.getElementById(id)}
+async function loadWho(){try{const r=await fetch(API('/whoami'));const j=await r.json();el('identity').textContent='Signed in as: '+(j.email||'unknown')}catch(e){el('identity').textContent='Unable to load identity'}}
+function renderFilters(f){const parts=[f.state||'—',f.county||'—',f.district||'—',f.affiliation||'Any','Canvass'];document.getElementById('filters').innerHTML=parts.map(p=>`<span class="badge">${p}</span>`).join('')}
+function getFilters(){try{return JSON.parse(localStorage.getItem('filters')||'{}')||{}}catch(e){return {}}}
+
+document.getElementById('walkList').addEventListener('click', async()=>{
+  el('tableWrap').innerHTML='Loading…';
+  try{
+    const f=getFilters();
+    const r=await fetch(API('/canvass/list'),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(f)});
+    const j=await r.json();
+    const rows=j.rows||[];
+    if(!rows.length) {el('tableWrap').textContent='No addresses';return}
+    const html=['<table><thead><tr><th>Name</th><th>Address</th></tr></thead><tbody>'];
+    rows.forEach(rw=>html.push(`<tr><td>${rw.name}</td><td>${rw.address}</td></tr>`));
+    html.push('</tbody></table>');
+    el('tableWrap').innerHTML=html.join('');
+  }catch(e){el('tableWrap').textContent='Error: '+e.message}
+});
+
+loadWho(); renderFilters(getFilters());
+</script>
