@@ -17,3 +17,9 @@ node_modules/
 dist/
 .out/
 .next/
+node_modules/
+.DS_Store
+**/.DS_Store
+.wrangler/
+.venv/
+*.log

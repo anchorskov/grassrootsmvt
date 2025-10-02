@@ -1,0 +1,69 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Admin — GrassrootsMVT</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 16px; }
+    .muted { color: #666; font-size: 0.9em; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin: 12px 0; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #eee; padding: 8px; text-align: left; }
+    th { background: #fafafa; }
+  </style>
+</head>
+<body>
+  <h1>Admin Dashboard</h1>
+  <div class="muted" id="whoami">…</div>
+
+  <div class="card">
+    <h2>Health</h2>
+    <pre id="health">Loading…</pre>
+  </div>
+
+  <div class="card">
+    <h2>Open Follow-ups</h2>
+    <div id="followups">Loading…</div>
+  </div>
+
+  <div class="card">
+    <h2>Recent Contacts</h2>
+    <div id="contacts">Loading…</div>
+  </div>
+
+  <script>
+    const api = (p, opts) => fetch(p, opts).then(r => {
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    });
+    const el = id => document.getElementById(id);
+    const tbl = (rows, cols) => {
+      const head = "<tr>" + cols.map(c=>"<th>"+c+"</th>").join("") + "</tr>";
+      const body = rows.map(r => "<tr>" + cols.map(c => "<td>"+(r[c] ?? "")+"</td>").join("") + "</tr>").join("");
+      return "<table>"+head+body+"</table>";
+    };
+
+    async function load() {
+      try {
+        const who = await api("/api/whoami");
+        el("whoami").textContent = "Signed in as " + who.email;
+
+        const h = await api("/api/admin/health");
+        el("health").textContent = JSON.stringify(h, null, 2);
+
+        const f = await api("/api/admin/followups");
+        el("followups").innerHTML = f.rows.length ? tbl(f.rows, ["voter_id","due_date","reason","created_by","created_at"]) : "<em>No open follow-ups</em>";
+
+        const c = await api("/api/admin/contacts/recent");
+        el("contacts").innerHTML = c.rows.length ? tbl(c.rows, ["voter_id","method","outcome","notes","created_at"]) : "<em>No recent contacts</em>";
+      } catch (e) {
+        el("health").textContent = "Error: " + e.message;
+        el("followups").textContent = "Error: " + e.message;
+        el("contacts").textContent = "Error: " + e.message;
+      }
+    }
+    load();
+  </script>
+</body>
+</html>
