@@ -1,0 +1,21 @@
+name = "grassroots-api"
+main = "src/index.ts"
+compatibility_date = "2025-09-30"
+
+[[d1_databases]]
+binding = "wy"
+database_name = "wy"
+database_id = "4b4227f1-bf30-4fcf-8a08-6967b536a5ab"
+
+[vars]
+ACCESS_HEADER = "Cf-Access-Authenticated-User-Email"
+
+# existing subdomain route
+[[routes]]
+pattern = "api.grassrootsmvt.org/*"
+zone_name = "grassrootsmvt.org"
+
+# same-origin route under the volunteers host
+[[routes]]
+pattern = "volunteers.grassrootsmvt.org/api/*"
+zone_name = "grassrootsmvt.org"
