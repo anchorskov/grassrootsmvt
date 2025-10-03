@@ -1,0 +1,617 @@
+{
+  "state": "WY",
+  "counts": {
+    "counties": 23,
+    "cities": 214,
+    "senateCount": 31,
+    "houseCount": 62
+  },
+  "counties": [
+    "ALBANY",
+    "BIG HORN",
+    "CAMPBELL",
+    "CARBON",
+    "CONVERSE",
+    "CROOK",
+    "FREMONT",
+    "GOSHEN",
+    "HOT SPRINGS",
+    "JOHNSON",
+    "LARAMIE",
+    "LINCOLN",
+    "NATRONA",
+    "NIOBRARA",
+    "PARK",
+    "PLATTE",
+    "SHERIDAN",
+    "SUBLETTE",
+    "SWEETWATER",
+    "TETON",
+    "UINTA",
+    "WASHAKIE",
+    "WESTON"
+  ],
+  "citiesByCounty": {
+    "ALBANY": [
+      "BOSLER",
+      "BUFORD",
+      "CENTENNIAL",
+      "GARRETT",
+      "JELM",
+      "LARAMIE",
+      "MEDICINE BOW",
+      "ROCK RIVER",
+      "TIE SIDING",
+      "WHEATLAND"
+    ],
+    "BIG HORN": [
+      "BASIN",
+      "BURLINGTON",
+      "BYRON",
+      "COWLEY",
+      "DEAVER",
+      "EMBLEM",
+      "FRANNIE",
+      "GREYBULL",
+      "HYATTVILLE",
+      "LOVELL",
+      "MANDERSON",
+      "OTTO",
+      "SHELL"
+    ],
+    "CAMPBELL": [
+      "ARVADA",
+      "GILLETTE",
+      "NEWCASTLE",
+      "RECLUSE",
+      "ROZET",
+      "WESTON",
+      "WRIGHT"
+    ],
+    "CARBON": [
+      "BAGGS",
+      "DIXON",
+      "ELK MOUNTAIN",
+      "ENCAMPMENT",
+      "HANNA",
+      "LEO",
+      "MCFADDEN",
+      "MEDICINE BOW",
+      "MUDDY GAP",
+      "RAWLINS",
+      "RIVERSIDE",
+      "SARATOGA",
+      "SAVERY",
+      "SINCLAIR",
+      "WALCOTT"
+    ],
+    "CONVERSE": [
+      "DOUGLAS",
+      "GLENROCK",
+      "LOST SPRINGS",
+      "SHAWNEE"
+    ],
+    "CROOK": [
+      "ALADDIN",
+      "ALVA",
+      "BEULAH",
+      "CARLILE",
+      "COLONY",
+      "DEVILS TOWER",
+      "HULETT",
+      "MOORCROFT",
+      "OSHOTO",
+      "PINE HAVEN",
+      "SUNDANCE",
+      "UPTON"
+    ],
+    "FREMONT": [
+      "ARAPAHOE",
+      "ATLANTIC CITY",
+      "BONNEVILLE",
+      "CROWHEART",
+      "DUBOIS",
+      "ETHETE",
+      "FT WASHAKIE",
+      "HUDSON",
+      "JEFFREY CITY",
+      "KINNEAR",
+      "LANDER",
+      "LYSITE",
+      "PAVILLION",
+      "RAWLINS",
+      "RIVERTON",
+      "SHOSHONI",
+      "SOUTH PASS CITY",
+      "ST. STEPHENS"
+    ],
+    "GOSHEN": [
+      "CHUGWATER",
+      "FORT LARAMIE",
+      "HAWK SPRINGS",
+      "HUNTLEY",
+      "JAY EM",
+      "LA GRANGE",
+      "LINGLE",
+      "LUSK",
+      "TORRINGTON",
+      "VAN TASSELL",
+      "VETERAN",
+      "YODER"
+    ],
+    "HOT SPRINGS": [
+      "EAST THERMOPOLIS",
+      "KIRBY",
+      "THERMOPOLIS"
+    ],
+    "JOHNSON": [
+      "ARVADA",
+      "BANNER",
+      "BUFFALO",
+      "CLEARMONT",
+      "EDGERTON",
+      "KAYCEE",
+      "LINCH",
+      "MIDWEST",
+      "SADDLESTRING"
+    ],
+    "LARAMIE": [
+      "ALBIN",
+      "BURNS",
+      "CARPENTER",
+      "CHEYENNE",
+      "GRANITE CANON",
+      "HILLSDALE",
+      "MERIDEN",
+      "PINE BLUFFS",
+      "WAFB"
+    ],
+    "LINCOLN": [
+      "AFTON",
+      "ALPINE",
+      "AUBURN",
+      "BEDFORD",
+      "COKEVILLE",
+      "DIAMONDVILLE",
+      "ETNA",
+      "FAIRVIEW",
+      "FREEDOM",
+      "FRONTIER",
+      "GROVER",
+      "KEMMERER",
+      "LA BARGE",
+      "OPAL",
+      "SMOOT",
+      "STAR VALLEY RANCH",
+      "THAYNE"
+    ],
+    "NATRONA": [
+      "ALCOVA",
+      "ARMINTO",
+      "BAR NUNN",
+      "CASPER",
+      "EDGERTON",
+      "EVANSVILLE",
+      "HILAND",
+      "KAYCEE",
+      "LYSITE",
+      "MIDWEST",
+      "MILLS",
+      "NATRONA",
+      "POWDER RIVER"
+    ],
+    "NIOBRARA": [
+      "KEELINE",
+      "LANCE CREEK",
+      "LUSK",
+      "MANVILLE",
+      "NODE",
+      "VAN TASSELL"
+    ],
+    "PARK": [
+      "CODY",
+      "DEAVER",
+      "FRANNIE",
+      "MEETEETSE",
+      "POWELL",
+      "RALSTON",
+      "YNP"
+    ],
+    "PLATTE": [
+      "CHUGWATER",
+      "GLENDO",
+      "GUERNSEY",
+      "HARTVILLE",
+      "WHEATLAND"
+    ],
+    "SHERIDAN": [
+      "ARVADA",
+      "BANNER",
+      "BIG HORN",
+      "CLEARMONT",
+      "DAYTON",
+      "PARKMAN",
+      "RANCHESTER",
+      "SHERIDAN",
+      "STORY",
+      "WYARNO"
+    ],
+    "SUBLETTE": [
+      "BIG PINEY",
+      "BONDURANT",
+      "BOULDER",
+      "CORA",
+      "DANIEL",
+      "MARBLETON",
+      "PINEDALE"
+    ],
+    "SWEETWATER": [
+      "BAIROIL",
+      "EDEN",
+      "FARSON",
+      "GRANGER",
+      "GREEN RIVER",
+      "JAMESTOWN",
+      "LITTLE AMERIC",
+      "MCKINNON",
+      "POINT OF ROCK",
+      "RELIANCE",
+      "ROCK SPRINGS",
+      "SUPERIOR",
+      "WAMSUTTER",
+      "WASHAM"
+    ],
+    "TETON": [
+      "ALTA",
+      "JACKSON",
+      "KELLY",
+      "MOOSE",
+      "MORAN",
+      "TETON VILLAGE",
+      "WILSON",
+      "YNP"
+    ],
+    "UINTA": [
+      "BEAR RIVER",
+      "EVANSTON",
+      "FT BRIDGER",
+      "LONETREE",
+      "LYMAN",
+      "MT VIEW",
+      "ROBERTSON",
+      "URIE"
+    ],
+    "WASHAKIE": [
+      "TEN SLEEP",
+      "WORLAND"
+    ],
+    "WESTON": [
+      "FOUR CORNERS",
+      "NEWCASTLE",
+      "OSAGE",
+      "SUNDANCE",
+      "UPTON"
+    ]
+  },
+  "senateByCounty": {
+    "ALBANY": [
+      "09",
+      "10"
+    ],
+    "BIG HORN": [
+      "19",
+      "20"
+    ],
+    "CAMPBELL": [
+      "01",
+      "23",
+      "24"
+    ],
+    "CARBON": [
+      "11"
+    ],
+    "CONVERSE": [
+      "02"
+    ],
+    "CROOK": [
+      "01"
+    ],
+    "FREMONT": [
+      "20",
+      "25",
+      "26"
+    ],
+    "GOSHEN": [
+      "03"
+    ],
+    "HOT SPRINGS": [
+      "20"
+    ],
+    "JOHNSON": [
+      "22"
+    ],
+    "LARAMIE": [
+      "04",
+      "05",
+      "06",
+      "07",
+      "08",
+      "31"
+    ],
+    "LINCOLN": [
+      "14",
+      "16"
+    ],
+    "NATRONA": [
+      "02",
+      "27",
+      "28",
+      "29",
+      "30"
+    ],
+    "NIOBRARA": [
+      "03"
+    ],
+    "PARK": [
+      "18",
+      "19",
+      "20"
+    ],
+    "PLATTE": [
+      "06"
+    ],
+    "SHERIDAN": [
+      "21",
+      "22"
+    ],
+    "SUBLETTE": [
+      "14"
+    ],
+    "SWEETWATER": [
+      "11",
+      "12",
+      "13",
+      "14"
+    ],
+    "TETON": [
+      "16",
+      "17"
+    ],
+    "UINTA": [
+      "14",
+      "15"
+    ],
+    "WASHAKIE": [
+      "20"
+    ],
+    "WESTON": [
+      "01",
+      "03"
+    ]
+  },
+  "houseByCounty": {
+    "ALBANY": [
+      "13",
+      "14",
+      "45",
+      "46"
+    ],
+    "BIG HORN": [
+      "26",
+      "27",
+      "28"
+    ],
+    "CAMPBELL": [
+      "03",
+      "31",
+      "32",
+      "52",
+      "53"
+    ],
+    "CARBON": [
+      "15",
+      "47"
+    ],
+    "CONVERSE": [
+      "06",
+      "62"
+    ],
+    "CROOK": [
+      "01"
+    ],
+    "FREMONT": [
+      "28",
+      "33",
+      "34",
+      "54",
+      "55"
+    ],
+    "GOSHEN": [
+      "02",
+      "05"
+    ],
+    "HOT SPRINGS": [
+      "28"
+    ],
+    "JOHNSON": [
+      "40"
+    ],
+    "LARAMIE": [
+      "04",
+      "07",
+      "08",
+      "09",
+      "10",
+      "11",
+      "12",
+      "41",
+      "42",
+      "43",
+      "44",
+      "61"
+    ],
+    "LINCOLN": [
+      "18",
+      "20",
+      "21",
+      "22"
+    ],
+    "NATRONA": [
+      "35",
+      "36",
+      "37",
+      "38",
+      "56",
+      "57",
+      "58",
+      "59",
+      "62"
+    ],
+    "NIOBRARA": [
+      "02"
+    ],
+    "PARK": [
+      "24",
+      "25",
+      "26",
+      "28",
+      "50"
+    ],
+    "PLATTE": [
+      "04"
+    ],
+    "SHERIDAN": [
+      "29",
+      "30",
+      "40",
+      "51"
+    ],
+    "SUBLETTE": [
+      "20"
+    ],
+    "SWEETWATER": [
+      "15",
+      "17",
+      "18",
+      "39",
+      "47",
+      "48",
+      "60"
+    ],
+    "TETON": [
+      "16",
+      "22",
+      "23"
+    ],
+    "UINTA": [
+      "18",
+      "19",
+      "49"
+    ],
+    "WASHAKIE": [
+      "27"
+    ],
+    "WESTON": [
+      "01",
+      "02"
+    ]
+  },
+  "senateAll": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "08",
+    "09",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "15",
+    "16",
+    "17",
+    "18",
+    "19",
+    "20",
+    "21",
+    "22",
+    "23",
+    "24",
+    "25",
+    "26",
+    "27",
+    "28",
+    "29",
+    "30",
+    "31"
+  ],
+  "houseAll": [
+    "01",
+    "02",
+    "03",
+    "04",
+    "05",
+    "06",
+    "07",
+    "08",
+    "09",
+    "10",
+    "11",
+    "12",
+    "13",
+    "14",
+    "15",
+    "16",
+    "17",
+    "18",
+    "19",
+    "20",
+    "21",
+    "22",
+    "23",
+    "24",
+    "25",
+    "26",
+    "27",
+    "28",
+    "29",
+    "30",
+    "31",
+    "32",
+    "33",
+    "34",
+    "35",
+    "36",
+    "37",
+    "38",
+    "39",
+    "40",
+    "41",
+    "42",
+    "43",
+    "44",
+    "45",
+    "46",
+    "47",
+    "48",
+    "49",
+    "50",
+    "51",
+    "52",
+    "53",
+    "54",
+    "55",
+    "56",
+    "57",
+    "58",
+    "59",
+    "60",
+    "61",
+    "62"
+  ],
+  "generatedAt": "2025-10-03T10:53:49.383Z"
+}
