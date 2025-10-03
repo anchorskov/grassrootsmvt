@@ -12,7 +12,29 @@ const SQLITE_PATH = process.env.SQLITE_PATH || "/home/anchor/projects/voterdata/
 const META_OUT = process.env.META_OUT || "ui/admin/wy.json";
 const DEV_EMAIL = process.env.DEV_EMAIL || "dev@local";
 
+// Read-only DB handle for safe concurrent reads in dev
 const db = new Database(SQLITE_PATH, { readonly: true });
+
+// Write connection (separate handle; enables WAL-friendly concurrent reads)
+// NOTE: No { readonly:true } here.
+const dbWrite = new Database(SQLITE_PATH);
+// Small safety: turn on WAL for better concurrency in dev
+dbWrite.pragma('journal_mode = WAL');
+
+// Tiny helpers for writes
+const exec = (sql, ...args) => dbWrite.prepare(sql).run(...args);
+
+// Dev-only local activity table (safe no-op if it already exists)
+exec(`
+  CREATE TABLE IF NOT EXISTS call_activity (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              DATETIME DEFAULT CURRENT_TIMESTAMP,
+    voter_id        TEXT,
+    outcome         TEXT,
+    payload_json    TEXT,
+    volunteer_email TEXT
+  );
+`);
 
 // helpers
 const q  = (sql, ...args) => db.prepare(sql).all(...args);
@@ -20,6 +42,99 @@ const q1 = (sql, ...args) => db.prepare(sql).get(...args);
 const uniq = (arr) => Array.from(new Set(arr)).filter(Boolean);
 // helper: Upper-case safe normalizer
 const up = (s) => (s ?? "").toString().trim().toUpperCase();
+
+// ---- add helpers ----
+const PARTY_MAP = {
+  R:'Republican', D:'Democratic', U:'Unaffiliated',
+  REPUBLICAN:'Republican', DEMOCRATIC:'Democratic', UNAFFILIATED:'Unaffiliated'
+};
+const PARTY_CANON = new Set(Object.values(PARTY_MAP));
+
+function normalizeParties(arr) {
+  const out = [];
+  for (const raw of (arr || [])) {
+    const key = String(raw || '').toUpperCase();
+    const mapped = PARTY_MAP[key] || raw;
+    if (PARTY_CANON.has(mapped)) out.push(mapped);
+  }
+  return out;
+}
+
+// Normalize street suffixes to short canonical form (e.g. STREET -> ST, AVENUE -> AVE)
+function canonicalizeStreet(s) {
+  if (!s) return s;
+  let t = String(s).toUpperCase().trim();
+  // Normalize directional words/prefixes (NORTH -> N, SOUTH -> S, EAST -> E, WEST -> W)
+  t = t.replace(/^NORTH\s+/,'N ').replace(/^SOUTH\s+/,'S ').replace(/^EAST\s+/,'E ').replace(/^WEST\s+/,'W ');
+  t = t.replace(/\s+NORTH$/,' N').replace(/\s+SOUTH$/,' S').replace(/\s+EAST$/,' E').replace(/\s+WEST$/,' W');
+  // Normalize common abbreviations and suffixes
+  const map = [
+    [' STREET', ' ST'], [' ST.', ' ST'],
+    [' AVENUE', ' AVE'], [' AVE.', ' AVE'],
+    [' ROAD', ' RD'], [' RD.', ' RD'],
+    [' BOULEVARD', ' BLVD'], [' BLVD.', ' BLVD'],
+    [' DRIVE', ' DR'], [' DR.', ' DR'],
+    [' LANE', ' LN'], [' LN.', ' LN'],
+    [' COURT', ' CT'], [' CT.', ' CT'],
+    [' PLACE', ' PL'], [' PL.', ' PL']
+  ];
+  // replace suffixes
+  for (const [k, v] of map) {
+    t = t.replace(new RegExp(k + '$'), v);
+  }
+  // replace interior occurrences and variants
+  for (const [k, v] of map) {
+    t = t.split(k).join(v);
+  }
+  // collapse multiple spaces
+  t = t.replace(/\s+/g, ' ').trim();
+  // If directional appears immediately before the suffix (e.g. 'MAIN N ST' or 'MAIN NORTH ST'),
+  // move it to prefix so 'MAIN N ST' -> 'N MAIN ST' for consistent matching
+  try {
+    const toks = t.split(' ');
+    const sufSet = new Set(['ST','AVE','RD','BLVD','DR','LN','CT','PL']);
+    if (toks.length >= 3) {
+      const last = toks[toks.length-1];
+      const pen = toks[toks.length-2];
+      const dirSet = new Set(['N','S','E','W','NORTH','SOUTH','EAST','WEST']);
+      if (sufSet.has(last) && dirSet.has(pen)) {
+        // remove pen and bring to front
+        toks.splice(toks.length-2, 1);
+        toks.unshift(pen);
+        t = toks.join(' ');
+      }
+    }
+  } catch (e) { /* ignore */ }
+  // Normalize directional long-forms to single-letter abbreviations
+  t = t.replace(/\bNORTH\b/g, 'N').replace(/\bSOUTH\b/g, 'S').replace(/\bEAST\b/g, 'E').replace(/\bWEST\b/g, 'W');
+  // also collapse any double spaces introduced
+  t = t.replace(/\s+/g, ' ').trim();
+  return t;
+}
+
+// Register SQL function for canonical street normalization for use inside queries
+try {
+  // better-sqlite3 exposes .function on the Database instance
+  if (typeof db.function === 'function') {
+    db.function('canon_street', { deterministic: true }, (s) => canonicalizeStreet(s));
+  }
+} catch (e) {
+  console.warn('Unable to register SQL function canon_street:', e && e.message);
+}
+
+function normalizeFiltersShape(f = {}) {
+  const norm = { ...f };
+  if (norm.county) norm.county = String(norm.county).trim().toUpperCase();
+  if (norm.city)   norm.city   = String(norm.city).trim().toUpperCase();
+  if (norm.district_type) norm.district_type = String(norm.district_type).toLowerCase(); // house|senate
+  if (norm.district) {
+    const d = String(norm.district).trim();
+    norm.district = /^\d+$/.test(d) ? d.padStart(2, '0') : d;
+  }
+  norm.parties = normalizeParties(Array.isArray(f.parties) ? f.parties : (f.parties ? [f.parties] : []));
+  norm.limit = Math.max(1, Math.min(200, Number(f.limit || 50)));
+  return norm;
+}
 
 const app = express();
 app.use(cors());
@@ -88,25 +203,37 @@ function parseFilters(req) {
   let f = {};
   if (req.method === "GET")   f = req.query || {};
   if (req.method === "POST")  f = (req.body?.filters) || req.body || {};
+
+  // Normalize shape for canonical fields (county/city/district/parties/limit)
+  const nf = normalizeFiltersShape(f);
+
   const filters = {
-    county: f.county || null,
-    city: f.city || null,
-    district_type: f.district_type || null, // 'house' | 'senate'
-    district: f.district || null,
-    parties: Array.isArray(f.parties) ? f.parties.filter(Boolean) : (f.parties ? [f.parties] : []),
-    q: f.q || null,
-    limit: Math.max(1, Math.min(200, Number(f.limit || 50))),
+    county: nf.county || null,
+    city: nf.city || null,
+    district_type: nf.district_type || null,
+    district: nf.district || null,
+    parties: Array.isArray(nf.parties) ? nf.parties.filter(Boolean) : (nf.parties ? [nf.parties] : []),
+    q: f.q ? String(f.q).trim().toUpperCase() : null,
+    limit: Math.max(1, Math.min(200, Number(nf.limit || 50))),
+    // NEW: phone gating knobs (for call flow)
+    require_phone: f.require_phone !== undefined ? !!f.require_phone : true,
+    min_confidence: f.min_confidence !== undefined ? Number(f.min_confidence) : 1, // 1+ by default
+    wy_area_only: f.wy_area_only !== undefined ? !!f.wy_area_only : false,
   };
-  // normalize for DB comparisons
-  filters.county = filters.county ? up(filters.county) : null;
-  filters.city   = filters.city   ? up(filters.city)   : null;
-  if (filters.q) filters.q = up(filters.q);
   return filters;
 }
+
+
+// ---- Sidecar: preview endpoint (handy for debugging) ----
+app.all('/api/filters/normalize', (req, res) => {
+  const raw = req.method === 'GET' ? (req.query || {}) : ((req.body?.filters) || req.body || {});
+  res.json({ ok:true, normalized: normalizeFiltersShape(raw) });
+});
 
 function whereAndParams(filters) {
   const cond = [];
   const p = [];
+
   if (filters.county) { cond.push(`v.county = ?`); p.push(filters.county); }
   if (filters.city)   { cond.push(`n.city = ?`);   p.push(filters.city); }
 
@@ -122,11 +249,26 @@ function whereAndParams(filters) {
   }
 
   if (filters.q) {
-    cond.push(`( n.addr1 LIKE ? OR n.city LIKE ? OR (n.fn || ' ' || n.ln) LIKE ? )`);
+    cond.push(`( UPPER(n.addr1) LIKE ? OR UPPER(n.city) LIKE ? OR UPPER(n.fn || ' ' || n.ln) LIKE ? )`);
     const like = `%${filters.q}%`.toUpperCase();
     p.push(like, like, like);
   }
-  return { cond, p };
+
+  // Phone constraints: only applied in /api/call/next handler when require_phone=true
+  const phoneCond = [];
+  const phoneParams = [];
+  if (filters.require_phone) {
+    phoneCond.push(`bp.phone_e164 IS NOT NULL AND bp.phone_e164 <> ''`);
+    if (Number.isFinite(filters.min_confidence)) {
+      phoneCond.push(`bp.confidence_code >= ?`);
+      phoneParams.push(Number(filters.min_confidence));
+    }
+    if (filters.wy_area_only) {
+      phoneCond.push(`bp.is_wy_area = 1`);
+    }
+  }
+
+  return { cond, p, phoneCond, phoneParams };
 }
 
 app.get("/api/canvass/list", (req, res) => {
@@ -175,32 +317,164 @@ app.post("/api/canvass/list", (req, res) => {
   }
 });
 
+// --- Canvass nearby: POST { filters, street: "MAIN ST", house: 123, range?:20, limit?: 20 }
+app.post("/api/canvass/nearby", (req, res) => {
+  try {
+    const f0 = req.body?.filters || {};
+    const filters = {
+      county: (f0.county || null)?.toString().trim().toUpperCase() || null,
+      city:   (f0.city   || null)?.toString().trim().toUpperCase() || null,
+      district_type: f0.district_type || null,  // 'house' | 'senate'
+      district: f0.district || null,
+      parties: Array.isArray(f0.parties) ? f0.parties.filter(Boolean) : (f0.parties ? [f0.parties] : []),
+      require_phone: !!f0.require_phone,
+    };
+
+    const streetIn = (req.body?.street || "").toString().trim().toUpperCase();
+    const houseIn  = Number(req.body?.house || 0);
+    const range    = Math.max(0, Math.min(200, Number(req.body?.range || 20)));
+    const limit    = Math.max(1, Math.min(200, Number(req.body?.limit || 20)));
+    if (!streetIn || !houseIn) return res.status(400).json({ ok:false, error:"missing_house_or_street" });
+
+    // Normalize common suffixes so "DRIVE" ~ "DR", "AVENUE" ~ "AVE", etc.
+    const normStreet = streetIn
+      .replace(/\s+/g,' ')
+      .replace(/\bSTREET\b/g,'ST').replace(/\bAVENUE\b/g,'AVE')
+      .replace(/\bDRIVE\b/g,'DR').replace(/\bROAD\b/g,'RD')
+      .replace(/\bCOURT\b/g,'CT').replace(/\bLANE\b/g,'LN')
+      .replace(/\bBOULEVARD\b/g,'BLVD');
+
+    // Build shared WHERE parts.
+    const buildWhere = (includeDistrict) => {
+      const cond = [];
+      const p = [];
+
+      // county & party use voters; city uses normalized view (more reliable)
+  if (filters.county) { cond.push(`v.county = ?`); p.push(filters.county); }
+  if (filters.city)   { cond.push(`norm.city   = ?`); p.push(filters.city); }
+
+      // IMPORTANT: district filters from the normalized view columns (house/senate),
+      // not from voters.* to avoid schema variance.
+      if (includeDistrict && filters.district_type && filters.district) {
+  if (filters.district_type === "house")  { cond.push(`norm.house  = ?`); p.push(filters.district); }
+  if (filters.district_type === "senate") { cond.push(`norm.senate = ?`); p.push(filters.district); }
+      }
+
+      if (filters.parties?.length) {
+        const placeholders = filters.parties.map(()=>"?").join(",");
+        cond.push(`v.political_party IN (${placeholders})`);
+        p.push(...filters.parties);
+      }
+
+      if (filters.require_phone) cond.push(`bp.phone_e164 IS NOT NULL`);
+
+      return { cond, p };
+    };
+
+    // The core query:
+    // 1) Start from v_voters_addr_norm (n) — has ln/fn, addr1, city, zip, house, senate
+    // 2) Parse house number and street into separate pieces for proximity + street match
+    // 3) Join voters v for county + party; left join v_best_phone bp when needed
+    const run = (includeDistrict) => {
+      const { cond, p } = buildWhere(includeDistrict);
+      const extra = cond.length ? ` AND ${cond.join(" AND ")}` : "";
+
+      const sql = `
+        WITH base AS (
+          SELECT
+            n.voter_id, n.fn, n.ln, n.addr1, n.city, n.zip, n.house, n.senate,
+            CAST(
+              CASE WHEN INSTR(UPPER(TRIM(n.addr1)),' ') > 0
+                   THEN SUBSTR(UPPER(TRIM(n.addr1)), 1, INSTR(UPPER(TRIM(n.addr1)),' ')-1)
+                   ELSE UPPER(TRIM(n.addr1)) END AS INTEGER
+            ) AS num,
+            TRIM(
+              CASE WHEN INSTR(UPPER(TRIM(n.addr1)),' ') > 0
+                   THEN SUBSTR(UPPER(TRIM(n.addr1)), INSTR(UPPER(TRIM(n.addr1)),' ')+1)
+                   ELSE '' END
+            ) AS street_raw
+          FROM v_voters_addr_norm n
+        ),
+        norm AS (
+          SELECT *,
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(street_raw,'  ', ' '),
+              'STREET','ST'),'AVENUE','AVE'),'DRIVE','DR'),'ROAD','RD'),'LANE','LN'),'BOULEVARD','BLVD') AS street
+          FROM base
+        )
+        SELECT
+          v.voter_id,
+          (norm.fn || ' ' || norm.ln) AS name,
+          norm.addr1 AS address,
+          norm.city, norm.zip,
+          v.political_party AS party,
+          bp.phone_e164 AS phone_e164,
+          bp.confidence_code AS phone_confidence
+        FROM norm
+        JOIN voters v ON v.voter_id = norm.voter_id
+        LEFT JOIN v_best_phone bp ON bp.voter_id = v.voter_id
+        WHERE norm.street LIKE ?
+          AND norm.num BETWEEN ? AND ?
+          ${extra}
+        ORDER BY ABS(norm.num - ?)
+        LIMIT ?
+      `;
+      const args = [`${normStreet}%`, houseIn - range, houseIn + range, ...p, houseIn, limit];
+      return q(sql, ...args);
+    };
+
+    // Try with district; if empty, auto-broaden by dropping district filter.
+    let rows = run(true);
+    let broadened = false;
+    if (!rows.length) { rows = run(false); broadened = true; }
+
+    res.json({
+      ok: true,
+      rows,
+      filters,
+      input: { street: normStreet, house: houseIn, range, limit },
+      broadened
+    });
+  } catch (e) {
+    console.error("POST /api/canvass/nearby error:", e);
+    res.status(500).json({ ok:false, error:"canvass_nearby_failed" });
+  }
+});
+
 // --- Call next: GET/POST (one record) ---
 app.all("/api/call/next", (req, res) => {
   try {
     const filters = parseFilters(req);
     const { cond, p } = whereAndParams(filters);
+    // Ensure phone predicate is treated like other conditions (only when requested)
+    if (filters.require_phone) cond.push(`NULLIF(TRIM(bp.phone_e164),'') IS NOT NULL`);
     const where = cond.length ? `WHERE ${cond.join(" AND ")}` : "";
+
+    // Determine volunteer identity (prefer header, fall back to DEV_EMAIL)
+    const volunteer = (req.headers && (req.headers['x-volunteer-email'] || req.headers['x-user-email'])) || DEV_EMAIL || null;
 
     const sql = `
       SELECT v.voter_id,
-             n.fn AS first_name,
-             n.ln AS last_name,
+             n.fn  AS first_name,
+             n.ln  AS last_name,
              v.political_party AS party,
-             n.city  AS ra_city,
-             n.zip   AS ra_zip,
+             n.city AS ra_city,
+             n.zip  AS ra_zip,
              bp.phone_e164
       FROM voters v
       JOIN v_voters_addr_norm n ON n.voter_id = v.voter_id
-      LEFT JOIN v_best_phone bp ON bp.voter_id = v.voter_id
+      INNER JOIN v_best_phone bp ON bp.voter_id = v.voter_id
       ${where}
-      ORDER BY RANDOM()
+      AND NOT EXISTS (
+        SELECT 1 FROM call_activity ca
+        WHERE ca.voter_id = v.voter_id
+          AND ca.volunteer_email = ?
+      )
+      ORDER BY v.voter_id
       LIMIT 1
     `;
-    const row = q1(sql, ...p);
-    if (!row) {
-      return res.json({ ok:true, filters, empty:true });
-    }
+    // bind filters params then volunteer
+    const row = q1(sql, ...p, volunteer);
+    if (!row) return res.json({ ok:true, filters, empty:true });
     res.json({ ok:true, ...row, filters });
   } catch (e) {
     console.error("ALL /api/call/next error:", e);
@@ -208,11 +482,94 @@ app.all("/api/call/next", (req, res) => {
   }
 });
 
+// --- Get single voter by id (dev helper) ---
+app.get('/api/voter/:id', (req, res) => {
+  try {
+    const id = req.params.id;
+    if (!id) return res.status(400).json({ ok:false, error:'missing_id' });
+    const sql = `
+      SELECT v.voter_id,
+             n.fn AS first_name,
+             n.ln AS last_name,
+             v.political_party AS party,
+             n.city AS ra_city,
+             n.zip AS ra_zip,
+             bp.phone_e164
+      FROM voters v
+      JOIN v_voters_addr_norm n ON n.voter_id = v.voter_id
+      LEFT JOIN v_best_phone bp ON bp.voter_id = v.voter_id
+      WHERE v.voter_id = ?
+      LIMIT 1
+    `;
+    const row = q1(sql, id);
+    if (!row) return res.status(404).json({ ok:false, error:'not_found' });
+    res.json({ ok:true, ...row });
+  } catch (e) {
+    console.error('GET /api/voter/:id error:', e);
+    res.status(500).json({ ok:false, error:'voter_lookup_failed' });
+  }
+});
+
 // --- Call complete: POST (echo stub) ---
 app.post("/api/call/complete", (req, res) => {
-  const body = req.body || {};
-  // In a future step, insert into a local log table or file.
-  res.json({ ok:true, saved: body, ts: new Date().toISOString() });
+  try {
+    const body = req.body || {};
+    const email = (req.headers && (req.headers['x-volunteer-email'] || req.headers['x-user-email'])) || DEV_EMAIL || null;
+
+    // Defensive: idempotency window (seconds)
+    const IDEMPOTENT_WINDOW_SEC = Number(process.env.IDEMPOTENT_WINDOW_SEC || 30);
+
+    // Find the most recent activity for this volunteer (if any)
+    const last = db.prepare(`SELECT id, ts, voter_id FROM call_activity WHERE volunteer_email = ? ORDER BY id DESC LIMIT 1`).get(email);
+    if (last && last.voter_id && body.voter_id && String(last.voter_id) === String(body.voter_id)) {
+      // If within the short window, treat as duplicate and return ok without inserting
+      const lastTs = new Date(last.ts).getTime ? new Date(last.ts).getTime() : Date.now();
+      const ageSec = (Date.now() - lastTs) / 1000;
+      if (ageSec <= IDEMPOTENT_WINDOW_SEC) {
+        return res.json({ ok:true, saved: body, persisted: "sqlite", duplicate:true, note: `recent duplicate (${Math.round(ageSec)}s)` , ts: new Date().toISOString() });
+      }
+    }
+
+    // Insert the activity
+    exec(
+      `INSERT INTO call_activity (voter_id, outcome, payload_json, volunteer_email)
+       VALUES (?, ?, ?, ?)`,
+      body.voter_id ?? null,
+      body.outcome ?? null,
+      JSON.stringify(body),
+      email
+    );
+
+    // If the posted voter_id doesn't match the last served voter for this volunteer, return ok with a warning
+    const warning = {};
+    if (last && last.voter_id && body.voter_id && String(last.voter_id) !== String(body.voter_id)) {
+      warning.mismatch_last_served = true;
+      warning.last_served = last.voter_id;
+    }
+
+    res.json({ ok:true, saved: body, persisted: "sqlite", warning: Object.keys(warning).length ? warning : undefined, ts: new Date().toISOString() });
+  } catch (e) {
+    console.error("POST /api/call/complete error:", e);
+    res.status(500).json({ ok:false, error:"call_complete_failed" });
+  }
+});
+
+// Optional: quick recent activity reader for sanity checks
+app.get("/admin/activity/recent", (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(100, Number(req.query.limit || 10)));
+    const rows = db.prepare(`
+      SELECT id, ts, voter_id, outcome, volunteer_email,
+             json_extract(payload_json, '$.comments') AS comments
+      FROM call_activity
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(limit);
+    res.json({ ok:true, rows });
+  } catch (e) {
+    console.error("GET /admin/activity/recent error:", e);
+    res.status(500).json({ ok:false, error:"recent_failed" });
+  }
 });
 
 // --- ADMIN: rebuild meta JSON from SQLite ---

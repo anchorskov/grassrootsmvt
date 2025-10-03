@@ -1,0 +1,203 @@
+<!doctype html>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Canvass</title>
+<style>
+  :root { --gap: 10px; }
+  body { font-family: system-ui, sans-serif; margin: 12px; }
+  .card { border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin:12px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); }
+  h1 { font-size: 1.4rem; margin: 4px 0 12px; }
+  .row { display:flex; gap:var(--gap); flex-wrap:wrap; align-items:center; }
+  .row > * { flex:1 1 140px; }
+  label { font-size:.9rem; color:#334155; }
+  input[type=number], input[type=text], select, button {
+    width:100%; font-size:1rem; padding:.7rem .75rem; border:1px solid #cbd5e1; border-radius:10px;
+  }
+  button.primary { background:#2563eb; color:white; border:0; font-weight:600; }
+  .muted { color:#64748b }
+  .addr { font-weight:600; }
+  .person { font-size:.95rem; margin-top:2px; }
+  .chip { display:inline-block; border:1px solid #cbd5e1; border-radius:999px; padding:.15rem .5rem; font-size:.8rem; margin-left:6px; }
+  button[disabled] { opacity:.45; cursor:not-allowed; }
+  .muted-chip { border:1px solid #e5e7eb; color:#64748b; }
+  .list > div { padding:10px 0; border-bottom:1px solid #f1f5f9; }
+  .list > div:last-child { border-bottom:0; }
+  .toolbar { display:flex; gap:8px; }
+</style>
+
+<h1>Canvass</h1>
+
+<div class="card">
+  <div class="muted" id="filtersBadge">Loading filters…</div>
+</div>
+
+<div class="card">
+  <div class="row">
+    <div>
+      <label for="house">House #</label>
+      <input id="house" type="number" placeholder="e.g. 5201" inputmode="numeric" />
+    </div>
+    <div>
+      <label for="street">Street</label>
+      <input id="street" type="text" placeholder="e.g. RAVEN ST" />
+    </div>
+  </div>
+  <div class="row" style="margin-top:8px;">
+    <div>
+      <label for="range">Number range (±)</label>
+      <select id="range">
+        <option>10</option><option selected>20</option><option>30</option><option>50</option>
+      </select>
+    </div>
+    <div>
+      <label for="limit">Max addresses</label>
+      <select id="limit">
+        <option>10</option><option selected>20</option><option>30</option><option>50</option>
+      </select>
+    </div>
+  </div>
+  <div class="row" style="margin-top:10px;">
+    <button class="primary" id="btnFind">Find nearby</button>
+  </div>
+  <div id="msg" class="muted" style="margin-top:8px;"></div>
+</div>
+
+<div class="card">
+  <div class="list" id="results"></div>
+</div>
+
+<div id="toast" style="position:fixed;left:50%;transform:translateX(-50%);bottom:20px;background:#111827;color:white;padding:8px 12px;border-radius:8px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.2);">Opening call...</div>
+
+<script>
+  // Same-origin Pages Functions helper
+  const API = (p) => '/api' + p;
+
+  function fromQS() {
+    const u = new URL(location.href);
+    const parties = u.searchParams.getAll('parties');
+    const f = {
+      county: (u.searchParams.get('county')||'').toUpperCase() || null,
+      city:   (u.searchParams.get('city')||'').toUpperCase() || null,
+      district_type: u.searchParams.get('district_type') || null,
+      district: u.searchParams.get('district') || null,
+      parties: parties.length ? parties : [],
+    };
+    return f;
+  }
+
+  function showFiltersBadge(f) {
+    const badge = document.getElementById('filtersBadge');
+    badge.textContent = 'Filters: ' + JSON.stringify(f);
+  }
+
+  async function jsonFetch(url, init={}) {
+    const r = await fetch(url, {
+      credentials: 'include',
+      ...init,
+      headers: { 'content-type': 'application/json', ...(init.headers||{}) }
+    });
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    const ct = r.headers.get('content-type')||'';
+    return ct.includes('application/json') ? r.json() : r.text();
+  }
+
+  function setMsg(t) { document.getElementById('msg').textContent = t || ''; }
+
+  function renderList(rows) {
+    const el = document.getElementById('results');
+    el.innerHTML = '';
+    if (!rows || !rows.length) { el.innerHTML = '<div class="muted">No nearby addresses.</div>'; return; }
+    for (const r of rows) {
+      const div = document.createElement('div');
+      div.innerHTML = `
+        <div class="addr">${r.address}, ${r.city} ${r.zip}
+          <span class="chip">${r.party||''}</span>
+          ${r.phone_e164
+            ? `<span class="chip">${r.phone_e164}${r.phone_confidence ? ' ('+r.phone_confidence+')' : ''}</span>`
+            : `<span class="chip muted-chip">no phone</span>`}
+        </div>
+        <div class="person">${r.name||''}</div>
+        <div class="toolbar" style="margin-top:8px;">
+          <button data-id="${r.voter_id}" data-a="contacted">Contacted</button>
+          <button data-id="${r.voter_id}" data-a="no_answer">No answer</button>
+          <button data-id="${r.voter_id}" data-a="note">Note</button>
+    <button data-id="${r.voter_id}" data-a="call"
+      class="primary"
+      ${r.phone_e164 ? '' : 'disabled title="No phone on file" aria-disabled="true"'}
+    >Call</button>
+        </div>
+      `;
+      el.appendChild(div);
+    }
+    el.querySelectorAll('button[data-a]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const voter_id = btn.getAttribute('data-id');
+        let outcome = btn.getAttribute('data-a');
+        let comments = null;
+        if (outcome === 'call') {
+          // Prefill call UI and show toast then navigate there
+          try {
+            const pre = { voter_id, prefill: true };
+            sessionStorage.setItem('vol.call_prefill', JSON.stringify(pre));
+            const toast = document.getElementById('toast');
+            toast.style.display = 'block';
+            setTimeout(() => { toast.style.display = 'none'; location.href = '/call.html?voter_id=' + encodeURIComponent(voter_id); }, 700);
+          } catch (e) {
+            alert('Unable to open call UI: ' + e.message);
+          }
+          return;
+        }
+        if (outcome === 'note') {
+          const t = prompt('Note for this address / voter?');
+          if (!t) return;
+          outcome = 'note';
+          comments = t;
+        }
+        try {
+          await jsonFetch(API('/call/complete'), { method:'POST', body: JSON.stringify({ voter_id, outcome, comments }) });
+          btn.closest('div').querySelectorAll('button').forEach(b => b.disabled = true);
+        } catch (e) {
+          alert('Save failed: '+e.message);
+        }
+      });
+    });
+  }
+
+  async function findNearby() {
+    const house = Number(document.getElementById('house').value || 0);
+    const street = (document.getElementById('street').value || '').trim().toUpperCase();
+    const range  = Number(document.getElementById('range').value);
+    const limit  = Number(document.getElementById('limit').value);
+    if (!house || !street) {
+      setMsg('Enter a house number and street.'); return;
+    }
+    setMsg('Searching…');
+    const filters = fromQS();
+    try {
+      const j = await jsonFetch(API('/canvass/nearby'), {
+        method: 'POST',
+        body: JSON.stringify({ filters, house, street, range, limit })
+      });
+      renderList(j.rows || []);
+      setMsg(`Found ${j.rows?.length||0} nearby addresses.`);
+    } catch (e) {
+      setMsg('Error: '+e.message);
+    }
+  }
+
+  document.getElementById('btnFind').addEventListener('click', findNearby);
+  // QoL: Enter on street field triggers search
+  const streetEl = document.getElementById('street');
+  document.getElementById('street').addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); findNearby(); }
+  });
+  // Auto-uppercase input to reduce mismatches
+  streetEl.addEventListener('input', () => {
+    const pos = streetEl.selectionStart;
+    streetEl.value = (streetEl.value || '').toUpperCase();
+    streetEl.selectionStart = streetEl.selectionEnd = pos;
+  });
+
+  const f = fromQS();
+  showFiltersBadge(f);
+</script>
