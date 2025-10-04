@@ -1,5 +1,6 @@
 // /functions/whoami.js (Pages Functions)
 import { createRemoteJWKSet, jwtVerify } from "jose";
+import { requireUserOrThrow } from '../_auth.js';
 
 export const onRequestGet = async ({ request, env }) => {
   // 1) Fast path: Cloudflare already puts email on proxied requests
@@ -12,7 +13,18 @@ export const onRequestGet = async ({ request, env }) => {
   const jwt =
     request.headers.get("Cf-Access-Jwt-Assertion") ||
     getCookie(request.headers.get("Cookie") || "", "CF_Authorization");
-  if (!jwt) return json({ error: "unauthorized" }, 401);
+
+  try {
+    const identity = await requireUserOrThrow(request, env);
+    // identity may be an email or a JWT token depending on Access configuration
+    if (identity && identity.includes && identity.includes('@')) {
+      return new Response(JSON.stringify({ email: identity }), { headers: { 'content-type': 'application/json' } });
+    }
+    return new Response(JSON.stringify({ jwt: identity }), { headers: { 'content-type': 'application/json' } });
+  } catch (err) {
+    // requireUserOrThrow throws a Response for 401; rethrow to let Pages return it
+    throw err;
+  }
 
   // 3) Verify with jose against your team JWKS + AUD
   try {
