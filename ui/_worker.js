@@ -213,11 +213,24 @@ export default {
 
     // /api/whoami
     if (pathname === "/api/whoami") {
-      const email =
-        request.headers.get(env.ACCESS_HEADER || "Cf-Access-Authenticated-User-Email") ||
-        env.DEV_EMAIL ||
-        "dev@local";
-      return json({ ok: true, email }, 200, { "cache-control": "no-store" });
+      // Prefer explicit header (set via Access), fall back to JWT header or cookie
+      const headerEmail = request.headers.get(env.ACCESS_HEADER || "Cf-Access-Authenticated-User-Email");
+      if (headerEmail) return json({ ok: true, email: headerEmail }, 200, { "cache-control": "no-store" });
+
+      // Accept JWT via header or CF_Authorization cookie (browser same-origin)
+      const jwt = getAccessJWT(request);
+      if (jwt) return json({ ok: true, jwt }, 200, { "cache-control": "no-store" });
+
+      return json({ ok: true, email: env.DEV_EMAIL || "dev@local" }, 200, { "cache-control": "no-store" });
+    }
+
+    // Helper: accept Cloudflare Access JWT either via header or cookie
+    function getAccessJWT(request) {
+      const hdr = request.headers.get('Cf-Access-Jwt-Assertion');
+      if (hdr) return hdr;
+      const cookie = request.headers.get('Cookie') || '';
+      const m = cookie.match(/(?:^|;\s*)CF_Authorization=([^;]+)/i);
+      return m ? decodeURIComponent(m[1]) : null;
     }
 
     // /api/filters/normalize — GET/POST helper to see final filters

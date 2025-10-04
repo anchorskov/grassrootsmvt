@@ -26,13 +26,32 @@ const cors = {
 
 const requireUser = (req: Request, env: Env) => {
   const email = req.headers.get(env.ACCESS_HEADER);
-  if (!email) throw new Response("Unauthorized (Cloudflare Access required)", { status: 401, headers: cors });
-  return email.toLowerCase();
+  if (email) return email.toLowerCase();
+
+  // Fallback: accept Cloudflare Access JWT from header or cookie
+  const jwt = getAccessJWT(req);
+  if (!jwt) throw new Response("Unauthorized (Cloudflare Access required)", { status: 401, headers: cors });
+  // If we only have a JWT (no email header), return the raw token as the identity string.
+  return jwt;
 };
 
 async function whoami(req: Request, env: Env) {
-  const email = req.headers.get(env.ACCESS_HEADER) || "unknown";
-  return json({ email }, { headers: cors });
+  const email = req.headers.get(env.ACCESS_HEADER);
+  if (email) return json({ email }, { headers: cors });
+
+  const jwt = getAccessJWT(req);
+  if (jwt) return json({ jwt }, { headers: cors });
+
+  return json({ email: "unknown" }, { headers: cors });
+}
+
+// Helper: accept Cloudflare Access JWT either via header or cookie
+function getAccessJWT(req: Request): string | null {
+  const hdr = req.headers.get('Cf-Access-Jwt-Assertion');
+  if (hdr) return hdr;
+  const cookie = req.headers.get('Cookie') || '';
+  const m = cookie.match(/(?:^|;\s*)CF_Authorization=([^;]+)/i);
+  return m ? decodeURIComponent(m[1]) : null;
 }
 
 function canonicalizeStreet(s: string | null | undefined) {
