@@ -197,6 +197,41 @@ POST /api/call/complete (via sidecar) inserts rows above.
 - `DEV_EMAIL=dev@local`
 - `ACCESS_HEADER=Cf-Access-Authenticated-User-Email` (prod)
 
+## Cloudflare Access / whoami notes
+
+For Pages Functions that validate Cloudflare Access identities, set these Pages Secrets (do NOT commit secrets to source):
+
+- `CF_ACCESS_TEAM` or `CF_ACCESS_TEAM_DOMAIN` — either your short team name (e.g. `acme`) or full domain (e.g. `https://acme.cloudflareaccess.com`). `whoami` prefers `CF_ACCESS_TEAM_DOMAIN` if present.
+- `CF_ACCESS_AUD` — the Access application's audience (AUD) to verify tokens against.
+- `CF_ACCESS_ENFORCE_ISSUER` — set to `1` to enforce issuer checks against the team domain.
+- `CF_ACCESS_ISSUER` — optional custom issuer URL if you need it.
+
+Optional secrets for the admin exchange helper (only for testing):
+
+- `CF_ACCESS_CLIENT_ID` and `CF_ACCESS_CLIENT_SECRET` — service token credentials used to obtain a CF_Authorization cookie.
+- `SERVICE_TOKEN_TARGET_HOST` — the host to target for the exchange (e.g. `volunteers.grassrootsmvt.org`).
+- `ADMIN_SECRET` — secret used to protect the `service-token-exchange` Pages Function. Keep this secret and restrict who knows it.
+
+How to obtain a CF_Authorization cookie for testing (admin-only helper):
+
+1. Call the admin endpoint (protected by `X-Admin-Secret`):
+
+   POST https://<your-host>/api/service-token-exchange
+   Headers:
+     X-Admin-Secret: <ADMIN_SECRET>
+     Content-Type: application/json
+   Body JSON (optional if creds are in Pages Secrets):
+   {
+     "client_id": "<CF_ACCESS_CLIENT_ID>",
+     "client_secret": "<CF_ACCESS_CLIENT_SECRET>",
+     "target_host": "volunteers.grassrootsmvt.org"
+   }
+
+   The response will include the raw `set_cookie` value. Use that value in a subsequent `Cookie: CF_Authorization=<value>` header when calling `/api/whoami?debug=1`.
+
+2. Important: the `service-token-exchange` endpoint is for testing only — rotate `ADMIN_SECRET` frequently and consider restricting access by IP or removing the endpoint after use.
+
+
 ## Request flow (dev)
 
 
