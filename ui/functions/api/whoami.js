@@ -1,51 +1,35 @@
-// /functions/whoami.js (Pages Functions)
+// ui/functions/api/whoami.js
 import { createRemoteJWKSet, jwtVerify } from "jose";
-import { requireUserOrThrow } from '../_auth.js';
 
 export const onRequestGet = async ({ request, env }) => {
-  // 1) Fast path: Cloudflare already puts email on proxied requests
-  const cfEmail = request.headers.get("Cf-Access-Authenticated-User-Email");
-  if (cfEmail) {
-    return json({ email: cfEmail });
-  }
+  // 1) Fast path: some CF edges inject the email header
+  const hdrEmail = request.headers.get("Cf-Access-Authenticated-User-Email");
+  if (hdrEmail) return json({ email: hdrEmail });
 
-  // 2) Pull JWT from header or cookie
+  // 2) Get the Access JWT (header or cookie)
   const jwt =
     request.headers.get("Cf-Access-Jwt-Assertion") ||
     getCookie(request.headers.get("Cookie") || "", "CF_Authorization");
 
-  try {
-    const identity = await requireUserOrThrow(request, env);
-    // identity may be an email or a JWT token depending on Access configuration
-    if (identity && identity.includes && identity.includes('@')) {
-      return new Response(JSON.stringify({ email: identity }), { headers: { 'content-type': 'application/json' } });
-    }
-    return new Response(JSON.stringify({ jwt: identity }), { headers: { 'content-type': 'application/json' } });
-  } catch (err) {
-    // requireUserOrThrow throws a Response for 401; rethrow to let Pages return it
-    throw err;
-  }
+  if (!jwt) return json({ error: "No Access token" }, 401);
 
-  // 3) Verify with jose against your team JWKS + AUD
   try {
-    const team = env.CF_ACCESS_TEAM; // e.g. "skovgard"
-    const JWKS = createRemoteJWKSet(
-      new URL(`https://${team}.cloudflareaccess.com/cdn-cgi/access/certs`)
-    );
-    const { payload, protectedHeader } = await jwtVerify(jwt, JWKS, {
-      audience: env.CF_ACCESS_AUD, // value you saved as secret
-      // issuer is optional; Access rotates issuers. You can also enforce:
-      // issuer: `https://${team}.cloudflareaccess.com`,
+    const team = (env.CF_ACCESS_TEAM || "").trim();   // e.g. "skovgard"
+    const aud  = (env.CF_ACCESS_AUD  || "").trim();   // audience tag from the Access app
+    const issuer = `https://${team}.cloudflareaccess.com`;
+
+    const JWKS = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`));
+    const { payload } = await jwtVerify(jwt, JWKS, {
+      issuer,                // verify iss
+      audience: aud,         // verify aud
     });
-    // Prefer payload.email; fall back to header-based claim if present
-    const email =
-      payload.email ||
-      request.headers.get("Cf-Access-Authenticated-User-Email") ||
-      null;
-    if (!email) return json({ error: "no-email" }, 401);
-    return json({ email, header: protectedHeader.kid ? "verified" : "ok" });
-  } catch (err) {
-    return json({ error: "invalid-token", detail: err.message }, 401);
+
+    const email = payload?.email;
+    if (!email) return json({ error: "Token missing email" }, 401);
+
+    return json({ email });  // ✅ only return email
+  } catch (e) {
+    return json({ error: "Invalid Access token" }, 401);
   }
 };
 
