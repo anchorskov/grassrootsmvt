@@ -9,6 +9,7 @@ interface D1Result {
 
 interface D1PreparedStatement {
   bind(...args: unknown[]): D1PreparedStatement;
+  all(...args: unknown[]): Promise<D1Result>;
 }
 
 interface D1Database {

@@ -1,101 +1,112 @@
 <!doctype html>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<meta name="robots" content="noindex, nofollow" />
-<title>Volunteers</title>
+<title>Volunteer Call</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 720px; }
+  :root { --w: 720px; }
+  body { font-family: system-ui, sans-serif; margin: 1rem; }
+  main { max-width: var(--w); margin: 0 auto; }
   .card { border: 1px solid #ddd; border-radius: 12px; padding: 1rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
   label { display:block; margin:.5rem 0 .25rem; }
   input[type=text], select, textarea { width: 100%; padding:.6rem; border:1px solid #ccc; border-radius:8px; }
   button { padding:.6rem 1rem; border-radius:8px; border:0; background:#0ea5e9; color:white; font-weight:600; cursor:pointer; }
   button.secondary { background:#e2e8f0; color:#0f172a; }
+  button:disabled { opacity:.6; cursor:not-allowed; }
   .row { display:flex; gap:.75rem; flex-wrap: wrap; }
   .row > * { flex:1 1 200px; }
   .muted { color:#64748b; }
   .error { color:#b91c1c; }
   .toolbar { display:flex; gap:.5rem; align-items:center; }
+  .titlebar { display:flex; justify-content:space-between; align-items:center; }
 </style>
 
-<h1 style="display:flex;justify-content:space-between;align-items:center;">
-  <span>Volunteer Call</span>
-  <span class="toolbar">
-    <button id="getNextBtn" onclick="nextVoter()" style="padding:8px 12px;border-radius:6px;background:#6aa9ff;color:#fff;border:none;">Get Next</button>
-  </span>
-</h1>
+<main>
+  <h1 class="titlebar">
+    <span>Volunteer Call</span>
+    <span class="toolbar">
+      <button id="getNextBtn" style="padding:8px 12px;border-radius:6px;background:#6aa5ff;color:#fff;border:none;">Get Next</button>
+    </span>
+  </h1>
 
-<div class="card" id="whoami">Checking login…</div>
+  <div class="card" id="whoami">Checking login…</div>
 
-<div class="card" id="voterCard" hidden>
-  <div id="voterInfo" class="muted"></div>
+  <div class="card" id="voterCard" hidden>
+    <div id="voterInfo" class="muted"></div>
 
-  <h3>Call outcome</h3>
-  <label for="outcome">Outcome</label>
-  <select id="outcome">
-    <option value="">— choose —</option>
-    <option>connected</option><option>vm</option><option>no_answer</option>
-    <option>wrong_number</option><option>refused</option><option>follow_up</option>
-  </select>
+    <h3>Call outcome</h3>
+    <label for="outcome">Outcome</label>
+    <select id="outcome">
+      <option value="">— choose —</option>
+      <option>connected</option><option>vm</option><option>no_answer</option>
+      <option>wrong_number</option><option>refused</option><option>follow_up</option>
+    </select>
 
-  <div class="row">
-    <label><input type="checkbox" id="ok_callback"> OK to call back</label>
-    <label><input type="checkbox" id="requested_info"> Requested info</label>
-    <label><input type="checkbox" id="dnc"> Do not call</label>
-  </div>
-  <div class="row">
-    <div>
-      <label for="best_day">Best day</label>
-      <select id="best_day"><option value="">—</option>
-        <option>Mon</option><option>Tue</option><option>Wed</option>
-        <option>Thu</option><option>Fri</option><option>Sat</option><option>Sun</option>
-      </select>
+    <div class="row">
+      <label><input type="checkbox" id="ok_callback"> OK to call back</label>
+      <label><input type="checkbox" id="requested_info"> Requested info</label>
+      <label><input type="checkbox" id="dnc"> Do not call</label>
     </div>
-    <div>
-      <label for="best_time_window">Best time</label>
-      <select id="best_time_window"><option value="">—</option>
-        <option>Morning</option><option>Afternoon</option><option>Evening</option>
-        <option>6–8pm</option>
-      </select>
+    <div class="row">
+      <div>
+        <label for="best_day">Best day</label>
+        <select id="best_day"><option value="">—</option>
+          <option>Mon</option><option>Tue</option><option>Wed</option>
+          <option>Thu</option><option>Fri</option><option>Sat</option><option>Sun</option>
+        </select>
+      </div>
+      <div>
+        <label for="best_time_window">Best time</label>
+        <select id="best_time_window"><option value="">—</option>
+          <option>Morning</option><option>Afternoon</option><option>Evening</option>
+          <option>6–8pm</option>
+        </select>
+      </div>
     </div>
+
+    <div class="row">
+      <label><input type="checkbox" id="optin_sms"> Opt-in SMS</label>
+      <label><input type="checkbox" id="optin_email"> Opt-in Email</label>
+    </div>
+    <label for="email">Email address (if provided)</label>
+    <input type="text" id="email" placeholder="name@example.com"/>
+
+    <div class="row">
+      <label><input type="checkbox" id="wants_volunteer"> Wants to volunteer</label>
+      <label><input type="checkbox" id="share_insights_ok"> OK to share insights</label>
+    </div>
+    <div class="row">
+      <label><input type="checkbox" id="for_term_limits"> For term limits</label>
+      <label><input type="checkbox" id="issue_public_lands"> Interested: public land sales</label>
+    </div>
+    <label for="comments">Comments</label>
+    <textarea id="comments" rows="3"></textarea>
+
+    <div class="row" style="margin-top:.75rem;">
+      <button id="saveBtn">Save & Next</button>
+      <button class="secondary" id="skipBtn" type="button">Skip</button>
+    </div>
+    <div id="msg" class="muted" style="margin-top:.5rem;"></div>
   </div>
 
-  <div class="row">
-    <label><input type="checkbox" id="optin_sms"> Opt-in SMS</label>
-    <label><input type="checkbox" id="optin_email"> Opt-in Email</label>
-  </div>
-  <label for="email">Email address (if provided)</label>
-  <input type="text" id="email" placeholder="name@example.com"/>
-
-  <div class="row">
-    <label><input type="checkbox" id="wants_volunteer"> Wants to volunteer</label>
-    <label><input type="checkbox" id="share_insights_ok"> OK to share insights</label>
-  </div>
-  <div class="row">
-    <label><input type="checkbox" id="for_term_limits"> For term limits</label>
-    <label><input type="checkbox" id="issue_public_lands"> Interested: public land sales</label>
-  </div>
-  <label for="comments">Comments</label>
-  <textarea id="comments" rows="3"></textarea>
-
-  <div class="row" style="margin-top:.75rem;">
-    <button id="saveBtn">Save & Next</button>
-    <button class="secondary" id="skipBtn" type="button">Skip</button>
-  </div>
-  <div id="msg" class="muted" style="margin-top:.5rem;"></div>
-</div>
-
-<div class="card" id="empty" hidden>No eligible voters (or not logged in).</div>
+  <div class="card" id="empty" hidden>No eligible voters (or not logged in).</div>
+</main>
 
 <script>
 // Use same-origin Pages Functions API path.
-window.API = (p) => '/api' + p;
+const API = (p) => '/api' + p;
 
+// ---- DOM refs ----
 const who = document.getElementById("whoami");
 const voterCard = document.getElementById("voterCard");
 const voterInfo = document.getElementById("voterInfo");
 const empty = document.getElementById("empty");
 const msg = document.getElementById("msg");
+const btnNext = document.getElementById("getNextBtn");
+const btnSave = document.getElementById("saveBtn");
+const btnSkip = document.getElementById("skipBtn");
+const outcomeSel = document.getElementById("outcome");
 
+// ---- helpers ----
 function setMsg(text, kind="muted") {
   msg.className = kind;
   msg.textContent = text || "";
@@ -103,7 +114,7 @@ function setMsg(text, kind="muted") {
 
 async function jsonFetch(url, init = {}) {
   const r = await fetch(url, {
-    credentials: "include",  // send Cloudflare Access cookies
+    credentials: "include",
     ...init,
     headers: { "content-type": "application/json", ...(init.headers || {}) },
   });
@@ -113,40 +124,67 @@ async function jsonFetch(url, init = {}) {
   return ct.includes("application/json") ? r.json() : r.text();
 }
 
+function currentFiltersFromURL() {
+  const params = new URLSearchParams(location.search);
+  const filters = {};
+  for (const [k, v] of params.entries()) filters[k] = v;
+  return filters;
+}
+
+function uiBusy(busy) {
+  btnNext.disabled = busy;
+  btnSave.disabled = busy || !outcomeSel.value;
+  btnSkip.disabled = busy;
+  outcomeSel.disabled = busy;
+}
+
+function renderVoter(v) {
+  voterCard.dataset.voter = v.voter_id || "";
+  const name = [v.first_name, v.last_name].filter(Boolean).join(" ");
+  voterInfo.innerHTML =
+    `<strong>${name || "—"}</strong><br/>` +
+    `${v.ra_city || ""} ${v.ra_zip || ""} • Party: ${v.party || ""}<br/>` +
+    `Phone: ${v.phone_e164 || "—"}`;
+}
+
+// ---- actions ----
 async function loadWho() {
   try {
-    const j = await jsonFetch(API("/whoami"), { method:"GET", headers:{} });
+    const j = await jsonFetch(API("/whoami"), { method:"GET" });
     who.textContent = j && j.email ? ("Signed in as: " + j.email) : "Not signed in (Access required)";
   } catch (e) {
     who.innerHTML = `<span class="error">Unable to reach API: ${e.message}</span>`;
   }
 }
 
+// Cursor-based "next": send after_id (the last voter you saw)
 async function nextVoter() {
   try {
     setMsg("Loading next voter…");
-    const v = await jsonFetch(API("/call/next"), { method:"POST" });
+    uiBusy(true);
+    const after_id = voterCard.dataset.voter || null;
+    const payload = { filters: currentFiltersFromURL(), after_id };
+    const v = await jsonFetch(API("/call/next"), { method:"POST", body: JSON.stringify(payload) });
+
     if (!v || !v.voter_id) {
-      voterCard.hidden = true; empty.hidden = false; setMsg(""); return;
+      voterCard.hidden = true; empty.hidden = false; setMsg("No eligible voters.", "muted");
+      return;
     }
     empty.hidden = true; voterCard.hidden = false;
-    voterCard.dataset.voter = v.voter_id;
-    const name = [v.first_name, v.last_name].filter(Boolean).join(" ");
-    voterInfo.innerHTML =
-      `<strong>${name || "—"}</strong><br/>` +
-      `${v.ra_city || ""} ${v.ra_zip || ""} • Party: ${v.party || ""}<br/>` +
-      `Phone: ${v.phone_e164 || "—"}`;
+    renderVoter(v);
     setMsg("");
   } catch (e) {
     voterCard.hidden = true; empty.hidden = false;
     setMsg(`Error: ${e.message}`, "error");
+  } finally {
+    uiBusy(false);
   }
 }
 
 async function saveAndNext() {
   const payload = {
     voter_id: voterCard.dataset.voter || "",
-    outcome: document.getElementById("outcome").value,
+    outcome: outcomeSel.value,
     ok_callback: +document.getElementById("ok_callback").checked,
     requested_info: +document.getElementById("requested_info").checked,
     dnc: +document.getElementById("dnc").checked,
@@ -166,9 +204,10 @@ async function saveAndNext() {
 
   try {
     setMsg("Saving…");
+    uiBusy(true);
     await jsonFetch(API("/call/complete"), { method:"POST", body: JSON.stringify(payload) });
     // reset fields
-    document.getElementById("outcome").value = "";
+    outcomeSel.value = "";
     document.getElementById("best_day").value = "";
     document.getElementById("best_time_window").value = "";
     document.getElementById("email").value = "";
@@ -177,31 +216,32 @@ async function saveAndNext() {
      "wants_volunteer","share_insights_ok","for_term_limits","issue_public_lands"]
      .forEach(id => document.getElementById(id).checked = false);
     setMsg("Saved.", "muted");
-    nextVoter();
+    await nextVoter();
   } catch (e) {
     setMsg(`Save failed: ${e.message}`, "error");
+  } finally {
+    uiBusy(false);
   }
 }
 
-document.getElementById("getNextBtn").addEventListener("click", nextVoter);
-document.getElementById("saveBtn").addEventListener("click", saveAndNext);
-document.getElementById("skipBtn").addEventListener("click", nextVoter);
+// ---- events ----
+btnNext.addEventListener("click", nextVoter);
+btnSave.addEventListener("click", saveAndNext);
+btnSkip.addEventListener("click", nextVoter);
 
-// Keyboard shortcut: N = Get Next
-window.addEventListener("keydown", (e) => {
-  if (e.key.toLowerCase() === "n" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-    e.preventDefault();
-    nextVoter();
-  }
+// Disable Save until an outcome is chosen
+outcomeSel.addEventListener("change", () => {
+  btnSave.disabled = !outcomeSel.value;
 });
 
+// Keyboard shortcuts
+window.addEventListener("keydown", (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if (k === "n") { e.preventDefault(); nextVoter(); }
+  if (k === "s" && !btnSave.disabled) { e.preventDefault(); saveAndNext(); }
+});
+
+// boot
 loadWho().then(nextVoter);
 </script>
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-  const btn = document.getElementById("getNextBtn");
-});
-</script>
-<script>window.getNext = typeof nextVoter!=="undefined" ? nextVoter : ()=>{};</script>
-
-

@@ -24,6 +24,7 @@ node_modules/
 .venv/
 *.log
 ui/_worker.dev.js
-
-# Local temp files used during development
-tmp/
+ # Local temp files used during development
+ tmp/
+ .dev.vars
+ /home/anchor/projects/voterdata/

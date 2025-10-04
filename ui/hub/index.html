@@ -3,172 +3,260 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Volunteer Hub</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 900px; }
-  .grid { display:grid; grid-template-columns: 1fr 1fr; gap:1rem; }
-  .card { border:1px solid #ddd; border-radius:12px; padding:1rem; box-shadow:0 1px 2px rgba(0,0,0,.05); }
-  label { display:block; font-weight:600; margin:.5rem 0 .25rem; }
-  select, input[type=number] { width:100%; padding:.6rem; border:1px solid #ccc; border-radius:8px; }
-  fieldset { border:0; padding:0; margin:.25rem 0 0; }
+  body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 880px; }
+  .card { border:1px solid #e5e7eb; border-radius: 12px; padding: 1rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .row { display:flex; gap:1rem; flex-wrap: wrap; }
+  .row > * { flex:1 1 220px; }
+  label { display:block; margin:.4rem 0 .25rem; font-weight:600; }
+  select, input[type=number] { width:100%; padding:.6rem; border:1px solid #cbd5e1; border-radius:8px; }
   .muted { color:#64748b; }
-  .row { display:flex; flex-wrap:wrap; gap:.75rem; align-items:center; }
-  .row > * { flex: 1 1 180px; }
-  button { padding:.6rem 1rem; border-radius:8px; border:0; background:#0ea5e9; color:white; font-weight:600; cursor:pointer; }
+  .btns { display:flex; gap:.75rem; flex-wrap: wrap; margin-top:.75rem; }
+  button { padding:.7rem 1.1rem; border-radius:10px; border:0; font-weight:700; cursor:pointer; }
+  button.primary { background:#0ea5e9; color:white; }
   button.secondary { background:#e2e8f0; color:#0f172a; }
-  .disabled { opacity:.6; pointer-events:none; }
+  button[disabled] { opacity:.5; cursor:not-allowed; }
+  .chips { display:flex; gap:.5rem; flex-wrap: wrap; }
+  .chip { display:inline-flex; align-items:center; gap:.4rem; border:1px solid #cbd5e1; border-radius:999px; padding:.35rem .6rem; }
 </style>
 
 <h1>Volunteer Hub</h1>
-<p class="muted">Choose a target set, then start <strong>Calls</strong> or <strong>Canvass</strong>. Lists are powered by <code>/meta/wy.json</code> in dev/prod.</p>
+<p class="muted">Pick your target set, then start calling or canvassing.</p>
 
 <div class="card">
-  <div class="grid">
+  <div class="row">
     <div>
       <label for="county">County</label>
-      <select id="county"><option value="">— select county —</option></select>
+      <select id="county">
+        <option value="">— select —</option>
+      </select>
     </div>
     <div>
-      <label for="city">City</label>
-      <select id="city" disabled><option value="">— select city —</option></select>
+      <label for="city">City (optional)</label>
+      <select id="city" disabled>
+        <option value="">— any —</option>
+      </select>
     </div>
     <div>
-      <label for="district_type">District Type</label>
+      <label for="district_type">District type</label>
       <select id="district_type" disabled>
-        <option value="">— select type —</option>
+        <option value="">— select —</option>
         <option value="house">House</option>
         <option value="senate">Senate</option>
       </select>
     </div>
     <div>
       <label for="district">District</label>
-      <select id="district" disabled><option value="">— select district —</option></select>
+      <select id="district" disabled>
+        <option value="">— select —</option>
+      </select>
     </div>
   </div>
 
-  <div class="row" style="margin-top:1rem;">
+  <div class="row" style="margin-top:.5rem;">
     <div>
       <label>Party</label>
-      <fieldset id="parties">
-        <label class="row" style="gap:.5rem; align-items:center;">
-          <span><input type="checkbox" value="R" checked /> Republican</span>
-          <span><input type="checkbox" value="D" checked /> Democratic</span>
-          <span><input type="checkbox" value="U" checked /> Unaffiliated/Minor</span>
-        </label>
-      </fieldset>
+      <div class="chips">
+        <label class="chip"><input type="checkbox" id="p_r" value="Republican"> R</label>
+        <label class="chip"><input type="checkbox" id="p_d" value="Democratic"> D</label>
+        <label class="chip"><input type="checkbox" id="p_u" value="Unaffiliated"> Unaff/Minor</label>
+      </div>
     </div>
     <div>
-      <label for="count">Number of voters</label>
-      <input id="count" type="number" min="1" max="200" value="10" />
+      <label for="limit">Number of voters</label>
+      <input id="limit" type="number" min="1" max="200" value="50" />
     </div>
   </div>
 
-  <div class="row" style="margin-top:1rem;">
-    <button id="startCalls" class="disabled" disabled>Start Calls</button>
-    <button id="startCanvass" class="secondary disabled" disabled>Start Canvass</button>
-    <div id="msg" class="muted"></div>
+  <div class="btns">
+    <button id="startCall" class="primary" disabled>Start Calls</button>
+    <button id="startCanvass" class="secondary" disabled>Start Canvass</button>
+    <span id="msg" class="muted"></span>
   </div>
 </div>
 
 <script>
-const msg = document.getElementById('msg');
-const els = {
-  county: document.getElementById('county'),
-  city: document.getElementById('city'),
-  district_type: document.getElementById('district_type'),
-  district: document.getElementById('district'),
-  count: document.getElementById('count'),
-  startCalls: document.getElementById('startCalls'),
-  startCanvass: document.getElementById('startCanvass'),
-  parties: document.getElementById('parties'),
-};
+(function(){
+  const selCounty = document.getElementById('county');
+  const selCity   = document.getElementById('city');
+  const selType   = document.getElementById('district_type');
+  const selDist   = document.getElementById('district');
+  const chkR      = document.getElementById('p_r');
+  const chkD      = document.getElementById('p_d');
+  const chkU      = document.getElementById('p_u');
+  const numLimit  = document.getElementById('limit');
+  const btnCalls  = document.getElementById('startCall');
+  const btnCanv   = document.getElementById('startCanvass');
+  const hint      = document.getElementById('msg');
 
-async function loadMeta() {
-  msg.textContent = 'Loading metadata…';
-  // prefer local static; if missing (first run), try the admin refresh in dev
-  let j;
-  try {
-    const r = await fetch('/meta/wy.json', { cache: 'no-store' });
-    if (r.ok) j = await r.json();
-  } catch {}
-  if (!j) {
-    try {
-      await fetch('/admin/meta/refresh', { method:'POST' });
-      const r2 = await fetch('/meta/wy.json', { cache: 'no-store' });
-      if (r2.ok) j = await r2.json();
-    } catch {}
+  // robust fetch of wy.json with fallback path
+  async function fetchMeta() {
+    const tryPaths = ['/admin/wy.json', '/ui/admin/wy.json'];
+    let lastErr = null;
+    for (const p of tryPaths) {
+      try {
+        const r = await fetch(p, { cache: 'no-store' });
+        if (r.ok) return await r.json();
+        lastErr = new Error(`${p} -> HTTP ${r.status}`);
+      } catch (e) { lastErr = e; }
+    }
+    throw lastErr || new Error('wy.json not found');
   }
-  if (!j) {
-    msg.textContent = 'Failed to load metadata. Make sure /admin/meta/refresh works in dev.';
-    return;
+
+  function titleCase(s) {
+    return String(s||'').toLowerCase()
+      .split(/\s+/).map(w => w ? w[0].toUpperCase()+w.slice(1) : w).join(' ');
   }
-  msg.textContent = '';
-  window.__WY_META__ = j;
-  fillCounties(j.counties || []);
-}
 
-function fillCounties(list) {
-  els.county.innerHTML = `<option value="">— select county —</option>` + list.map(c=>`<option>${c}</option>`).join('');
-  els.county.disabled = false;
-}
-function fillCities(county) {
-  const cities = (window.__WY_META__?.cities_by_county?.[county]) || [];
-  els.city.innerHTML = `<option value="">— select city —</option>` + cities.map(c=>`<option>${c}</option>`).join('');
-  els.city.disabled = cities.length === 0;
-}
-function fillDistricts(county, type) {
-  const map = window.__WY_META__?.districts_by_county?.[type] || {};
-  const districts = (map[county] || []);
-  els.district.innerHTML = `<option value="">— select district —</option>` + districts.map(d=>`<option>${d}</option>`).join('');
-  els.district.disabled = districts.length === 0;
-}
+  // Accept both camelCase (current) and snake_case (early drafts)
+  function normalizeWy(json) {
+    const counties = json.counties || json.COUNTIES || [];
+    const citiesByCounty =
+      json.citiesByCounty || json.cities_by_county || {};
+    const senateByCounty =
+      json.senateByCounty || (json.districts_by_county && json.districts_by_county.senate) || {};
+    const houseByCounty  =
+      json.houseByCounty  || (json.districts_by_county && json.districts_by_county.house)  || {};
 
-function updateButtons() {
-  const ok = !!els.county.value; // minimal requirement
-  [els.startCalls, els.startCanvass].forEach(b=>{
-    b.disabled = !ok;
-    b.classList.toggle('disabled', !ok);
+    return { counties, citiesByCounty, senateByCounty, houseByCounty };
+  }
+
+  function fillSelect(sel, items, {placeholder='— select —', anyLabel=null}={}) {
+    const prev = sel.value;
+    sel.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = anyLabel ?? placeholder;
+    sel.appendChild(opt0);
+    (items || []).forEach(v => {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = titleCase(v);
+      sel.appendChild(o);
+    });
+    // try keep previous if still valid
+    if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+  }
+
+  function partiesFromUI() {
+    const out = [];
+    if (chkR && chkR.checked) out.push('R');
+    if (chkD && chkD.checked) out.push('D');
+    if (chkU && chkU.checked) out.push('U');
+    return out;
+  }
+
+  function canProceed() {
+    // Require county OR district; if district_type is chosen, district must be chosen.
+    const county = selCounty.value || '';
+    const dtype  = selType.value || '';
+    const dist   = selDist.value || '';
+    if (dtype && !dist) return false;
+    return !!(county || (dtype && dist));
+  }
+
+  function updateButtons() {
+    const ok = canProceed();
+    btnCalls.disabled = !ok;
+    btnCanv.disabled  = !ok;
+    hint.textContent = ok
+      ? ''
+      : 'Select County/City and (optionally) District to continue.';
+  }
+
+  function persistFilters() {
+    // Build normalized filter payload for downstream pages
+    const county = selCounty.value ? selCounty.value.toUpperCase() : null;
+    const city   = selCity.value   ? selCity.value.toUpperCase()   : null;
+
+    const district_type = selType.value || null;
+    let district = selDist.value || null;
+    if (district) {
+      const n = String(parseInt(district, 10));
+      district = n && !isNaN(n) ? n.padStart(2,'0') : district;
+    }
+
+    // Expand shorthand parties R/D/U to long names for DB
+    const mapParty = p => p === 'R' ? 'Republican'
+                      : p === 'D' ? 'Democratic'
+                      : p === 'U' ? 'Unaffiliated'
+                      : p;
+    const parties = partiesFromUI().map(mapParty);
+
+    const filters = {
+      county,
+      city,
+      district_type,
+      district,
+      parties,
+      limit: Math.max(1, Math.min(200, Number(numLimit.value || 50))),
+      require_phone: true // default for calls; canvass can ignore
+    };
+    // store the filters object directly (call/canvass expect the raw filters)
+    sessionStorage.setItem('vol.filters', JSON.stringify(filters));
+    return filters;
+  }
+
+  function go(path) {
+    const f = persistFilters();
+    const u = new URL(path, location.origin);
+    // Keep lightweight params in URL so refresh/deep-link works
+    if (f.county) u.searchParams.set('county', f.county);
+    if (f.city)   u.searchParams.set('city', f.city);
+    if (f.district_type) u.searchParams.set('district_type', f.district_type);
+    if (f.district)      u.searchParams.set('district', f.district);
+    f.parties?.forEach(p => u.searchParams.append('parties', p));
+    if (f.limit) u.searchParams.set('limit', String(f.limit));
+    location.href = u.toString();
+  }
+
+  // Wire up events
+  [selCounty, selCity, selType, selDist, chkR, chkD, chkU, numLimit].forEach(el =>
+    el && el.addEventListener('change', updateButtons)
+  );
+  btnCalls.addEventListener('click', () => go('/call.html'));
+  btnCanv.addEventListener('click',  () => go('/canvass/'));
+
+  // Init
+  fetchMeta().then((raw) => {
+    const wy = normalizeWy(raw);
+
+    // Counties
+    fillSelect(selCounty, wy.counties);
+
+    // When county changes, rebuild cities and districts
+    selCounty.addEventListener('change', () => {
+      const cty = selCounty.value || '';
+      const cities = (wy.citiesByCounty[cty] || []).slice().sort();
+      fillSelect(selCity, cities, { placeholder: '— any —', anyLabel: '— any —' });
+      selCity.disabled = false;
+
+      // when county changes, clear district type + list
+      selType.value = '';
+      selType.disabled = false;
+      fillSelect(selDist, [], { placeholder: '— select —' });
+      selDist.disabled = true;
+      updateButtons();
+    });
+
+    // When district type changes, rebuild district numbers for selected county
+    selType.addEventListener('change', () => {
+      const cty = selCounty.value || '';
+      const dtype = selType.value; // 'house' | 'senate' | ''
+      let dists = [];
+      if (dtype === 'house')   dists = wy.houseByCounty[cty]  || [];
+      if (dtype === 'senate')  dists = wy.senateByCounty[cty] || [];
+      fillSelect(selDist, dists);
+      selDist.disabled = !dists.length;
+      updateButtons();
+    });
+
+    // City changes only affect validation message
+    selCity.addEventListener('change', updateButtons);
+
+    updateButtons();
+  }).catch(err => {
+    console.error('Failed to load wy.json', err);
+    hint.textContent = 'Failed to load county/city metadata.';
   });
-}
-
-els.county.addEventListener('change', ()=>{
-  fillCities(els.county.value);
-  els.district_type.disabled = !els.county.value;
-  els.district.disabled = true;
-  els.district.value = '';
-  updateButtons();
-});
-els.city.addEventListener('change', updateButtons);
-els.district_type.addEventListener('change', ()=>{
-  const t = els.district_type.value;
-  if (t) fillDistricts(els.county.value, t);
-  els.district.disabled = !t;
-  updateButtons();
-});
-els.district.addEventListener('change', updateButtons);
-
-function selectedParties() {
-  return Array.from(els.parties.querySelectorAll('input[type=checkbox]:checked')).map(x=>x.value);
-}
-
-function gatherFilters() {
-  const filters = {
-    county: els.county.value || null,
-    city: els.city.value || null,
-    district_type: els.district_type.value || null, // 'house' | 'senate'
-    district: els.district.value || null,
-    parties: selectedParties(),
-    limit: Math.max(1, Math.min(200, Number(els.count.value || 10))),
-  };
-  return filters;
-}
-
-function persistAndNav(target) {
-  const filters = gatherFilters();
-  sessionStorage.setItem('volunteerFilters', JSON.stringify(filters));
-  location.href = target; // e.g. '/index.html' for Calls; '/canvass.html' for Canvass
-}
-
-els.startCalls.addEventListener('click', ()=>persistAndNav('/index.html'));
-els.startCanvass.addEventListener('click', ()=>persistAndNav('/canvass.html'));
-
-loadMeta();
+})();
 </script>
