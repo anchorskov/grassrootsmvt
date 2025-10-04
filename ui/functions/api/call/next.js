@@ -1,8 +1,13 @@
-export const onRequest = ({ request }) => {
+export const onRequest = async ({ request }) => {
   if (!["GET","POST"].includes(request.method)) return new Response("Method Not Allowed", { status: 405 });
+  let payload = {};
+  if (request.method === "POST") {
+    try { payload = await request.json(); } catch {}
+  }
   const stub = {
     ok: true,
     method: request.method,
+    filters: payload.filters || {},
     voter_id: "TEST123",
     first_name: "Jane",
     last_name: "Doe",

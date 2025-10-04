@@ -24,3 +24,5 @@ node_modules/
 .venv/
 *.log
 ui/_worker.dev.js
+.dev.vars
+/home/anchor/projects/voterdata/

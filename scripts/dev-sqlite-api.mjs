@@ -112,6 +112,74 @@ function canonicalizeStreet(s) {
   return t;
 }
 
+// Canonicalize a street string to improve matching (cheap, no USPS needed)
+function normalizeStreetInput(s) {
+  const SUFFIX = {
+    STREET: 'ST', ST: 'ST',
+    AVENUE: 'AVE', AVE: 'AVE',
+    ROAD: 'RD', RD: 'RD',
+    DRIVE: 'DR', DR: 'DR',
+    LANE: 'LN', LN: 'LN',
+    COURT: 'CT', CT: 'CT',
+    PLACE: 'PL', PL: 'PL',
+    BOULEVARD: 'BLVD', BLVD: 'BLVD',
+    PARKWAY: 'PKWY', PKWY: 'PKWY',
+    TERRACE: 'TER', TER: 'TER',
+    HIGHWAY: 'HWY', HWY: 'HWY',
+    CIRCLE: 'CIR', CIR: 'CIR',
+    WAY: 'WAY'
+  };
+  const DIR = { NORTH:'N', N:'N', SOUTH:'S', S:'S', EAST:'E', E:'E', WEST:'W', W:'W' };
+  const UNIT = new Set(['APT','APARTMENT','UNIT','STE','SUITE','#']);
+
+  // Uppercase, collapse spaces, drop commas/periods
+  let t = (s || '').toUpperCase().replace(/[.,]/g,' ').replace(/\s+/g,' ').trim();
+  if (!t) return { base: '', abbr: '', full: '' };
+
+  // Remove unit designators and the token that follows them ("APT 1", "# 5", "UNIT B")
+  const toks = t.split(' ');
+  const cleaned = [];
+  let skipNext = false;
+  for (let i = 0; i < toks.length; i++) {
+    const tok = toks[i];
+    if (skipNext) { skipNext = false; continue; }
+    if (tok === '#') { skipNext = true; continue; }
+    if (UNIT.has(tok)) { skipNext = true; continue; }
+    cleaned.push(tok);
+  }
+  t = cleaned.join(' ');
+
+  // Split tokens; drop leading house number if present
+  let parts = t.split(' ');
+  if (/^\d+[A-Z]?$/.test(parts[0])) parts = parts.slice(1);
+  if (!parts.length) return { base: '', abbr: '', full: '' };
+
+  // Optional leading directional
+  if (parts.length > 1 && DIR[parts[0]]) parts = parts.slice(1);
+
+  // Optional trailing directional (e.g., "MAIN ST W")
+  if (parts.length > 1 && DIR[parts[parts.length-1]]) parts = parts.slice(0,-1);
+
+  // Last token might be suffix
+  let suffix = parts[parts.length-1];
+  const mapped = SUFFIX[suffix] || suffix;
+  if (mapped !== suffix) parts = parts.slice(0,-1).concat(mapped);
+
+  const full = parts.join(' ');                 // e.g., "BELLAIRE DR"
+  const abbr = parts.join(' ');                 // already abbreviated
+  const base = parts.slice(0,-1).join(' ') || full; // base without suffix if present
+
+  // Also produce an "expanded" form if the user typed the abbreviation
+  let expanded = full;
+  for (const [k,v] of Object.entries(SUFFIX)) {
+    if (v === parts[parts.length-1] && k.length > v.length) { // one expanded key
+      expanded = parts.slice(0,-1).concat(k).join(' ');
+      break;
+    }
+  }
+  return { base, abbr: full, full: expanded };
+}
+
 // Register SQL function for canonical street normalization for use inside queries
 try {
   // better-sqlite3 exposes .function on the Database instance
@@ -230,7 +298,7 @@ app.all('/api/filters/normalize', (req, res) => {
   res.json({ ok:true, normalized: normalizeFiltersShape(raw) });
 });
 
-function whereAndParams(filters) {
+function whereAndParams(filters, extra = {}) {
   const cond = [];
   const p = [];
 
@@ -250,25 +318,36 @@ function whereAndParams(filters) {
 
   if (filters.q) {
     cond.push(`( UPPER(n.addr1) LIKE ? OR UPPER(n.city) LIKE ? OR UPPER(n.fn || ' ' || n.ln) LIKE ? )`);
-    const like = `%${filters.q}%`.toUpperCase();
+    const like = `%${(filters.q||'').toString().toUpperCase()}%`;
     p.push(like, like, like);
   }
 
-  // Phone constraints: only applied in /api/call/next handler when require_phone=true
-  const phoneCond = [];
-  const phoneParams = [];
-  if (filters.require_phone) {
-    phoneCond.push(`bp.phone_e164 IS NOT NULL AND bp.phone_e164 <> ''`);
-    if (Number.isFinite(filters.min_confidence)) {
-      phoneCond.push(`bp.confidence_code >= ?`);
-      phoneParams.push(Number(filters.min_confidence));
-    }
-    if (filters.wy_area_only) {
-      phoneCond.push(`bp.is_wy_area = 1`);
-    }
+  // Support an array of exclude_ids to avoid recently-seen voters
+  const excludes = (extra.exclude_ids || []).filter(Boolean);
+  if (excludes.length) {
+    cond.push(`v.voter_id NOT IN (${excludes.map(()=>'?').join(',')})`);
+    p.push(...excludes);
   }
 
-  return { cond, p, phoneCond, phoneParams };
+  return { cond, p };
+}
+
+function getExcludeId(req) {
+  if (req.method === "GET") return req.query?.exclude_id || null;
+  if (req.method === "POST") return (req.body?.exclude_id) || null;
+  return null;
+}
+
+function getExcludeIds(req) {
+  if (req.method === "GET") {
+    const raw = req.query?.exclude_ids;
+    return Array.isArray(raw) ? raw : (raw ? [raw] : []);
+  }
+  if (req.method === "POST") {
+    const raw = req.body?.exclude_ids;
+    return Array.isArray(raw) ? raw : (raw ? [raw] : []);
+  }
+  return [];
 }
 
 app.get("/api/canvass/list", (req, res) => {
@@ -330,19 +409,16 @@ app.post("/api/canvass/nearby", (req, res) => {
       require_phone: !!f0.require_phone,
     };
 
-    const streetIn = (req.body?.street || "").toString().trim().toUpperCase();
+    const rawStreet = (req.body?.street || "").toString();
+    const { base, abbr, full } = normalizeStreetInput(rawStreet);
+    const streetIn = abbr;
     const houseIn  = Number(req.body?.house || 0);
     const range    = Math.max(0, Math.min(200, Number(req.body?.range || 20)));
     const limit    = Math.max(1, Math.min(200, Number(req.body?.limit || 20)));
     if (!streetIn || !houseIn) return res.status(400).json({ ok:false, error:"missing_house_or_street" });
 
-    // Normalize common suffixes so "DRIVE" ~ "DR", "AVENUE" ~ "AVE", etc.
-    const normStreet = streetIn
-      .replace(/\s+/g,' ')
-      .replace(/\bSTREET\b/g,'ST').replace(/\bAVENUE\b/g,'AVE')
-      .replace(/\bDRIVE\b/g,'DR').replace(/\bROAD\b/g,'RD')
-      .replace(/\bCOURT\b/g,'CT').replace(/\bLANE\b/g,'LN')
-      .replace(/\bBOULEVARD\b/g,'BLVD');
+    // Use normalized abbr/full patterns
+    const normStreet = streetIn;
 
     // Build shared WHERE parts.
     const buildWhere = (includeDistrict) => {
@@ -350,14 +426,14 @@ app.post("/api/canvass/nearby", (req, res) => {
       const p = [];
 
       // county & party use voters; city uses normalized view (more reliable)
-  if (filters.county) { cond.push(`v.county = ?`); p.push(filters.county); }
-  if (filters.city)   { cond.push(`norm.city   = ?`); p.push(filters.city); }
+      if (filters.county) { cond.push(`v.county = ?`); p.push(filters.county); }
+      if (filters.city)   { cond.push(`norm.city   = ?`); p.push(filters.city); }
 
       // IMPORTANT: district filters from the normalized view columns (house/senate),
       // not from voters.* to avoid schema variance.
       if (includeDistrict && filters.district_type && filters.district) {
-  if (filters.district_type === "house")  { cond.push(`norm.house  = ?`); p.push(filters.district); }
-  if (filters.district_type === "senate") { cond.push(`norm.senate = ?`); p.push(filters.district); }
+        if (filters.district_type === "house")  { cond.push(`norm.house  = ?`); p.push(filters.district); }
+        if (filters.district_type === "senate") { cond.push(`norm.senate = ?`); p.push(filters.district); }
       }
 
       if (filters.parties?.length) {
@@ -371,11 +447,8 @@ app.post("/api/canvass/nearby", (req, res) => {
       return { cond, p };
     };
 
-    // The core query:
-    // 1) Start from v_voters_addr_norm (n) — has ln/fn, addr1, city, zip, house, senate
-    // 2) Parse house number and street into separate pieces for proximity + street match
-    // 3) Join voters v for county + party; left join v_best_phone bp when needed
-    const run = (includeDistrict) => {
+    // The core query builder for ranged search
+    const runRanged = (includeDistrict) => {
       const { cond, p } = buildWhere(includeDistrict);
       const extra = cond.length ? ` AND ${cond.join(" AND ")}` : "";
 
@@ -412,27 +485,88 @@ app.post("/api/canvass/nearby", (req, res) => {
         FROM norm
         JOIN voters v ON v.voter_id = norm.voter_id
         LEFT JOIN v_best_phone bp ON bp.voter_id = v.voter_id
-        WHERE norm.street LIKE ?
+        WHERE (norm.addr1 LIKE ? OR norm.addr1 LIKE ?)
           AND norm.num BETWEEN ? AND ?
           ${extra}
         ORDER BY ABS(norm.num - ?)
         LIMIT ?
       `;
-      const args = [`${normStreet}%`, houseIn - range, houseIn + range, ...p, houseIn, limit];
+      // build patterns to match both abbreviated and expanded forms
+      const patterns = [`% ${abbr}%`, `% ${full}%`];
+      const args = [patterns[0], patterns[1], houseIn - range, houseIn + range, ...p, houseIn, limit];
       return q(sql, ...args);
     };
 
-    // Try with district; if empty, auto-broaden by dropping district filter.
-    let rows = run(true);
+    // Fallback query: nearest addresses on same street ordered by absolute house-number distance
+    const runNearest = (includeDistrict) => {
+      const { cond, p } = buildWhere(includeDistrict);
+      const extra = cond.length ? ` AND ${cond.join(" AND ")}` : "";
+
+      const sql = `
+        WITH base AS (
+          SELECT
+            n.voter_id, n.fn, n.ln, n.addr1, n.city, n.zip, n.house, n.senate,
+            CAST(
+              CASE WHEN INSTR(UPPER(TRIM(n.addr1)),' ') > 0
+                   THEN SUBSTR(UPPER(TRIM(n.addr1)), 1, INSTR(UPPER(TRIM(n.addr1)),' ')-1)
+                   ELSE UPPER(TRIM(n.addr1)) END AS INTEGER
+            ) AS num,
+            TRIM(
+              CASE WHEN INSTR(UPPER(TRIM(n.addr1)),' ') > 0
+                   THEN SUBSTR(UPPER(TRIM(n.addr1)), INSTR(UPPER(TRIM(n.addr1)),' ')+1)
+                   ELSE '' END
+            ) AS street_raw
+          FROM v_voters_addr_norm n
+        ),
+        norm AS (
+          SELECT *,
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(street_raw,'  ', ' '),
+              'STREET','ST'),'AVENUE','AVE'),'DRIVE','DR'),'ROAD','RD'),'LANE','LN'),'BOULEVARD','BLVD') AS street
+          FROM base
+        )
+        SELECT
+          v.voter_id,
+          (norm.fn || ' ' || norm.ln) AS name,
+          norm.addr1 AS address,
+          norm.city, norm.zip,
+          v.political_party AS party,
+          bp.phone_e164 AS phone_e164,
+          bp.confidence_code AS phone_confidence,
+          ABS(norm.num - ?) AS house_distance
+        FROM norm
+        JOIN voters v ON v.voter_id = norm.voter_id
+        LEFT JOIN v_best_phone bp ON bp.voter_id = v.voter_id
+        WHERE (norm.addr1 LIKE ? OR norm.addr1 LIKE ?)
+          AND norm.num IS NOT NULL
+          ${extra}
+        ORDER BY house_distance, norm.num
+        LIMIT ?
+      `;
+      const patterns = [`% ${abbr}%`, `% ${full}%`];
+      const args = [houseIn, patterns[0], patterns[1], ...p, limit];
+      return q(sql, ...args);
+    };
+
+    // Try ranged search (with district first); if empty, drop district; if still empty and house provided,
+    // run nearest-on-street fallback.
+    let rows = runRanged(true);
     let broadened = false;
-    if (!rows.length) { rows = run(false); broadened = true; }
+    if (!rows.length) { rows = runRanged(false); broadened = true; }
+
+    let fallbackNearest = false;
+    if ((!rows || rows.length === 0) && houseIn) {
+      rows = runNearest(true);
+      if (!rows.length) rows = runNearest(false);
+      fallbackNearest = true;
+    }
 
     res.json({
       ok: true,
       rows,
       filters,
       input: { street: normStreet, house: houseIn, range, limit },
-      broadened
+      broadened,
+      fallback_nearest: fallbackNearest
     });
   } catch (e) {
     console.error("POST /api/canvass/nearby error:", e);
@@ -444,36 +578,32 @@ app.post("/api/canvass/nearby", (req, res) => {
 app.all("/api/call/next", (req, res) => {
   try {
     const filters = parseFilters(req);
-    const { cond, p } = whereAndParams(filters);
-    // Ensure phone predicate is treated like other conditions (only when requested)
-    if (filters.require_phone) cond.push(`NULLIF(TRIM(bp.phone_e164),'') IS NOT NULL`);
-    const where = cond.length ? `WHERE ${cond.join(" AND ")}` : "";
+    const exclude_ids = getExcludeIds(req);
 
-    // Determine volunteer identity (prefer header, fall back to DEV_EMAIL)
-    const volunteer = (req.headers && (req.headers['x-volunteer-email'] || req.headers['x-user-email'])) || DEV_EMAIL || null;
+    const baseJoin = filters.require_phone
+      ? 'JOIN v_best_phone bp ON bp.voter_id = v.voter_id'
+      : 'LEFT JOIN v_best_phone bp ON bp.voter_id = v.voter_id';
 
-    const sql = `
-      SELECT v.voter_id,
-             n.fn  AS first_name,
-             n.ln  AS last_name,
-             v.political_party AS party,
-             n.city AS ra_city,
-             n.zip  AS ra_zip,
-             bp.phone_e164
-      FROM voters v
-      JOIN v_voters_addr_norm n ON n.voter_id = v.voter_id
-      INNER JOIN v_best_phone bp ON bp.voter_id = v.voter_id
-      ${where}
-      AND NOT EXISTS (
-        SELECT 1 FROM call_activity ca
-        WHERE ca.voter_id = v.voter_id
-          AND ca.volunteer_email = ?
-      )
-      ORDER BY v.voter_id
-      LIMIT 1
-    `;
-    // bind filters params then volunteer
-    const row = q1(sql, ...p, volunteer);
+    const pickOne = (useExcludes) => {
+      const { cond, p } = whereAndParams(filters, { exclude_ids: useExcludes ? exclude_ids : [] });
+      const where = cond.length ? `WHERE ${cond.join(" AND ")}` : "";
+      const sql = `
+        SELECT v.voter_id, n.fn AS first_name, n.ln AS last_name,
+               v.political_party AS party, n.city AS ra_city, n.zip AS ra_zip,
+               bp.phone_e164
+        FROM voters v
+        JOIN v_voters_addr_norm n ON n.voter_id = v.voter_id
+        ${baseJoin}
+        ${where}
+        ORDER BY RANDOM()
+        LIMIT 1
+      `;
+      return q1(sql, ...p);
+    };
+
+    let row = pickOne(true);
+    if (!row) row = pickOne(false); // fallback: ignore excludes once
+
     if (!row) return res.json({ ok:true, filters, empty:true });
     res.json({ ok:true, ...row, filters });
   } catch (e) {
