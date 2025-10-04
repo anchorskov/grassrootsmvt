@@ -1,247 +1,246 @@
 <!doctype html>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Volunteer Call</title>
+<title>Volunteer Hub</title>
 <style>
-  :root { --w: 720px; }
-  body { font-family: system-ui, sans-serif; margin: 1rem; }
-  main { max-width: var(--w); margin: 0 auto; }
-  .card { border: 1px solid #ddd; border-radius: 12px; padding: 1rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-  label { display:block; margin:.5rem 0 .25rem; }
-  input[type=text], select, textarea { width: 100%; padding:.6rem; border:1px solid #ccc; border-radius:8px; }
-  button { padding:.6rem 1rem; border-radius:8px; border:0; background:#0ea5e9; color:white; font-weight:600; cursor:pointer; }
-  button.secondary { background:#e2e8f0; color:#0f172a; }
-  button:disabled { opacity:.6; cursor:not-allowed; }
-  .row { display:flex; gap:.75rem; flex-wrap: wrap; }
-  .row > * { flex:1 1 200px; }
+  body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 880px; }
+  .card { border:1px solid #e5e7eb; border-radius: 12px; padding: 1rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  .row { display:flex; gap:1rem; flex-wrap: wrap; }
+  .row > * { flex:1 1 220px; }
+  label { display:block; margin:.4rem 0 .25rem; font-weight:600; }
+  select, input[type=number] { width:100%; padding:.6rem; border:1px solid #cbd5e1; border-radius:8px; }
   .muted { color:#64748b; }
-  .error { color:#b91c1c; }
-  .toolbar { display:flex; gap:.5rem; align-items:center; }
-  .titlebar { display:flex; justify-content:space-between; align-items:center; }
+  .btns { display:flex; gap:.75rem; flex-wrap: wrap; margin-top:.75rem; }
+  button { padding:.7rem 1.1rem; border-radius:10px; border:0; font-weight:700; cursor:pointer; }
+  button.primary { background:#0ea5e9; color:white; }
+  button.secondary { background:#e2e8f0; color:#0f172a; }
+  button[disabled] { opacity:.5; cursor:not-allowed; }
+  .chips { display:flex; gap:.5rem; flex-wrap: wrap; }
+  .chip { display:inline-flex; align-items:center; gap:.4rem; border:1px solid #cbd5e1; border-radius:999px; padding:.35rem .6rem; }
 </style>
 
-<main>
-  <h1 class="titlebar">
-    <span>Volunteer Call</span>
-    <span class="toolbar">
-      <button id="getNextBtn" style="padding:8px 12px;border-radius:6px;background:#6aa5ff;color:#fff;border:none;">Get Next</button>
-    </span>
-  </h1>
+<h1>Volunteer Hub</h1>
+<p class="muted">Pick your target set, then start calling or canvassing.</p>
 
-  <div class="card" id="whoami">Checking login…</div>
-
-  <div class="card" id="voterCard" hidden>
-    <div id="voterInfo" class="muted"></div>
-
-    <h3>Call outcome</h3>
-    <label for="outcome">Outcome</label>
-    <select id="outcome">
-      <option value="">— choose —</option>
-      <option>connected</option><option>vm</option><option>no_answer</option>
-      <option>wrong_number</option><option>refused</option><option>follow_up</option>
-    </select>
-
-    <div class="row">
-      <label><input type="checkbox" id="ok_callback"> OK to call back</label>
-      <label><input type="checkbox" id="requested_info"> Requested info</label>
-      <label><input type="checkbox" id="dnc"> Do not call</label>
+<div class="card">
+  <div class="row">
+    <div>
+      <label for="county">County</label>
+      <select id="county">
+        <option value="">— select —</option>
+      </select>
     </div>
-    <div class="row">
-      <div>
-        <label for="best_day">Best day</label>
-        <select id="best_day"><option value="">—</option>
-          <option>Mon</option><option>Tue</option><option>Wed</option>
-          <option>Thu</option><option>Fri</option><option>Sat</option><option>Sun</option>
-        </select>
-      </div>
-      <div>
-        <label for="best_time_window">Best time</label>
-        <select id="best_time_window"><option value="">—</option>
-          <option>Morning</option><option>Afternoon</option><option>Evening</option>
-          <option>6–8pm</option>
-        </select>
-      </div>
+    <div>
+      <label for="city">City (optional)</label>
+      <select id="city" disabled>
+        <option value="">— any —</option>
+      </select>
     </div>
-
-    <div class="row">
-      <label><input type="checkbox" id="optin_sms"> Opt-in SMS</label>
-      <label><input type="checkbox" id="optin_email"> Opt-in Email</label>
+    <div>
+      <label for="district_type">District type</label>
+      <select id="district_type" disabled>
+        <option value="">— select —</option>
+        <option value="house">House</option>
+        <option value="senate">Senate</option>
+      </select>
     </div>
-    <label for="email">Email address (if provided)</label>
-    <input type="text" id="email" placeholder="name@example.com"/>
-
-    <div class="row">
-      <label><input type="checkbox" id="wants_volunteer"> Wants to volunteer</label>
-      <label><input type="checkbox" id="share_insights_ok"> OK to share insights</label>
+    <div>
+      <label for="district">District</label>
+      <select id="district" disabled>
+        <option value="">— select —</option>
+      </select>
     </div>
-    <div class="row">
-      <label><input type="checkbox" id="for_term_limits"> For term limits</label>
-      <label><input type="checkbox" id="issue_public_lands"> Interested: public land sales</label>
-    </div>
-    <label for="comments">Comments</label>
-    <textarea id="comments" rows="3"></textarea>
-
-    <div class="row" style="margin-top:.75rem;">
-      <button id="saveBtn">Save & Next</button>
-      <button class="secondary" id="skipBtn" type="button">Skip</button>
-    </div>
-    <div id="msg" class="muted" style="margin-top:.5rem;"></div>
   </div>
 
-  <div class="card" id="empty" hidden>No eligible voters (or not logged in).</div>
-</main>
+  <div class="row" style="margin-top:.5rem;">
+    <div>
+      <label>Party</label>
+      <div class="chips">
+        <label class="chip"><input type="checkbox" id="p_r" value="Republican"> R</label>
+        <label class="chip"><input type="checkbox" id="p_d" value="Democratic"> D</label>
+        <label class="chip"><input type="checkbox" id="p_u" value="Unaffiliated"> Unaff/Minor</label>
+      </div>
+    </div>
+    <div>
+      <label for="limit">Number of voters</label>
+      <input id="limit" type="number" min="1" max="200" value="50" />
+    </div>
+  </div>
+
+  <div class="btns">
+    <button id="startCall" class="primary" disabled>Start Calls</button>
+    <button id="startCanvass" class="secondary" disabled>Start Canvass</button>
+    <span id="msg" class="muted"></span>
+  </div>
+</div>
 
 <script>
-// Use same-origin Pages Functions API path.
-const API = (p) => '/api' + p;
+(function(){
+  const selCounty = document.getElementById('county');
+  const selCity   = document.getElementById('city');
+  const selType   = document.getElementById('district_type');
+  const selDist   = document.getElementById('district');
+  const chkR      = document.getElementById('p_r');
+  const chkD      = document.getElementById('p_d');
+  const chkU      = document.getElementById('p_u');
+  const numLimit  = document.getElementById('limit');
+  const btnCalls  = document.getElementById('startCall');
+  const btnCanv   = document.getElementById('startCanvass');
+  const hint      = document.getElementById('msg');
 
-// ---- DOM refs ----
-const who = document.getElementById("whoami");
-const voterCard = document.getElementById("voterCard");
-const voterInfo = document.getElementById("voterInfo");
-const empty = document.getElementById("empty");
-const msg = document.getElementById("msg");
-const btnNext = document.getElementById("getNextBtn");
-const btnSave = document.getElementById("saveBtn");
-const btnSkip = document.getElementById("skipBtn");
-const outcomeSel = document.getElementById("outcome");
-
-// ---- helpers ----
-function setMsg(text, kind="muted") {
-  msg.className = kind;
-  msg.textContent = text || "";
-}
-
-async function jsonFetch(url, init = {}) {
-  const r = await fetch(url, {
-    credentials: "include",
-    ...init,
-    headers: { "content-type": "application/json", ...(init.headers || {}) },
-  });
-  if (r.status === 401) throw new Error("Unauthorized (Access required)");
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const ct = r.headers.get("content-type") || "";
-  return ct.includes("application/json") ? r.json() : r.text();
-}
-
-function currentFiltersFromURL() {
-  const params = new URLSearchParams(location.search);
-  const filters = {};
-  for (const [k, v] of params.entries()) filters[k] = v;
-  return filters;
-}
-
-function uiBusy(busy) {
-  btnNext.disabled = busy;
-  btnSave.disabled = busy || !outcomeSel.value;
-  btnSkip.disabled = busy;
-  outcomeSel.disabled = busy;
-}
-
-function renderVoter(v) {
-  voterCard.dataset.voter = v.voter_id || "";
-  const name = [v.first_name, v.last_name].filter(Boolean).join(" ");
-  voterInfo.innerHTML =
-    `<strong>${name || "—"}</strong><br/>` +
-    `${v.ra_city || ""} ${v.ra_zip || ""} • Party: ${v.party || ""}<br/>` +
-    `Phone: ${v.phone_e164 || "—"}`;
-}
-
-// ---- actions ----
-async function loadWho() {
-  try {
-    const j = await jsonFetch(API("/whoami"), { method:"GET" });
-    who.textContent = j && j.email ? ("Signed in as: " + j.email) : "Not signed in (Access required)";
-  } catch (e) {
-    who.innerHTML = `<span class="error">Unable to reach API: ${e.message}</span>`;
-  }
-}
-
-// Cursor-based "next": send after_id (the last voter you saw)
-async function nextVoter() {
-  try {
-    setMsg("Loading next voter…");
-    uiBusy(true);
-    const after_id = voterCard.dataset.voter || null;
-    const payload = { filters: currentFiltersFromURL(), after_id };
-    const v = await jsonFetch(API("/call/next"), { method:"POST", body: JSON.stringify(payload) });
-
-    if (!v || !v.voter_id) {
-      voterCard.hidden = true; empty.hidden = false; setMsg("No eligible voters.", "muted");
-      return;
+  // Load wy.json with a fallback path
+  async function fetchMeta() {
+    const tryPaths = ['/admin/wy.json', '/ui/admin/wy.json'];
+    let lastErr = null;
+    for (const p of tryPaths) {
+      try {
+        const r = await fetch(p, { cache: 'no-store' });
+        if (r.ok) return await r.json();
+        lastErr = new Error(`${p} -> HTTP ${r.status}`);
+      } catch (e) { lastErr = e; }
     }
-    empty.hidden = true; voterCard.hidden = false;
-    renderVoter(v);
-    setMsg("");
-  } catch (e) {
-    voterCard.hidden = true; empty.hidden = false;
-    setMsg(`Error: ${e.message}`, "error");
-  } finally {
-    uiBusy(false);
+    throw lastErr || new Error('wy.json not found');
   }
-}
 
-async function saveAndNext() {
-  const payload = {
-    voter_id: voterCard.dataset.voter || "",
-    outcome: outcomeSel.value,
-    ok_callback: +document.getElementById("ok_callback").checked,
-    requested_info: +document.getElementById("requested_info").checked,
-    dnc: +document.getElementById("dnc").checked,
-    best_day: document.getElementById("best_day").value || null,
-    best_time_window: document.getElementById("best_time_window").value || null,
-    optin_sms: +document.getElementById("optin_sms").checked,
-    optin_email: +document.getElementById("optin_email").checked,
-    email: document.getElementById("email").value || null,
-    wants_volunteer: +document.getElementById("wants_volunteer").checked,
-    share_insights_ok: +document.getElementById("share_insights_ok").checked,
-    for_term_limits: +document.getElementById("for_term_limits").checked,
-    issue_public_lands: +document.getElementById("issue_public_lands").checked,
-    comments: document.getElementById("comments").value || null
-  };
-  if (!payload.voter_id) { alert("No voter selected."); return; }
-  if (!payload.outcome) { alert("Choose an outcome."); return; }
-
-  try {
-    setMsg("Saving…");
-    uiBusy(true);
-    await jsonFetch(API("/call/complete"), { method:"POST", body: JSON.stringify(payload) });
-    // reset fields
-    outcomeSel.value = "";
-    document.getElementById("best_day").value = "";
-    document.getElementById("best_time_window").value = "";
-    document.getElementById("email").value = "";
-    document.getElementById("comments").value = "";
-    ["ok_callback","requested_info","dnc","optin_sms","optin_email",
-     "wants_volunteer","share_insights_ok","for_term_limits","issue_public_lands"]
-     .forEach(id => document.getElementById(id).checked = false);
-    setMsg("Saved.", "muted");
-    await nextVoter();
-  } catch (e) {
-    setMsg(`Save failed: ${e.message}`, "error");
-  } finally {
-    uiBusy(false);
+  function titleCase(s) {
+    return String(s||'').toLowerCase()
+      .split(/\s+/).map(w => w ? w[0].toUpperCase()+w.slice(1) : w).join(' ');
   }
-}
 
-// ---- events ----
-btnNext.addEventListener("click", nextVoter);
-btnSave.addEventListener("click", saveAndNext);
-btnSkip.addEventListener("click", nextVoter);
+  // Accept camelCase or snake_case shapes
+  function normalizeWy(json) {
+    const counties = json.counties || json.COUNTIES || [];
+    const citiesByCounty =
+      json.citiesByCounty || json.cities_by_county || {};
+    const senateByCounty =
+      json.senateByCounty || (json.districts_by_county && json.districts_by_county.senate) || {};
+    const houseByCounty  =
+      json.houseByCounty  || (json.districts_by_county && json.districts_by_county.house)  || {};
+    return { counties, citiesByCounty, senateByCounty, houseByCounty };
+  }
 
-// Disable Save until an outcome is chosen
-outcomeSel.addEventListener("change", () => {
-  btnSave.disabled = !outcomeSel.value;
-});
+  function fillSelect(sel, items, {placeholder='— select —', anyLabel=null}={}) {
+    const prev = sel.value;
+    sel.innerHTML = '';
+    const opt0 = document.createElement('option');
+    opt0.value = '';
+    opt0.textContent = anyLabel ?? placeholder;
+    sel.appendChild(opt0);
+    (items || []).forEach(v => {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = titleCase(v);
+      sel.appendChild(o);
+    });
+    if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
+  }
 
-// Keyboard shortcuts
-window.addEventListener("keydown", (e) => {
-  if (e.metaKey || e.ctrlKey || e.altKey) return;
-  const k = e.key.toLowerCase();
-  if (k === "n") { e.preventDefault(); nextVoter(); }
-  if (k === "s" && !btnSave.disabled) { e.preventDefault(); saveAndNext(); }
-});
+  function partiesFromUI() {
+    const out = [];
+    if (chkR && chkR.checked) out.push('R');
+    if (chkD && chkD.checked) out.push('D');
+    if (chkU && chkU.checked) out.push('U');
+    return out;
+  }
 
-// boot
-loadWho().then(nextVoter);
+  function canProceed() {
+    const county = selCounty.value || '';
+    const dtype  = selType.value || '';
+    const dist   = selDist.value || '';
+    if (dtype && !dist) return false;
+    return !!(county || (dtype && dist));
+  }
+
+  function updateButtons() {
+    const ok = canProceed();
+    btnCalls.disabled = !ok;
+    btnCanv.disabled  = !ok;
+    hint.textContent = ok ? '' : 'Select County/City and (optionally) District to continue.';
+  }
+
+  function persistFilters() {
+    const county = selCounty.value ? selCounty.value.toUpperCase() : null;
+    const city   = selCity.value   ? selCity.value.toUpperCase()   : null;
+
+    const district_type = selType.value || null;
+    let district = selDist.value || null;
+    if (district) {
+      const n = String(parseInt(district, 10));
+      district = n && !isNaN(n) ? n.padStart(2, '0') : district;
+    }
+
+    const mapParty = p => p === 'R' ? 'Republican'
+                      : p === 'D' ? 'Democratic'
+                      : p === 'U' ? 'Unaffiliated'
+                      : p;
+    const parties = partiesFromUI().map(mapParty);
+
+    const filters = {
+      county,
+      city,
+      district_type,
+      district,
+      parties,
+      limit: Math.max(1, Math.min(200, Number(numLimit.value || 50))),
+      require_phone: true // calls default; canvass can ignore
+    };
+    sessionStorage.setItem('vol.filters', JSON.stringify(filters));
+    return filters;
+  }
+
+  function go(path) {
+    const f = persistFilters();
+    const u = new URL(path, location.origin);
+    if (f.county) u.searchParams.set('county', f.county);
+    if (f.city)   u.searchParams.set('city', f.city);
+    if (f.district_type) u.searchParams.set('district_type', f.district_type);
+    if (f.district)      u.searchParams.set('district', f.district);
+    f.parties?.forEach(p => u.searchParams.append('parties', p));
+    if (f.limit) u.searchParams.set('limit', String(f.limit));
+    location.href = u.toString();
+  }
+
+  [selCounty, selCity, selType, selDist, chkR, chkD, chkU, numLimit].forEach(el =>
+    el && el.addEventListener('change', updateButtons)
+  );
+  document.getElementById('startCall').addEventListener('click', () => go('/call.html'));
+  document.getElementById('startCanvass').addEventListener('click',  () => go('/canvass/'));
+
+  fetchMeta().then(raw => {
+    const wy = normalizeWy(raw);
+
+    fillSelect(selCounty, wy.counties);
+
+    selCounty.addEventListener('change', () => {
+      const cty = selCounty.value || '';
+      const cities = (wy.citiesByCounty[cty] || []).slice().sort();
+      fillSelect(selCity, cities, { placeholder: '— any —', anyLabel: '— any —' });
+      selCity.disabled = false;
+
+      selType.value = '';
+      selType.disabled = false;
+      fillSelect(selDist, [], { placeholder: '— select —' });
+      selDist.disabled = true;
+      updateButtons();
+    });
+
+    selType.addEventListener('change', () => {
+      const cty = selCounty.value || '';
+      const dtype = selType.value;
+      let dists = [];
+      if (dtype === 'house')   dists = wy.houseByCounty[cty]  || [];
+      if (dtype === 'senate')  dists = wy.senateByCounty[cty] || [];
+      fillSelect(selDist, dists);
+      selDist.disabled = !dists.length;
+      updateButtons();
+    });
+
+    selCity.addEventListener('change', updateButtons);
+
+    updateButtons();
+  }).catch(err => {
+    console.error('Failed to load wy.json', err);
+    hint.textContent = 'Failed to load county/city metadata.';
+  });
+})();
 </script>
