@@ -419,6 +419,31 @@ docs/API.md
 
 MD
 
+## Pages Functions verification
+
+After these changes, Cloudflare Pages should detect `ui/functions` and attach a Pages Functions bundle to deployments.
+
+Quick local verification:
+
+```bash
+npm run build:functions
+npm run deploy:pages
+npm run verify:functions
+```
+
+The final command should print `true` when the deployment includes functions. Then try:
+
+```bash
+curl -i https://<preview>.grassrootsmvt.pages.dev/api/healthz
+```
+
+You should receive JSON from the function instead of the static index.html.
+
+Verification note:
+
+Cloudflare Pages will show a banner prompting you to "include a /functions directory" until the first deployment that includes a functions bundle. After the workflow above runs successfully you should see the function routes listed in the Pages project settings and `npm run verify:functions` will return `true`.
+
+
 3) docs
 
 mkdir -p docs

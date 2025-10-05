@@ -26,9 +26,17 @@ node_modules/
 ui/_worker.dev.js
 _worker.js
 _worker.bundle
+_worker.bundle*
 ui/_worker.js
+ui/_worker*.js
 dist/_worker*
- # Local temp files used during development
+# Local temp files used during development
  tmp/
  .dev.vars
  /home/anchor/projects/voterdata/
+
+# Ignore generated worker artifacts that may shadow Pages Functions
+_worker.bundle*
+_worker.js
+ui/_worker*.js
+dist/_worker*

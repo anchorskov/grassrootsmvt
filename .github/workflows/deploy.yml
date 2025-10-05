@@ -1,3 +1,84 @@
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install deps
+        run: npm ci
+      - name: Build and verify functions
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          npm run build:functions
+          if [ ! -d "ui/.wrangler" ]; then
+            echo "❌ No functions bundle detected (ui/.wrangler missing). Aborting.";
+            ls -R ui || true
+            exit 1
+          fi
+          echo "✅ functions bundle present"
+      - name: Deploy to Cloudflare Pages
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: npm run deploy:pages
+      - name: Verify deployment includes functions
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          PROJECT: grassrootsmvt
+        run: |
+          RESULT=$(npm run verify:functions)
+          if [ "$RESULT" != "true" ]; then
+            echo "❌ Functions were not attached in the latest deployment.";
+            exit 1
+          fi
+          echo "✅ Functions active in deployment."
+name: Deploy to Cloudflare Pages
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Build and verify functions
+        run: |
+          npm run build:functions
+          if [ ! -d "ui/.wrangler/tmp/functions" ]; then
+            echo "❌ No functions bundle detected. Aborting.";
+            ls -R ui || true;
+            exit 1;
+          fi
+      - name: Deploy to Cloudflare Pages
+        run: npm run deploy:pages
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          PROJECT: grassrootsmvt
+      - name: Verify deployment includes functions
+        run: |
+          RESULT=$(npm run verify:functions)
+          echo "API returned: $RESULT"
+          if [ "${RESULT//\"/}" != "true" ]; then
+            echo "❌ Functions were not attached in the latest deployment.";
+            exit 1;
+          fi
+          echo "✅ Functions active in deployment."
 name: Deploy Pages
 
 on:
