@@ -19,6 +19,3 @@ DEV_EMAIL = "dev@local"
 pattern = "api.grassrootsmvt.org/*"
 zone_name = "grassrootsmvt.org"
 
-[[routes]]
-pattern = "volunteers.grassrootsmvt.org/api/*"
-zone_name = "grassrootsmvt.org"
