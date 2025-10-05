@@ -24,6 +24,10 @@ node_modules/
 .venv/
 *.log
 ui/_worker.dev.js
+_worker.js
+_worker.bundle
+ui/_worker.js
+dist/_worker*
  # Local temp files used during development
  tmp/
  .dev.vars

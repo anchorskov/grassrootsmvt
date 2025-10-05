@@ -7,4 +7,9 @@
   "dependencies": {
     "jose": "^6.1.0"
   }
+  ,
+  "scripts": {
+    "build:functions": "npx wrangler@4.42.0 pages functions build ./ui/functions && ls -R ui/.wrangler/tmp || true",
+    "verify:api": "echo 'replace <PREVIEW> with preview host' && curl -I https://<PREVIEW>.grassrootsmvt.pages.dev/api/healthz || true"
+  }
 }
