@@ -1,3 +1,9 @@
 name = "grassrootsmvt"
 pages_build_output_dir = "./ui"
 compatibility_date = "2025-09-24"
+
+[build]
+command = ""
+
+[pages]
+functions = "./ui/functions"
