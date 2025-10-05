@@ -1,4 +1,4 @@
-name: Deploy to Cloudflare Pages
+name: Deploy Pages (build + verify functions)
 
 on:
   push:
@@ -12,93 +12,37 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - name: Install deps
+      - name: Install dependencies
         run: npm ci
-      - name: Build and verify functions
-        env:
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      - name: Build Pages Functions (wrangler)
         run: |
-          npm run build:functions
+          npx wrangler@4.42.0 pages functions build ./ui/functions --outdir ui/.wrangler
+      - name: Verify local functions bundle exists
+        run: |
           if [ ! -d "ui/.wrangler" ]; then
             echo "❌ No functions bundle detected (ui/.wrangler missing). Aborting.";
-            ls -R ui || true
-            exit 1
-          fi
-          echo "✅ functions bundle present"
-      - name: Deploy to Cloudflare Pages
-        env:
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-        run: npm run deploy:pages
-      - name: Verify deployment includes functions
-        env:
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          PROJECT: grassrootsmvt
-        run: |
-          RESULT=$(npm run verify:functions)
-          if [ "$RESULT" != "true" ]; then
-            echo "❌ Functions were not attached in the latest deployment.";
-            exit 1
-          fi
-          echo "✅ Functions active in deployment."
-name: Deploy to Cloudflare Pages
-
-on:
-  push:
-    branches: [ main ]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - run: npm ci
-      - name: Build and verify functions
-        run: |
-          npm run build:functions
-          if [ ! -d "ui/.wrangler/tmp/functions" ]; then
-            echo "❌ No functions bundle detected. Aborting.";
             ls -R ui || true;
             exit 1;
           fi
+          echo "✅ Local functions bundle present"
       - name: Deploy to Cloudflare Pages
-        run: npm run deploy:pages
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          npx wrangler@4.42.0 pages deploy ./ui --project-name=grassrootsmvt --commit-dirty=true
+      - name: Verify deployment includes functions via Cloudflare API
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           PROJECT: grassrootsmvt
-      - name: Verify deployment includes functions
         run: |
-          RESULT=$(npm run verify:functions)
-          echo "API returned: $RESULT"
-          if [ "${RESULT//\"/}" != "true" ]; then
-            echo "❌ Functions were not attached in the latest deployment.";
+          # Query most recent deployment and assert uses_functions == true
+          DEP_JSON=$(curl -sS -H "Authorization: Bearer $CF_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1")
+          echo "$DEP_JSON" | jq '.result[0] | {id: .id, created_on: .created_on, uses_functions: .uses_functions, artifacts: .artifacts}'
+          USES=$(echo "$DEP_JSON" | jq -r '.result[0].uses_functions')
+          if [ "$USES" != "true" ]; then
+            echo "❌ Deployment does not include a Functions bundle (uses_functions=$USES). Aborting.";
             exit 1;
           fi
-          echo "✅ Functions active in deployment."
-name: Deploy Pages
-
-on:
-  push:
-    branches: [ main ]
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-      - name: Install wrangler
-        run: npm install -g wrangler@4.42.0
-      - name: Build functions
-        run: npx wrangler@4.42.0 pages functions build ./ui/functions
-      - name: Deploy to Pages
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: npx wrangler@4.42.0 pages deploy ./ui --project-name=grassrootsmvt --commit-dirty=true
+          echo "✅ Deployment includes Functions (uses_functions=true)"
