@@ -1,3 +1,15 @@
 name = "grassrootsmvt"
-compatibility_date = "2025-09-24"
-pages_build_output_dir = "./ui"
+compatibility_date = "2025-09-30"
+
+# ✅ New syntax as of Wrangler 4.40+
+pages_build_output_dir = "ui"
+
+# Optional global vars
+[vars]
+ENVIRONMENT = "production"
+
+# D1 database binding for Pages Functions
+[[d1_databases]]
+binding = "DB"
+database_name = "wy"
+database_id = "4b4227f1-bf30-4fcf-8a08-6967b536a5ab"
