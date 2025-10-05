@@ -40,3 +40,7 @@ _worker.bundle*
 _worker.js
 ui/_worker*.js
 dist/_worker*
+# Prevent accidental worker conflicts
+_worker.js
+_worker.bundle*
+dist/_worker*
