@@ -11,6 +11,7 @@
   "scripts": {
     "build:functions": "wrangler pages functions build ./ui/functions && ls -R ui/.wrangler/tmp",
     "deploy:pages": "npx wrangler pages deploy ./ui --project-name=grassrootsmvt --commit-dirty=true",
-    "verify:functions": "curl -sS -H 'Authorization: Bearer $CF_API_TOKEN' https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1 | jq '.result[0].uses_functions'"
+    "verify:functions": "curl -sS -H 'Authorization: Bearer $CF_API_TOKEN' https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1 | jq '.result[0].uses_functions'",
+    "deploy:check": "bash ./scripts/deploy_and_check.sh"
   }
 }
