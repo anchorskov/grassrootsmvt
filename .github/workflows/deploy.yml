@@ -1,6 +1,6 @@
 name: Deploy Pages (build + verify functions)
 
-on:
+
   push:
     branches: [ main ]
 
