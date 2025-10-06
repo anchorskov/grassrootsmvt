@@ -1,4 +1,19 @@
-// Universal, safe CORS helper (kept in the worker entry for simplicity)
+function isAllowedOrigin(origin: string | null): boolean {
+  if (!origin) return false;
+
+  const allowed = [
+    "https://volunteers.grassrootsmvt.org",
+    "https://grassrootsmvt.pages.dev",
+  ];
+
+  // Allow any localhost or 127.0.0.1 origin for dev
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
+    return true;
+  }
+
+  return allowed.includes(origin);
+}
+
 function getCorsHeaders(origin: string) {
   return {
     "Access-Control-Allow-Origin": origin,
@@ -11,19 +26,27 @@ function getCorsHeaders(origin: string) {
 }
 
 export default {
-  async fetch(request: Request, env: any) {
-    const origin = request.headers.get("Origin") || "*";
+  async fetch(request: Request, env: any, ctx: any): Promise<Response> {
+    const origin = request.headers.get("Origin") || "";
+    const url = new URL(request.url);
 
-    // Handle preflight OPTIONS requests
+    // 🧩 Handle preflight OPTIONS requests
     if (request.method === "OPTIONS") {
+      if (!isAllowedOrigin(origin)) {
+        return new Response("CORS not allowed", { status: 403 });
+      }
       return new Response(null, {
         status: 204,
         headers: getCorsHeaders(origin),
       });
     }
 
-    const url = new URL(request.url);
+    // 🛑 Reject disallowed origins for other methods
+    if (origin && !isAllowedOrigin(origin)) {
+      return new Response("Forbidden: Origin not allowed", { status: 403 });
+    }
 
+    // ✅ /api/ping — basic health check
     if (url.pathname === "/api/ping") {
       return new Response(JSON.stringify({ ok: true }), {
         headers: {
@@ -33,17 +56,23 @@ export default {
       });
     }
 
-    if (url.pathname === "/api/whoami") {
-      return new Response(JSON.stringify({ user: "volunteer", authenticated: true }), {
-        headers: {
-          ...getCorsHeaders(origin),
-          "Content-Type": "application/json",
-        },
-      });
+    // ✅ Example: /api/call/next
+    if (url.pathname === "/api/call/next" && request.method === "POST") {
+      const body = await request.json().catch(() => ({}));
+      return new Response(
+        JSON.stringify({ ok: true, next: "voter", received: body }),
+        {
+          headers: {
+            ...getCorsHeaders(origin),
+            "Content-Type": "application/json",
+          },
+        }
+      );
     }
 
-    if (url.pathname === "/api/call/next" && request.method === "POST") {
-      return new Response(JSON.stringify({ ok: true, next: "voter" }), {
+    // ✅ Example: /api/whoami
+    if (url.pathname === "/api/whoami") {
+      return new Response(JSON.stringify({ user: "volunteer" }), {
         headers: {
           ...getCorsHeaders(origin),
           "Content-Type": "application/json",
