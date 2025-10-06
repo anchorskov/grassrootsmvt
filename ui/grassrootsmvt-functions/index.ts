@@ -72,10 +72,24 @@ export default {
 
     // ✅ Example: /api/whoami
     if (url.pathname === "/api/whoami") {
-      return new Response(JSON.stringify({ user: "volunteer" }), {
+      const email = request.headers.get("Cf-Access-Authenticated-User-Email");
+
+      if (!email) {
+        return new Response(JSON.stringify({ error: "Not signed in" }), {
+          status: 401,
+          headers: {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": env?.ALLOW_ORIGIN || origin,
+            "Access-Control-Allow-Credentials": "true",
+          },
+        });
+      }
+
+      return new Response(JSON.stringify({ ok: true, email }), {
         headers: {
-          ...getCorsHeaders(origin),
           "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": env?.ALLOW_ORIGIN || origin,
+          "Access-Control-Allow-Credentials": "true",
         },
       });
     }

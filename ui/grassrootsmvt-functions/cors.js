@@ -42,9 +42,18 @@ export function handleOptions(request, env) {
     return new Response("CORS not allowed", { status: 403 });
   }
 
+  // Explicitly return headers suitable for credentialed requests and preflight
+  const allowedOrigin = env?.ALLOW_ORIGIN || origin;
+
   return new Response(null, {
     status: 204,
-    headers: withCORS(env, origin),
+    headers: {
+      "Access-Control-Allow-Origin": allowedOrigin,
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, Pragma, Cache-Control",
+      "Access-Control-Allow-Credentials": "true",
+      "Access-Control-Max-Age": "86400",
+    },
   });
 }
 
