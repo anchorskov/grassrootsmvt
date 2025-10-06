@@ -18,7 +18,17 @@ jobs:
       - name: Install deterministic dependencies
         run: |
           echo "📦 Installing dependencies in ui/_functions"
-          npm ci --prefix ui/_functions --omit=dev --no-audit --no-fund
+          if [[ -f "ui/_functions/package.json" ]]; then
+            if [[ -f "ui/_functions/package-lock.json" ]]; then
+              echo "Found package-lock.json — running npm ci"
+              npm ci --prefix ui/_functions --omit=dev --no-audit --no-fund
+            else
+              echo "No lockfile found — using npm install"
+              npm install --prefix ui/_functions --omit=dev --no-audit --no-fund
+            fi
+          else
+            echo "⚠️ ui/_functions/package.json not found — skipping function dependency install"
+          fi
 
       - name: Debug list ui/_functions
         run: |
