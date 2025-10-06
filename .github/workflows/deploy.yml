@@ -17,10 +17,11 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      # 🧠 Build the Functions worker (grassrootsmvt-functions)
-      - name: Build Cloudflare Functions
+      # 🧠 Build the Cloudflare Worker (grassrootsmvt-functions) using wrangler deploy (dry-run)
+      - name: Build Cloudflare Worker (grassrootsmvt-functions)
+        working-directory: ./ui/grassrootsmvt-functions
         run: |
-          npx wrangler@4.42.0 pages functions build ./ui/grassrootsmvt-functions --outdir ui/.wrangler
+          npx wrangler@4.42.0 deploy --outdir ../../ui/.wrangler --dry-run --minify
 
       - name: Verify functions bundle exists
         run: |
