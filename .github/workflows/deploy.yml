@@ -22,12 +22,12 @@ jobs:
           npm install --omit=dev --no-audit --no-fund
 
       # 🚀 Deploy to Cloudflare Pages
-        - name: Debug: list ui directory
-          run: |
-            echo "--- ui top-level ---"
-            ls -la ui || true
-            echo "--- ui recursive ---"
-            ls -R ui | sed -n '1,400p' || true
+      - name: Debug: list ui directory
+        run: |
+          echo "--- ui top-level ---"
+          ls -la ui || true
+          echo "--- ui recursive ---"
+          ls -R ui | sed -n '1,400p' || true
 
       - name: Deploy to Cloudflare Pages
         env:
