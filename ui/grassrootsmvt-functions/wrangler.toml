@@ -22,3 +22,8 @@ ALLOW_ORIGIN = "https://grassrootsmvt.pages.dev"
 
 [env.local.vars]
 ALLOW_ORIGIN = "http://localhost:8787"
+
+# Optional route mapping for Pages domain -> Worker (used by wrangler deploy and route checks)
+routes = [
+	{ pattern = "volunteers.grassrootsmvt.org/api/*", zone_name = "grassrootsmvt.org" }
+]
