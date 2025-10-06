@@ -1,6 +1,14 @@
-// _utils/cors.js
-export function getCorsHeaders(origin, env) {
-  const allowedOrigin = env?.ALLOW_ORIGIN || 'https://volunteers.grassrootsmvt.org';
+// ui/functions/_utils/cors.js
+export function getAllowedOrigin(env, origin) {
+  const allowed = env?.ALLOW_ORIGIN?.trim() || 'https://volunteers.grassrootsmvt.org';
+  if (origin && (origin === allowed || /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin))) {
+    return origin;
+  }
+  return allowed;
+}
+
+export function getCorsHeaders(env, origin) {
+  const allowedOrigin = getAllowedOrigin(env, origin);
   return {
     'Access-Control-Allow-Origin': allowedOrigin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
@@ -10,19 +18,8 @@ export function getCorsHeaders(origin, env) {
   };
 }
 
-export function isAllowedOrigin(origin, env) {
-  const allowed = env?.ALLOW_ORIGIN || 'https://volunteers.grassrootsmvt.org';
-  return origin === allowed;
-}
-
 export function handleOptions(request, env) {
-  const origin = request.headers.get('Origin') || '';
-  if (!isAllowedOrigin(origin, env)) {
-    return new Response('Forbidden', { status: 403 });
-  }
-
-  return new Response(null, {
-    status: 204,
-    headers: getCorsHeaders(origin, env),
-  });
+  const origin = request.headers.get('Origin');
+  const headers = getCorsHeaders(env, origin);
+  return new Response(null, { status: 204, headers });
 }

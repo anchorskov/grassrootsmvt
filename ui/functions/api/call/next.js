@@ -1,29 +1,26 @@
 // ui/functions/api/call/next.js
-import { handleOptions, getCorsHeaders, isAllowedOrigin } from '../../_utils/cors.js';
+import { handleOptions, getCorsHeaders } from '../../_utils/cors.js';
 import { verifyAccessJWT } from '../../_utils/verifyAccessJWT.js';
 
-export async function onRequestOptions(context) {
-  return handleOptions(context.request);
+export async function onRequestOptions({ request, env }) {
+  return handleOptions(request, env);
 }
 
-export async function onRequestPost(context) {
-  const { request, env } = context;
-  const origin = request.headers.get('Origin') || '*';
-
-  if (!isAllowedOrigin(origin)) {
-    return new Response('CORS not allowed', { status: 403 });
-  }
+export async function onRequestPost({ request, env }) {
+  const origin = request.headers.get('Origin');
+  const cors = getCorsHeaders(env, origin);
 
   const verification = await verifyAccessJWT(request, env);
   if (!verification.valid) {
-    return new Response(JSON.stringify({ ok: false, error: 'Unauthorized' }), {
+    return new Response(JSON.stringify({ ok: false, error: verification.error }), {
       status: 401,
-      headers: { ...getCorsHeaders(origin), 'Content-Type': 'application/json' },
+      headers: { ...cors, 'Content-Type': 'application/json' },
     });
   }
 
-  // Stub data for testing
-  const sampleNext = {
+  // Example stubbed voter data
+  const body = await request.json().catch(() => ({}));
+  const voter = {
     ok: true,
     voter_id: 'TEST123',
     first_name: 'Jane',
@@ -31,9 +28,11 @@ export async function onRequestPost(context) {
     city: 'Casper',
     zip: '82601',
     phone_e164: '+13075551234',
+    received: body,
+    user: verification.email,
   };
 
-  return new Response(JSON.stringify(sampleNext), {
-    headers: { ...getCorsHeaders(origin), 'Content-Type': 'application/json' },
+  return new Response(JSON.stringify(voter), {
+    headers: { ...cors, 'Content-Type': 'application/json' },
   });
 }

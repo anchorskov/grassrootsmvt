@@ -3,9 +3,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 /**
  * Verifies a Cloudflare Access JWT (from header or cookie).
- * @param {Request} request
- * @param {Record<string,string>} env
- * @returns {Promise<{valid: boolean, email?: string, payload?: object, error?: string}>}
+ * Returns a consistent structure: { valid, email, payload, error }
  */
 export async function verifyAccessJWT(request, env) {
   const token = getAccessJWT(request);
@@ -13,30 +11,23 @@ export async function verifyAccessJWT(request, env) {
     return { valid: false, error: 'Missing Access token' };
   }
 
-  // Resolve team domain (either TEAM_DOMAIN or CF_ACCESS_TEAM)
   const teamDomain =
     env.TEAM_DOMAIN ||
     (env.CF_ACCESS_TEAM ? `https://${env.CF_ACCESS_TEAM}.cloudflareaccess.com` : null);
+  const aud = env.POLICY_AUD;
 
-  if (!teamDomain || !env.POLICY_AUD) {
-    return {
-      valid: false,
-      error: 'Missing TEAM_DOMAIN or POLICY_AUD environment variable',
-    };
+  if (!teamDomain || !aud) {
+    return { valid: false, error: 'Missing TEAM_DOMAIN or POLICY_AUD environment variable' };
   }
 
   try {
-    // Create remote JWKS endpoint
     const JWKS = createRemoteJWKSet(new URL(`${teamDomain}/cdn-cgi/access/certs`));
-
-    // Verify the token’s signature, audience, and issuer
     const { payload } = await jwtVerify(token, JWKS, {
       issuer: teamDomain,
-      audience: env.POLICY_AUD,
+      audience: aud,
     });
 
     const email = payload.email || null;
-
     return { valid: true, email, payload };
   } catch (err) {
     console.error('verifyAccessJWT: verification failed', err);
@@ -45,7 +36,7 @@ export async function verifyAccessJWT(request, env) {
 }
 
 /**
- * Attempts to extract the Access token from header or cookie.
+ * Extracts Access JWT from Cf-Access-Jwt-Assertion header or CF_Authorization cookie.
  */
 function getAccessJWT(request) {
   const headerToken = request.headers.get('Cf-Access-Jwt-Assertion');
@@ -54,7 +45,7 @@ function getAccessJWT(request) {
 }
 
 /**
- * Parses a named cookie from the request headers.
+ * Simple cookie parser.
  */
 function getCookie(request, name) {
   const cookie = request.headers.get('cookie');
