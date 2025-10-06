@@ -14,14 +14,14 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install dependencies
-        run: npm install
+      - name: Install worker dependencies
+        working-directory: ./ui/grassrootsmvt-functions
+        run: npm ci || npm install
 
-      # 🧠 Build the Cloudflare Worker (grassrootsmvt-functions) using wrangler deploy (dry-run)
       - name: Build Cloudflare Worker (grassrootsmvt-functions)
         working-directory: ./ui/grassrootsmvt-functions
         run: |
-          npx wrangler@4.42.0 deploy --outdir ../../ui/.wrangler --dry-run --minify
+          npx wrangler@4.42.0 deploy --dry-run --minify --outdir ../../ui/.wrangler
 
       - name: Verify functions bundle exists
         run: |
@@ -32,7 +32,6 @@ jobs:
           fi
           echo "✅ Local functions bundle present"
 
-      # 🚀 Deploy to Cloudflare Pages
       - name: Deploy to Cloudflare Pages
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -40,11 +39,9 @@ jobs:
         run: |
           npx wrangler@4.42.0 pages deploy ./ui \
             --project-name=grassrootsmvt \
-            --branch=main \
             --commit-dirty=true
 
-      # ✅ Verify deployment has functions (optional)
-      - name: Verify deployment includes functions via Cloudflare API
+      - name: Verify deployment includes functions
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -55,7 +52,7 @@ jobs:
           echo "$DEP_JSON" | jq '.result[0] | {id: .id, created_on: .created_on, uses_functions: .uses_functions, url: .url}'
           USES=$(echo "$DEP_JSON" | jq -r '.result[0].uses_functions')
           if [ "$USES" != "true" ]; then
-            echo "❌ Deployment does not include a Functions bundle (uses_functions=$USES). Dumping full response:";
+            echo "❌ Deployment missing Functions (uses_functions=$USES). Dumping full response:";
             echo "$DEP_JSON" | jq . || echo "$DEP_JSON";
             exit 1;
           fi
