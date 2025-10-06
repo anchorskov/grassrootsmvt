@@ -1,4 +1,4 @@
-// cors.js — shared middleware for consistent CORS handling
+// cors.js — shared CORS utilities for Cloudflare Workers
 
 export function isAllowedOrigin(origin) {
   if (!origin) return false;
@@ -27,42 +27,27 @@ export function getCorsHeaders(origin) {
   };
 }
 
-export function withCORS(env, requestOrigin) {
-  // prefer an explicit env var when provided (wrangler.toml [vars])
-  const configured = env?.ALLOW_ORIGIN;
-  const origin = configured || requestOrigin;
-
-  return getCorsHeaders(origin);
-}
-
 export function handleOptions(request, env) {
   const origin = request.headers.get("Origin");
+  const allowedOrigin = env?.ALLOW_ORIGIN || (isAllowedOrigin(origin) ? origin : null);
 
-  if (!isAllowedOrigin(origin) && !(env && env.ALLOW_ORIGIN)) {
+  if (!allowedOrigin) {
     return new Response("CORS not allowed", { status: 403 });
   }
 
-  // Explicitly return headers suitable for credentialed requests and preflight
-  const allowedOrigin = env?.ALLOW_ORIGIN || origin;
-
   return new Response(null, {
     status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": allowedOrigin,
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization, Pragma, Cache-Control",
-      "Access-Control-Allow-Credentials": "true",
-      "Access-Control-Max-Age": "86400",
-    },
+    headers: getCorsHeaders(allowedOrigin),
   });
 }
 
-export function jsonResponse(body, env, requestOrigin, status = 200) {
+export function jsonResponse(body, env, origin, status = 200) {
+  const allowedOrigin = env?.ALLOW_ORIGIN || origin;
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "Content-Type": "application/json",
-      ...withCORS(env, requestOrigin),
+      ...getCorsHeaders(allowedOrigin),
     },
   });
 }
