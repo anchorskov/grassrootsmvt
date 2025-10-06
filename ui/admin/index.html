@@ -33,7 +33,7 @@
   </div>
 
   <script>
-    const api = (p, opts) => fetch(p, opts).then(r => {
+  const api = (p, opts) => fetch('https://grassrootsmvt-functions.anchorskov.workers.dev' + p, opts).then(r => {
       if (!r.ok) throw new Error("HTTP " + r.status);
       return r.json();
     });

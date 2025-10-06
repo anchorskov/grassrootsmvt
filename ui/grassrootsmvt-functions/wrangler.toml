@@ -1,0 +1,24 @@
+name = "grassrootsmvt-functions"
+main = "index.ts"
+compatibility_date = "2025-09-30"
+workers_dev = true
+
+# This disables any static asset directory expectation
+# and makes it a pure Worker project.
+[build]
+upload.format = "modules"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wy"
+database_id = "4b4227f1-bf30-4fcf-8a08-6967b536a5ab"
+
+[vars]
+ENVIRONMENT = "production"
+ALLOW_ORIGIN = "https://volunteers.grassrootsmvt.org"
+
+[env.preview.vars]
+ALLOW_ORIGIN = "https://grassrootsmvt.pages.dev"
+
+[env.local.vars]
+ALLOW_ORIGIN = "http://localhost:8787"

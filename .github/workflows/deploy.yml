@@ -42,7 +42,8 @@ jobs:
           echo "$DEP_JSON" | jq '.result[0] | {id: .id, created_on: .created_on, uses_functions: .uses_functions, artifacts: .artifacts}'
           USES=$(echo "$DEP_JSON" | jq -r '.result[0].uses_functions')
           if [ "$USES" != "true" ]; then
-            echo "❌ Deployment does not include a Functions bundle (uses_functions=$USES). Aborting.";
+            echo "❌ Deployment does not include a Functions bundle (uses_functions=$USES). Dumping deployment JSON for debugging:";
+            echo "$DEP_JSON" | jq . || echo "$DEP_JSON";
             exit 1;
           fi
           echo "✅ Deployment includes Functions (uses_functions=true)"
