@@ -18,7 +18,8 @@ jobs:
       - name: Install Functions dependencies
         run: |
           cd ui/functions
-          npm ci --omit=dev
+          # use npm install when there's no package-lock.json present
+          npm install --omit=dev --no-audit --no-fund
 
       # 🚀 Deploy to Cloudflare Pages
       - name: Deploy to Cloudflare Pages
