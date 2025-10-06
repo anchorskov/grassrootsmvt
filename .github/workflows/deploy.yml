@@ -16,10 +16,25 @@ jobs:
           node-version: 20
 
       - name: Install Functions dependencies
+        shell: bash
         run: |
-          cd ui/functions
-          # use npm install when there's no package-lock.json present
-          npm install --omit=dev --no-audit --no-fund
+          set -euo pipefail
+          FUNCTIONS_DIR="ui/functions"
+
+          if [[ -f "${FUNCTIONS_DIR}/package.json" ]]; then
+            echo "📦 Installing dependencies in ${FUNCTIONS_DIR}"
+            cd "${FUNCTIONS_DIR}"
+
+            if [[ -f package-lock.json ]]; then
+              echo "Using npm ci (lockfile detected)"
+              npm ci --omit=dev --no-audit --no-fund
+            else
+              echo "No lockfile found — using npm install"
+              npm install --omit=dev --no-audit --no-fund
+            fi
+          else
+            echo "⚠️ No ${FUNCTIONS_DIR}/package.json found — skipping Functions dependency install"
+          fi
 
       - name: "Debug: list ui directory"
         run: |
