@@ -15,33 +15,15 @@ jobs:
         with:
           node-version: 20
 
-      - name: Install Functions dependencies
-        shell: bash
+      - name: Install deterministic dependencies
         run: |
-          set -euo pipefail
-          FUNCTIONS_DIR="ui/functions"
+          echo "📦 Installing dependencies in ui/_functions"
+          npm ci --prefix ui/_functions --omit=dev --no-audit --no-fund
 
-          if [[ -f "${FUNCTIONS_DIR}/package.json" ]]; then
-            echo "📦 Installing dependencies in ${FUNCTIONS_DIR}"
-            cd "${FUNCTIONS_DIR}"
-
-            if [[ -f package-lock.json ]]; then
-              echo "Using npm ci (lockfile detected)"
-              npm ci --omit=dev --no-audit --no-fund
-            else
-              echo "No lockfile found — using npm install"
-              npm install --omit=dev --no-audit --no-fund
-            fi
-          else
-            echo "⚠️ No ${FUNCTIONS_DIR}/package.json found — skipping Functions dependency install"
-          fi
-
-      - name: "Debug: list ui directory"
+      - name: Debug list ui/_functions
         run: |
-          echo "--- ui top-level ---"
-          ls -la ui || true
-          echo "--- ui recursive ---"
-          ls -R ui | sed -n '1,400p' || true
+          echo "Listing Cloudflare functions directory:"
+          ls -R ui/_functions || echo "Functions directory missing!"
 
       - name: Deploy to Cloudflare Pages
         env:
@@ -49,20 +31,33 @@ jobs:
         run: |
           npx wrangler@4.42.0 pages deploy ./ui \
             --project-name=grassrootsmvt \
-            --branch=main \
+            --functions ./ui/_functions \
             --commit-dirty=true
 
-      - name: Verify deployment includes functions via Cloudflare API
+      - name: Verify deployment includes functions
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PROJECT: grassrootsmvt
         run: |
-          DEP_JSON=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1")
+          DEP_JSON=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1")
           echo "$DEP_JSON" | jq '.result[0] | {id: .id, uses_functions: .uses_functions, url: .url}'
           USES=$(echo "$DEP_JSON" | jq -r '.result[0].uses_functions')
           if [ "$USES" != "true" ]; then
             echo "❌ Deployment missing Functions (uses_functions=$USES)"
             exit 1
           fi
-          echo "✅ Deployment includes Functions (uses_functions=true)"
+          echo "✅ Functions detected."
+
+      - name: Verify deployment health
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: grassrootsmvt
+        run: |
+          DEPLOY_URL=$(curl -sSf -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1" \
+            | jq -r '.result[0].url')
+          echo "Checking $DEPLOY_URL/api/ping..."
+          curl -sSf "$DEPLOY_URL/api/ping" || (echo "❌ Failed to reach $DEPLOY_URL/api/ping" && exit 1)
