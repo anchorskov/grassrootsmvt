@@ -22,6 +22,33 @@ export function withCORS(env, requestOrigin) {
   };
 }
 
+// New simple export expected by the user: corsHeaders(origin)
+export function corsHeaders(origin) {
+  const allowedOrigins = [
+    "https://volunteers.grassrootsmvt.org",
+    "https://grassrootsmvt.pages.dev",
+    "http://localhost:8787",
+    "http://127.0.0.1:8787",
+  ];
+
+  const headers = {
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Max-Age": "86400",
+  };
+
+  // only allow the request origin if it's on the approved list
+  if (origin && allowedOrigins.includes(origin)) {
+    headers["Access-Control-Allow-Origin"] = origin;
+  } else {
+    // fallback to strict mode — no wildcard for credentialed requests
+    headers["Access-Control-Allow-Origin"] = "https://volunteers.grassrootsmvt.org";
+  }
+
+  return headers;
+}
+
 export function handleOptions(request, env) {
   const origin = request.headers.get("Origin");
   return new Response(null, {
