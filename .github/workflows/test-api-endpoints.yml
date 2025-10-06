@@ -1,0 +1,39 @@
+name: "Verify Pages API Endpoints"
+
+on:
+  # Run manually
+  workflow_dispatch: {}
+
+  # Run after the main deploy workflow completes successfully (file named deploy.yml)
+  workflow_run:
+    workflows: ["deploy.yml"]
+    types:
+      - completed
+
+jobs:
+  api-endpoint-health-check:
+    name: API Endpoint Health Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Wrangler CLI
+        run: npm install -g wrangler@4.42.0
+
+      - name: Run API endpoint verifier
+        run: node scripts/test_api_endpoints.mjs
+        # Don't fail the entire workflow if an endpoint check fails
+        continue-on-error: true
+
+      - name: Upload API verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-verification-report
+          path: api-verification.md
