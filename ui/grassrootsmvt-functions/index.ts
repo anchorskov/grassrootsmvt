@@ -1,14 +1,4 @@
-// Universal, safe CORS helper (kept in the worker entry for simplicity)
-function getCorsHeaders(origin: string) {
-  return {
-    "Access-Control-Allow-Origin": origin,
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers":
-      "Content-Type, Authorization, X-Requested-With, Pragma, Cache-Control, Accept, Origin",
-    "Access-Control-Allow-Credentials": "true",
-    "Access-Control-Max-Age": "86400",
-  };
-}
+import { getCorsHeaders } from "./cors.js";
 
 export default {
   async fetch(request: Request, env: any) {

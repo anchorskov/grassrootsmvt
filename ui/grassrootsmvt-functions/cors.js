@@ -50,6 +50,18 @@ export function corsHeaders(origin) {
   return headers;
 }
 
+// Export the universal helper expected by index.ts
+export function getCorsHeaders(origin) {
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers":
+      "Content-Type, Authorization, X-Requested-With, Pragma, Cache-Control, Accept, Origin",
+    "Access-Control-Allow-Credentials": "true",
+    "Access-Control-Max-Age": "86400",
+  };
+}
+
 export function handleOptions(request, env) {
   const origin = request.headers.get("Origin");
   return new Response(null, {
