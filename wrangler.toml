@@ -7,6 +7,9 @@ pages_build_output_dir = "ui"
 # ✅ Environment variables available to your Pages Functions
 [vars]
 ENVIRONMENT = "production"
+TEAM_DOMAIN = "https://skovgard.cloudflareaccess.com"
+POLICY_AUD = "4f12e8846be4e319e892504594bfe34ac15a5bfe952f350b7498f0952abce81f"
+ALLOW_ORIGIN = "https://volunteers.grassrootsmvt.org"
 
 # ✅ D1 database binding for Pages Functions
 [[d1_databases]]
