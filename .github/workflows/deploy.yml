@@ -21,7 +21,7 @@ jobs:
           # use npm install when there's no package-lock.json present
           npm install --omit=dev --no-audit --no-fund
 
-      - name: Debug: list ui directory
+      - name: "Debug: list ui directory"
         run: |
           echo "--- ui top-level ---"
           ls -la ui || true
