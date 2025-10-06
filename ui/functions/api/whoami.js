@@ -1,3 +1,59 @@
+import { handleOptions, getCorsHeaders, isAllowedOrigin } from '../_utils/cors.js';
+import { verifyAccessJWT } from '../_utils/verifyAccessJWT.js';
+
+export async function onRequestOptions(context) {
+  return handleOptions(context.request);
+}
+
+export async function onRequestGet(context) {
+  const { request, env } = context;
+  const origin = request.headers.get('Origin') || '';
+
+  if (!isAllowedOrigin(origin)) {
+    return new Response('Forbidden: Origin not allowed', { status: 403 });
+  }
+
+  try {
+    const payload = await verifyAccessJWT(request, env);
+    return new Response(JSON.stringify({ ok: true, email: payload.email }), {
+      headers: {
+        ...getCorsHeaders(origin),
+        'Content-Type': 'application/json',
+      },
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({ error: 'Not signed in', message: error.message }), {
+      status: 401,
+      headers: {
+        ...getCorsHeaders(origin),
+        'Content-Type': 'application/json',
+      },
+    });
+  }
+}
+import { getCorsHeaders } from './_utils/cors.js';
+import { verifyAccessJWT } from './_utils/verifyAccessJWT.js';
+
+export default async function onRequest(context) {
+  const { request, env } = context;
+
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: getCorsHeaders(env) });
+  }
+
+  const verification = await verifyAccessJWT(request, env);
+  if (!verification.valid) {
+    return new Response(JSON.stringify({ ok: false, error: 'unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env) }
+    });
+  }
+
+  return new Response(JSON.stringify({ ok: true, user: verification.user }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json', ...getCorsHeaders(env) }
+  });
+}
 // ui/functions/api/whoami.js
 import { createRemoteJWKSet, jwtVerify } from "jose";
 

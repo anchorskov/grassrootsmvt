@@ -1,3 +1,54 @@
+import { handleOptions, getCorsHeaders, isAllowedOrigin } from '../../_utils/cors.js';
+import { verifyAccessJWT } from '../../_utils/verifyAccessJWT.js';
+
+export async function onRequestOptions(context) {
+  return handleOptions(context.request);
+}
+
+export async function onRequestPost(context) {
+  const { request, env } = context;
+  const origin = request.headers.get('Origin') || '';
+
+  if (!isAllowedOrigin(origin)) {
+    return new Response('Forbidden: Origin not allowed', { status: 403 });
+  }
+
+  try {
+    const payload = await verifyAccessJWT(request, env);
+    const data = await request.json().catch(() => ({}));
+
+    return new Response(
+      JSON.stringify({ ok: true, user: payload.email, next: 'voter', received: data }),
+      {
+        headers: {
+          ...getCorsHeaders(origin),
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+  } catch (error) {
+    return new Response(JSON.stringify({ error: 'Unauthorized', message: error.message }), {
+      status: 401,
+      headers: {
+        ...getCorsHeaders(origin),
+        'Content-Type': 'application/json',
+      },
+    });
+  }
+}
+export default async function onRequest(context) {
+  const { request, env } = context;
+  if (request.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': env?.ALLOW_ORIGIN || '*', 'Access-Control-Allow-Methods': 'GET,POST,OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization', 'Access-Control-Allow-Credentials': 'true' } });
+  }
+
+  // Minimal stub implementation: return a placeholder next call object
+  const payload = { next: null, message: 'no calls available (stub)' };
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': env?.ALLOW_ORIGIN || '*', 'Access-Control-Allow-Credentials': 'true' }
+  });
+}
 export const onRequestOptions = () =>
   new Response(null, {
     status: 204,
