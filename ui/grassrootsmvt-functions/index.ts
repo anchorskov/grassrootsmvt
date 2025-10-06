@@ -56,6 +56,26 @@ export default {
       });
     }
 
+    // Test-only routes expected by vitest
+    if (url.pathname === "/message") {
+      return new Response("Hello, World!", { status: 200 });
+    }
+
+    if (url.pathname === "/random") {
+      // UUID v4 generator using Web Crypto API
+      function uuidv4(): string {
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        // Per RFC4122 section 4.4
+        bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+        bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant
+        const hex = Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+      }
+
+      const uuid = uuidv4();
+      return new Response(uuid, { status: 200 });
+    }
+
     // ✅ Example: /api/call/next
     if (url.pathname === "/api/call/next" && request.method === "POST") {
       const body = await request.json().catch(() => ({}));
