@@ -2,9 +2,37 @@ name = "grassrootsmvt-functions"
 main = "index.ts"
 compatibility_date = "2025-09-30"
 workers_dev = true
+[build]
+upload.format = "modules"
 
-# This disables any static asset directory expectation
-# and makes it a pure Worker project.
+[placement]
+mode = "smart"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "wy"
+database_id = "4b4227f1-bf30-4fcf-8a08-6967b536a5ab"
+
+[vars]
+ENVIRONMENT = "production"
+ALLOW_ORIGIN = "https://volunteers.grassrootsmvt.org"
+TEAM_DOMAIN = "https://skovgard.cloudflareaccess.com"
+POLICY_AUD = "4f12e8846be4e319e892504549bfe34ac15a5bfe952f350b7498f0952abce81f"
+
+[env.preview.vars]
+ALLOW_ORIGIN = "https://grassrootsmvt.pages.dev"
+
+[env.local.vars]
+ALLOW_ORIGIN = "http://localhost:8787"
+
+routes = [
+  { pattern = "volunteers.grassrootsmvt.org/api/*", zone_name = "grassrootsmvt.org" }
+]
+name = "grassrootsmvt-functions"
+main = "index.ts"
+compatibility_date = "2025-09-30"
+workers_dev = true
+
 [build]
 upload.format = "modules"
 
@@ -16,6 +44,8 @@ database_id = "4b4227f1-bf30-4fcf-8a08-6967b536a5ab"
 [vars]
 ENVIRONMENT = "production"
 ALLOW_ORIGIN = "https://volunteers.grassrootsmvt.org"
+TEAM_DOMAIN = "https://skovgard.cloudflareaccess.com"
+POLICY_AUD = "4f12e8846be4e319e892504549bfe34ac15a5bfe952f350b7498f0952abce81f"
 
 [env.preview.vars]
 ALLOW_ORIGIN = "https://grassrootsmvt.pages.dev"
@@ -23,7 +53,7 @@ ALLOW_ORIGIN = "https://grassrootsmvt.pages.dev"
 [env.local.vars]
 ALLOW_ORIGIN = "http://localhost:8787"
 
-# Optional route mapping for Pages domain -> Worker (used by wrangler deploy and route checks)
 routes = [
-	{ pattern = "volunteers.grassrootsmvt.org/api/*", zone_name = "grassrootsmvt.org" }
+  { pattern = "volunteers.grassrootsmvt.org/api/*", zone_name = "grassrootsmvt.org" }
 ]
+
