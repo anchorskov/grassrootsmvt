@@ -15,7 +15,7 @@ jobs:
           node-version: 20
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       # 🧠 Build the Functions worker (grassrootsmvt-functions)
       - name: Build Cloudflare Functions
