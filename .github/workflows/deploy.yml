@@ -65,7 +65,6 @@ jobs:
           npx wrangler@4.42.0 pages deploy ui \
             --project-name=grassrootsmvt \
             --commit-dirty=true \
-            --config wrangler.toml \
             --env-file .env
 
       - name: Verify deployment includes functions
