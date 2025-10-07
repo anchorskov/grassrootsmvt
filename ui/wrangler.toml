@@ -1,4 +1,2 @@
 [pages]
 project_name = "grassrootsmvt"
-pages_build_output_dir = "ui"
-functions = "ui/functions"
