@@ -11,6 +11,9 @@ const ALLOWED_ORIGINS = [
   /^https:\/\/[a-z0-9-]+\.grassrootsmvt\.pages\.dev$/ // preview deployments
 ];
 
+// Toggle CORS debug logging with env: set DEBUG_CORS="true" in Pages or Wrangler
+const DEBUG_CORS = globalThis.DEBUG_CORS === "true";
+
 /**
  * Returns valid CORS headers for an allowed origin or '*' fallback for dev/curl
  */
@@ -18,10 +21,12 @@ export function getCorsHeaders(request) {
   const origin = request.headers.get("Origin");
 
   // Log every origin request for debugging (will appear in Wrangler/Cloudflare Logs)
-  if (origin) {
-    console.log("[CORS] Request origin:", origin);
-  } else {
-    console.log("[CORS] No Origin header present (likely curl or internal request)");
+  if (DEBUG_CORS) {
+    if (origin) {
+      console.log("[CORS] Request origin:", origin);
+    } else {
+      console.log("[CORS] No Origin header present (likely curl or internal request)");
+    }
   }
 
   // Optional: extend with Cloudflare environment var (comma-separated)
@@ -57,7 +62,9 @@ export function getCorsHeaders(request) {
   }
 
   // otherwise reject
-  console.warn("[CORS] Blocked origin:", origin);
+  if (DEBUG_CORS) {
+    console.warn("[CORS] 🚫 Blocked origin:", origin);
+  }
   return null;
 }
 
