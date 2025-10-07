@@ -55,15 +55,17 @@ async function getLatestDeployment() {
 
 async function verifyEndpoints(url) {
   const tests = [
-    { path: "/api/ping", expect: 200 },
-    { path: "/api/whoami", expect: 401 },
-    { path: "/api/call/next", expect: 401 },
+    { path: "/api/ping", method: 'GET', expect: 200 },
+    { path: "/api/whoami", method: 'GET', expect: 401 },
+    { path: "/api/call/next", method: 'POST', expect: 401, body: JSON.stringify({ filters: {}, exclude_ids: [] }) },
   ];
 
   for (const test of tests) {
     const fullUrl = `${url}${test.path}`;
     try {
-      const res = await fetch(fullUrl, { method: "GET" });
+      const opts = { method: test.method || 'GET', headers: {} };
+      if (test.body) { opts.body = test.body; opts.headers['content-type'] = 'application/json'; }
+      const res = await fetch(fullUrl, opts);
       console.log(`➡️  ${test.path} → ${res.status}`);
       const text = await res.text();
       const fname = `verify_${test.path.replace(/\//g, "_")}.txt`;
