@@ -10,15 +10,16 @@ export async function onRequestPost({ request, env }) {
   const origin = request.headers.get('Origin');
   const cors = getCorsHeaders(env, origin);
 
+  // 🔐 Require valid Authorization: Bearer <token>
   const verification = await verifyAccessJWT(request, env);
-  if (!verification.valid) {
+  if (!verification || !verification.valid || !verification.email) {
     return new Response(JSON.stringify({ ok: false, error: 'Unauthorized' }), {
       status: 401,
       headers: { ...cors, 'Content-Type': 'application/json' },
     });
   }
 
-  // Example stubbed voter data
+  // ✅ Example stubbed voter data
   const body = await request.json().catch(() => ({}));
   const voter = {
     ok: true,
