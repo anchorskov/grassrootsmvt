@@ -46,16 +46,10 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          echo "📦 Installing dependencies for ui/functions"
-          if [ -f "ui/functions/package-lock.json" ]; then
-            npm ci --prefix ui/functions --omit=dev --no-audit --no-fund
-          else
-            npm install --prefix ui/functions --omit=dev --no-audit --no-fund
-          fi
-
-          echo "🚀 Deploying to Cloudflare Pages..."
-          npx wrangler@4.42.0 pages deploy ./ui \
+          echo "� Deploying to Cloudflare Pages using ui/wrangler.toml..."
+          npx wrangler@4.42.0 pages deploy ui \
             --project-name=grassrootsmvt \
+            --config ui/wrangler.toml \
             --commit-dirty=true
 
       - name: Verify deployment includes functions
