@@ -6,12 +6,27 @@
   },
   "dependencies": {
     "jose": "^6.1.0"
-  }
-  ,
+  },
   "scripts": {
     "build:functions": "wrangler pages functions build ./ui/functions && ls -R ui/.wrangler/tmp",
     "deploy:pages": "npx wrangler pages deploy ./ui --project-name=grassrootsmvt --commit-dirty=true",
     "verify:functions": "curl -sS -H 'Authorization: Bearer $CF_API_TOKEN' https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1 | jq '.result[0].uses_functions'",
     "deploy:check": "bash ./scripts/deploy_and_check.sh"
-  }
+  },
+  "name": "grassrootsmvt",
+  "version": "1.0.0",
+  "description": "1) Updated project tree (reference) . ├── README.md                         # ← overview & quick start (this file) ├── DEBUG_NOTES.txt ├── api/ │   ├── src/index.ts                  # (Workers API, prod path) │   └── wrangler.toml ├── db/ │   ├── migrations/ │   └── schema/ │       ├── eligible_view_stub.sql │       └── volunteer_schema.sql ├── docs/ │   ├── DEVELOPMENT.md                # ← local dev instructions │   ├── ARCHITECTURE.md               # ← layout, data flow, envs │   └── API.md                        # ← endpoint contracts ├── infra/ ├── scripts/ │   └── dev-sqlite-api.mjs            # ← local SQLite sidecar (port 8787) ├── ui/ │   ├── index.html                    # Volunteer Hub (router/landing) │   ├── admin/index.html │   ├── functions/                    # Pages Functions (if used) │   │   ├── _routes.json │   │   └── ... │   └── _worker.js                    # ← Pages _worker with proxy & stubs └── wrangler.toml                     # Pages config (bucket=./ui)",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anchorskov/grassrootsmvt.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/anchorskov/grassrootsmvt/issues"
+  },
+  "homepage": "https://github.com/anchorskov/grassrootsmvt#readme"
 }

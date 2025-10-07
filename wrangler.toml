@@ -8,5 +8,5 @@ ALLOW_ORIGIN = "http://localhost:8788"
 
 [pages]
 project_name = "grassrootsmvt"
-build_output_dir = "ui"
+pages_build_output_dir = "ui"
 functions = "ui/functions"

@@ -1,0 +1,10 @@
+name: "Check Cloudflare Routes Conflicts"
+
+on:
+  workflow_run:
+    workflows: ["Deploy Pages (build + verify functions)"]
+    types: [completed]
+  workflow_dispatch: {}
+  # Optional nightly run (uncomment to enable)
+  # schedule:
+  #   - cron: 0
