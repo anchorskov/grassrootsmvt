@@ -2,6 +2,9 @@ name = "grassrootsmvt"
 account_id = "8bfd3f60fbdcc89183e9e312fb03e86e"
 compatibility_date = "2024-01-01"
 
+# Top-level Pages build output dir (some Wrangler versions expect this)
+pages_build_output_dir = "ui"
+
 [vars]
 ENVIRONMENT = "local"
 ALLOW_ORIGIN = "http://localhost:8788"
