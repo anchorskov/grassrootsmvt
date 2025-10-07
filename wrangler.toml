@@ -1,13 +1,10 @@
 name = "grassrootsmvt"
 
-# Top-level Pages build output dir (some Wrangler versions expect this)
+# Pages configuration (Pages-only file)
 pages_build_output_dir = "ui"
+project_name = "grassrootsmvt"
+functions = "ui/functions"
 
 [vars]
 ENVIRONMENT = "local"
 ALLOW_ORIGIN = "http://localhost:8788"
-
-[pages]
-project_name = "grassrootsmvt"
-pages_build_output_dir = "ui"
-functions = "ui/functions"
