@@ -96,6 +96,35 @@ Artifacts & debugging
 ---------------------
 - The deploy workflow uploads the verification logs (verify__api_*.txt) as a workflow artifact named `verification-results` so you can inspect API responses from CI runs.
 
+🔐 Environment Setup
+--------------------
+We use a local `.env` file for local testing. DO NOT commit your `.env` file — it should be listed in `.gitignore`.
+
+Create a `.env` file at the repo root containing the required variables (example):
+
+```ini
+# Cloudflare token with Pages and Account read scopes (for local testing only)
+CLOUDFLARE_API_TOKEN=pk_live_...
+# Your Cloudflare account id
+CLOUDFLARE_ACCOUNT_ID=8bfd3f60fbdcc89183e9e312fb03e86e
+# Optionally: ENVIRONMENT=local
+ENVIRONMENT=local
+```
+
+Quick-export into your shell (useful for short experiments):
+
+```bash
+# Export all vars from .env (skip commented lines)
+export $(grep -v '^#' .env | xargs)
+```
+
+Notes for CI / GitHub Actions
+- In CI we do NOT commit `.env` or store secrets in the repo. Instead, set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repository secrets and the workflow will use them.
+- The workflow will also run `scripts/check_env.sh` to fail early if required variables are missing.
+
+Wrangler env-file usage
+- The workflow (and local `wrangler` commands) now use `--env-file .env` when a `.env` is present. This keeps local testing easy while CI relies on secrets.
+
 Further documentation
 ---------------------
 - `docs/DEVELOPMENT.md` — longer development notes and examples (generated from README content).

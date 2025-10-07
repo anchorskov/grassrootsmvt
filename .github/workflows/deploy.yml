@@ -52,7 +52,17 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           echo "🚀 Deploying to Cloudflare Pages (ui/)..."
-          npx wrangler@4.42.0 pages deploy ui --project-name=grassrootsmvt --commit-dirty=true
+          # If a .env file exists in the workspace, pass it to wrangler for local env vars.
+          ENV_FLAG=""
+          if [[ -f ".env" ]]; then
+            echo "Found .env — passing --env-file .env to wrangler"
+            ENV_FLAG="--env-file .env"
+          fi
+
+          # Run a quick env sanity check (will fail the job if secrets are missing)
+          bash scripts/check_env.sh || (echo "Env sanity check failed" && exit 1)
+
+          npx wrangler@4.42.0 pages deploy ui --project-name=grassrootsmvt --commit-dirty=true $ENV_FLAG
 
       - name: Verify deployment includes functions
         env:

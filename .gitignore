@@ -7,7 +7,6 @@ exports/
 originals/
 backups/
 *.csv
-*.tsv
 *.xlsx
 *.pdf
 .env
@@ -25,6 +24,10 @@ node_modules/
 *.log
 ui/_worker.dev.js
 _worker.js
+# Environment files
+.env
+.env.local
+.env.production
 _worker.bundle
 _worker.bundle*
 ui/_worker.js
