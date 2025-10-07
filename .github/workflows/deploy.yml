@@ -54,7 +54,7 @@ jobs:
       - name: Verify Wrangler config
         run: |
           echo "Validating wrangler.toml..."
-          cat wrangler.toml || echo "wrangler.toml not found in repo root"
+          cat ui/wrangler.toml || echo "wrangler.toml not found in ui/"
 
       - name: Deploy to Cloudflare Pages
         working-directory: ui
@@ -69,6 +69,18 @@ jobs:
             --project-name=grassrootsmvt \
             --commit-dirty=true \
             --env-file ../.env
+
+      - name: Post-deploy check (diagnostic)
+        working-directory: ui
+        run: |
+          echo "📁 Current directory:"
+          pwd
+          ls -lah
+          if ls verify__api_*.txt 1> /dev/null 2>&1; then
+            echo "Found verify__api_*.txt in ui/"
+          else
+            echo "No verify__api_*.txt found in ui/"
+          fi
 
       - name: Verify deployment includes functions
         env:
@@ -99,15 +111,16 @@ jobs:
           curl -sSf "$DEPLOY_URL/api/ping" || (echo "❌ Failed to reach $DEPLOY_URL/api/ping" && exit 1)
 
       - name: ✅ Verify Cloudflare deployment
+        working-directory: ui
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PROJECT: grassrootsmvt
         run: |
-          node scripts/verify_deploy.mjs
+          node ../scripts/verify_deploy.mjs
 
       - name: "📦 Upload verification logs"
         uses: actions/upload-artifact@v4
         with:
           name: verification-results
-          path: verify__api_*.txt
+          path: ui/verify__api_*.txt
