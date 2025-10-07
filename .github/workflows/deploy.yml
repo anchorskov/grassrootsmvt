@@ -78,6 +78,29 @@ jobs:
           echo "Validating wrangler.toml..."
           cat ui/wrangler.toml || echo "wrangler.toml not found in ui/"
 
+      - name: Validate .env configuration
+        run: |
+          echo "🔍 Checking for .env file and critical environment variables..."
+          if [[ ! -f "../.env" ]]; then
+            echo "❌ .env file not found in repo root (expected at ../.env)"
+            exit 1
+          fi
+
+          REQUIRED_VARS=("CLOUDFLARE_API_TOKEN" "CLOUDFLARE_ACCOUNT_ID" "PROJECT")
+          for var in "${REQUIRED_VARS[@]}"; do
+            if ! grep -q "$var" ../.env; then
+              echo "⚠️ Missing $var in .env"
+              MISSING=true
+            fi
+          done
+
+          if [ "$MISSING" = true ]; then
+            echo "❌ .env missing required variables"
+            exit 1
+          fi
+
+          echo "✅ .env validation passed — all required variables present."
+
       - name: Deploy to Cloudflare Pages
         working-directory: ui
         continue-on-error: false
