@@ -19,7 +19,7 @@ jobs:
         run: npm i -g wrangler@latest
 
       - name: Install function dependencies
-        run: npm ci --prefix ui/_functions --omit=dev --no-audit --no-fund
+        run: npm ci --prefix ui/functions --omit=dev --no-audit --no-fund
 
       - name: Deploy to Pages
         env:
@@ -27,5 +27,5 @@ jobs:
         run: |
           npx wrangler@4.42.0 pages deploy ./ui \
             --project-name=grassrootsmvt \
-            --functions ./ui/_functions \
+            --functions ./ui/functions \
             --commit-dirty=true
