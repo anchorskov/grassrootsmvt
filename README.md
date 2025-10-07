@@ -635,5 +635,5 @@ GET /api/whoami
 
 GET /api/ping
 
-Shows env snapshot useful in dev. slight change
+Shows env snapshot useful in dev. slightest no change
 MD# Trigger Pages build
