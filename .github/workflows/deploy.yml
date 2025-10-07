@@ -62,7 +62,11 @@ jobs:
           # Run a quick env sanity check (will fail the job if secrets are missing)
           bash scripts/check_env.sh || (echo "Env sanity check failed" && exit 1)
 
-          npx wrangler@4.42.0 pages deploy ui --project-name=grassrootsmvt --commit-dirty=true $ENV_FLAG
+          npx wrangler@4.42.0 pages deploy ui \
+            --project-name=grassrootsmvt \
+            --commit-dirty=true \
+            --config wrangler.toml \
+            --env-file .env
 
       - name: Verify deployment includes functions
         env:
