@@ -83,6 +83,11 @@ jobs:
           echo "Validating wrangler.toml..."
           cat ui/wrangler.toml || echo "wrangler.toml not found in ui/"
 
+      - name: Preflight: check required files
+        run: |
+          echo "Running preflight checks for local files..."
+          bash ../scripts/preflight_check.sh
+
       # ...removed .env file validation: CI should use GitHub Secrets instead of a committed .env file...
 
       - name: Deploy to Cloudflare Pages

@@ -122,6 +122,17 @@ Notes for CI / GitHub Actions
 - In CI we do NOT commit `.env` or store secrets in the repo. Instead, set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as repository secrets and the workflow will use them.
 - The workflow will also run `scripts/check_env.sh` to fail early if required variables are missing.
 
+Local deploy (preflight + deploy)
+--------------------------------
+Run the preflight check and deploy from inside `ui/` so `wrangler.toml` is picked up correctly:
+
+```bash
+bash scripts/preflight_check.sh && cd ui && \
+  npx wrangler pages deploy . --project-name=grassrootsmvt --commit-dirty=true --env-file ../.env && cd ..
+```
+
+This ensures the repo root `.env` and `ui/wrangler.toml` exist before attempting to deploy.
+
 Wrangler env-file usage
 - The workflow (and local `wrangler` commands) now use `--env-file .env` when a `.env` is present. This keeps local testing easy while CI relies on secrets.
 
