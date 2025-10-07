@@ -1,15 +1,12 @@
 name = "grassrootsmvt"
+account_id = "8bfd3f60fbdcc89183e9e312fb03e86e"
 compatibility_date = "2024-01-01"
 
-# Cloudflare account id (used by Wrangler & scripts)
-account_id = "8bfd3f60fbdcc89183e9e312fb03e86e"
-
-# Optional: Environment vars for local dev
 [vars]
 ENVIRONMENT = "local"
 ALLOW_ORIGIN = "http://localhost:8788"
 
 [pages]
 project_name = "grassrootsmvt"
-build_output_dir = "ui"
+pages_build_output_dir = "ui"
 functions = "ui/functions"
