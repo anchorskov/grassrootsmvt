@@ -50,14 +50,13 @@ Runs fully local for dev (SQLite sidecar) and deploys to Cloudflare for prod (D1
 ## Quick Start
 
 ### Prereqs
-- Node 18+
-- `wrangler` >= 4.41
-- `jq` (for curl examples)
-- Local voter DB (not in repo), e.g. `/home/anchor/projects/voterdata/wyoming/wy.sqlite`
 
 ### 1) Install deps
 ```bash
 npm install
+
+<!-- CI trigger: append timestamp to force a workflow run -->
+CI-trigger: 2025-10-06T00:00:00Z
 
 2) Configure local env (.dev.vars)
 cat > .dev.vars <<'ENV'
