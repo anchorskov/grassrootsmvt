@@ -39,6 +39,14 @@ export async function verifyAccessJWT(request, env) {
  * Extracts Access JWT from Cf-Access-Jwt-Assertion header or CF_Authorization cookie.
  */
 function getAccessJWT(request) {
+  // Accept tokens from several locations, in order of precedence:
+  // 1) Authorization: Bearer <token> (useful when frontend stores a token in localStorage)
+  // 2) Cf-Access-Jwt-Assertion header (Cloudflare Access runtime)
+  // 3) CF_Authorization cookie
+  const authHeader = request.headers.get('authorization') || request.headers.get('Authorization');
+  if (authHeader && authHeader.toLowerCase().startsWith('bearer ')) {
+    return authHeader.split(/\s+/)[1] || null;
+  }
   const headerToken = request.headers.get('Cf-Access-Jwt-Assertion');
   const cookieToken = getCookie(request, 'CF_Authorization');
   return headerToken || cookieToken || null;
