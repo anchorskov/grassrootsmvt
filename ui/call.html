@@ -98,10 +98,31 @@
 <script>
   // Load the API shim which exposes window.apiFetch and API()
   (function(){
+    // Load the API shim as an ES module so imports inside it work correctly.
     const s = document.createElement('script');
+    s.type = 'module';
     s.src = '/src/api-shim.js';
-    s.defer = true;
     document.head.appendChild(s);
+  })();
+
+  // Debug snippet: logs token presence and tests /api/ping connectivity
+  (function(){
+    const dbg = document.createElement('script');
+    dbg.textContent = `
+      (async () => {
+        const token = localStorage.getItem("access_token");
+        console.log("🔐 Access token present:", !!token);
+        if (!token) console.warn("No access_token in localStorage — /api/whoami will return 401");
+        try {
+          const r = await fetch('/api/ping');
+          const j = await r.json();
+          console.log('🌎 /api/ping result:', j);
+        } catch (err) {
+          console.error('Failed to reach /api/ping:', err);
+        }
+      })();
+    `;
+    document.head.appendChild(dbg);
   })();
 
   const API = (p) => '/api' + p;

@@ -25,6 +25,22 @@
   <div id="voter" style="margin-top:.75rem"></div>
 </div>
 
+  <script type="module" src="/src/api-shim.js"></script>
+  <script>
+    (async () => {
+      const token = localStorage.getItem("access_token");
+      console.log("🔐 Access token present:", !!token);
+      if (!token) console.warn("No access_token in localStorage — /api/whoami will return 401");
+      try {
+        const r = await fetch('/api/ping');
+        const j = await r.json();
+        console.log('🌎 /api/ping result:', j);
+      } catch (err) {
+        console.error('Failed to reach /api/ping:', err);
+      }
+    })();
+  </script>
+
 <script>
 // compatibility: API() and apiFetch()
 function el(id){return document.getElementById(id)}
