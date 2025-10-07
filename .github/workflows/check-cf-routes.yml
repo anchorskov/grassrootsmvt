@@ -1,0 +1,48 @@
+name: "Check Cloudflare Routes Conflicts"
+
+on:
+  workflow_run:
+    workflows: ["Deploy Pages (build + verify functions)"]
+    types: [completed]
+  workflow_dispatch: {}
+  # Optional nightly run (uncomment to enable)
+  # schedule:
+  #   - cron: '0 3 * * *'
+
+jobs:
+  route-check:
+    name: Route check
+    runs-on: ubuntu-latest
+    # mark this job as related to infrastructure/security
+    tags: [infrastructure, security]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install root dependencies (if package.json present)
+        if:  exists('./package.json')
+        run: |
+          npm ci
+
+      - name: Run Cloudflare Routes conflict checker
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          set -e
+          echo "Running scripts/check_cf_routes_conflicts.mjs"
+          node scripts/check_cf_routes_conflicts.mjs
+
+      - name: Upload Cloudflare Routes Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudflare-routes-report
+          path: cloudflare-routes-report.md
+
+    # If the script exits with non-zero, the job will fail. The script itself
+    # should exit with code 1 when conflicts are detected and 0 when all good.
