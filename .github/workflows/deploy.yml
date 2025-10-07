@@ -37,27 +37,28 @@ jobs:
 
       - name: Build Cloudflare Pages Functions
         run: |
-          echo "Building Pages Functions (ui/functions)..."
+          echo "🏗️ Building Pages Functions (ui/functions)..."
           if [[ -d "ui/functions" ]]; then
             npx wrangler@4.42.1 pages functions build ui/functions --outdir ui/.wrangler/functions-build
           else
             echo "ui/functions not present — skipping functions build"
           fi
 
-      - name: Compute and upload built functions bundle
-        if: always()
+      - name: Compute SHA256 and upload functions bundle artifact
         run: |
-          echo "Checking for built functions bundle..."
-          if [[ -f "ui/.wrangler/functions-build/index.js" ]]; then
-            echo "Bundle exists: ui/.wrangler/functions-build/index.js"
-            sha256sum ui/.wrangler/functions-build/index.js | tee ui/.wrangler/functions-build/sha256.txt
+          echo "🔢 Computing SHA256 for built functions bundle..."
+          cd ui/.wrangler/functions-build || mkdir -p ui/.wrangler/functions-build
+          if [[ -f index.js ]]; then
+            sha256sum index.js > sha256.txt
+            echo "✅ SHA256 computed:"
+            cat sha256.txt
           else
-            echo "No built bundle found -- creating marker file"
-            echo "MISSING" > ui/.wrangler/functions-build/MISSING_BUNDLE.txt
+            echo "❌ index.js missing, writing MISSING_BUNDLE.txt"
+            echo "Bundle missing at build time" > MISSING_BUNDLE.txt
           fi
+        continue-on-error: true
 
-      - name: Upload functions bundle artifact
-        if: always()
+      - name: 📦 Upload built functions bundle artifact
         uses: actions/upload-artifact@v4
         with:
           name: functions-build
@@ -68,7 +69,7 @@ jobs:
 
       - name: Deep debug list functions
         run: |
-          echo "Full tree of ui/functions:"
+          echo "📁 Full tree of ui/functions:"
           find ui/functions -type f | sort || echo "No files found or directory missing"
           echo "File count:"
           find ui/functions -type f | wc -l || true
@@ -104,24 +105,16 @@ jobs:
 
       - name: Deploy to Cloudflare Pages
         working-directory: ui
-        continue-on-error: false
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           echo "🚀 Deploying to Cloudflare Pages from ui/..."
           bash ../scripts/check_env.sh || (echo "Env sanity check failed" && exit 1)
+
           npx wrangler@4.42.1 pages deploy . \
             --project-name=grassrootsmvt \
             --commit-dirty=true \
             --env-file ../.env
-
-      - name: Post-deploy check (diagnostic)
-        working-directory: ui
-        run: |
-          echo "📁 Current directory:"
-          pwd
-          ls -lah
-          echo "If verify__api_*.txt exists here, upload path should match ui/verify__api_*.txt"
 
       - name: Verify deployment includes functions
         env:
