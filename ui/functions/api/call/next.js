@@ -12,7 +12,7 @@ export async function onRequestPost({ request, env }) {
 
   const verification = await verifyAccessJWT(request, env);
   if (!verification.valid) {
-    return new Response(JSON.stringify({ ok: false, error: verification.error }), {
+    return new Response(JSON.stringify({ ok: false, error: 'Unauthorized' }), {
       status: 401,
       headers: { ...cors, 'Content-Type': 'application/json' },
     });

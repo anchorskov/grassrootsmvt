@@ -4,8 +4,9 @@
  */
 
 const ALLOWED_ORIGINS = [
-  "https://grassrootsmvt.pages.dev",     // production
+  "https://grassrootsmvt.pages.dev",     // Pages production
   "https://grassrootsmvt.org",           // custom domain (if mapped)
+  "https://volunteers.grassrootsmvt.org", // volunteer subdomain
   "http://localhost:8788",               // local wrangler dev
   "http://127.0.0.1:8788",               // local direct
   /^https:\/\/[a-z0-9-]+\.grassrootsmvt\.pages\.dev$/ // preview deployments
@@ -17,8 +18,19 @@ const DEBUG_CORS = globalThis.DEBUG_CORS === "true";
 /**
  * Returns valid CORS headers for an allowed origin or '*' fallback for dev/curl
  */
-export function getCorsHeaders(request) {
-  const origin = request.headers.get("Origin");
+export function getCorsHeaders(envOrRequest, maybeOrigin) {
+  // Support two call signatures used across handlers:
+  // - getCorsHeaders(request)
+  // - getCorsHeaders(env, origin)
+  let origin;
+  let env;
+  if (maybeOrigin !== undefined) {
+    env = envOrRequest;
+    origin = maybeOrigin;
+  } else {
+    const request = envOrRequest;
+    origin = request.headers.get("Origin");
+  }
 
   // Log every origin request for debugging (will appear in Wrangler/Cloudflare Logs)
   if (DEBUG_CORS) {
@@ -30,8 +42,10 @@ export function getCorsHeaders(request) {
   }
 
   // Optional: extend with Cloudflare environment var (comma-separated)
-  const envAllowed = globalThis.ALLOW_ORIGIN
-    ? globalThis.ALLOW_ORIGIN.split(",").map((o) => o.trim())
+  // Allow an ENV override from the Pages/Worker env (either env.ALLOW_ORIGIN or global)
+  const envAllowedRaw = (env && env.ALLOW_ORIGIN) || globalThis.ALLOW_ORIGIN || "";
+  const envAllowed = envAllowedRaw
+    ? envAllowedRaw.split(",").map((o) => o.trim())
     : [];
 
   const allAllowed = [...ALLOWED_ORIGINS, ...envAllowed];

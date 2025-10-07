@@ -96,7 +96,15 @@
 <div class="card" id="empty" hidden>No eligible voters (or not logged in).</div>
 
 <script>
-  const API = (p) => 'https://grassrootsmvt-functions.anchorskov.workers.dev/api' + p;
+  // Load the API shim which exposes window.apiFetch and API()
+  (function(){
+    const s = document.createElement('script');
+    s.src = '/src/api-shim.js';
+    s.defer = true;
+    document.head.appendChild(s);
+  })();
+
+  const API = (p) => '/api' + p;
 
   const who = document.getElementById("whoami");
   const voterCard = document.getElementById("voterCard");
@@ -141,6 +149,10 @@
   }
 
   async function jsonFetch(url, init = {}) {
+    // For API endpoints under /api use apiFetch to ensure Authorization is attached
+    if (url.startsWith('/api') && window.apiFetch) {
+      return window.apiFetch(url.replace('/api',''), init);
+    }
     const r = await fetch(url, {
       credentials: "include",
       ...init,

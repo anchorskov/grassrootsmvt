@@ -26,15 +26,12 @@
 </div>
 
 <script>
-// Simple API helper required by spec
-window.API = (p) => 'https://grassrootsmvt-functions.anchorskov.workers.dev/api' + p;
-
+// compatibility: API() and apiFetch()
 function el(id){return document.getElementById(id)}
 
 async function loadWho(){
   try{
-    const r=await fetch(API('/whoami'));
-    const j=await r.json();
+    const j = await window.apiFetch('/whoami');
     el('identity').textContent = 'Signed in as: ' + (j.email||'unknown');
   }catch(e){el('identity').textContent='Unable to load identity';}
 }
@@ -50,11 +47,10 @@ function getFilters(){
 document.getElementById('getNext').addEventListener('click', async()=>{
   el('voter').textContent='Loading…';
   try{
-    const r=await fetch(API('/call/next'),{method:'POST'});
-    const j=await r.json();
+    const j = await window.apiFetch('/call/next', { method: 'POST' });
     if(!j || !j.voter_id) el('voter').textContent='No voter available';
     else el('voter').innerHTML = `<strong>${j.first_name||'—'} ${j.last_name||''}</strong><br>${j.ra_city||''} ${j.ra_zip||''}<br>Phone: ${j.phone_e164||'—'}`;
-  }catch(e){el('voter').textContent='Error: '+e.message}
+  }catch(e){el('voter').textContent='Error: '+(e && e.message || e)}
 });
 
 loadWho(); renderFilters(getFilters());

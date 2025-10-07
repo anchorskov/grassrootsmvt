@@ -69,8 +69,11 @@
 <div id="toast" style="position:fixed;left:50%;transform:translateX(-50%);bottom:20px;background:#111827;color:white;padding:8px 12px;border-radius:8px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.2);">Opening call...</div>
 
 <script>
-  // Absolute worker URL helper
-  const API = (p) => 'https://grassrootsmvt-functions.anchorskov.workers.dev/api' + p;
+  // Load API shim (exposes window.apiFetch and API())
+  (function(){
+    const s = document.createElement('script'); s.src = '/src/api-shim.js'; s.defer = true; document.head.appendChild(s);
+  })();
+  const API = (p) => '/api' + p;
 
   function fromQS() {
     const u = new URL(location.href);
@@ -91,6 +94,9 @@
   }
 
   async function jsonFetch(url, init={}) {
+    if (url.startsWith('/api') && window.apiFetch) {
+      return window.apiFetch(url.replace('/api',''), init);
+    }
     const r = await fetch(url, {
       credentials: 'include',
       ...init,

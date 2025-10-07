@@ -51,8 +51,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          echo "🚀 Deploying to Cloudflare Pages..."
-          npx wrangler@4.42.0 pages deploy --cwd=.
+          echo "🚀 Deploying to Cloudflare Pages (ui/)..."
+          npx wrangler@4.42.0 pages deploy ui --project-name=grassrootsmvt --commit-dirty=true
 
       - name: Verify deployment includes functions
         env:
@@ -81,3 +81,17 @@ jobs:
             | jq -r '.result[0].url')
           echo "Checking $DEPLOY_URL/api/ping..."
           curl -sSf "$DEPLOY_URL/api/ping" || (echo "❌ Failed to reach $DEPLOY_URL/api/ping" && exit 1)
+
+      - name: ✅ Verify Cloudflare deployment
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: grassrootsmvt
+        run: |
+          node scripts/verify_deploy.mjs
+
+      - name: "📦 Upload verification logs"
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-results
+          path: verify__api_*.txt
