@@ -1,18 +1,13 @@
 name = "grassrootsmvt"
-compatibility_date = "2025-09-30"
+compatibility_date = "2024-01-01"
 
-# ✅ Cloudflare Pages build directory
-pages_build_output_dir = "ui"
-
-# ✅ Environment variables available to your Pages Functions
+# Optional: Environment vars for local dev
 [vars]
-ENVIRONMENT = "production"
-TEAM_DOMAIN = "https://skovgard.cloudflareaccess.com"
-POLICY_AUD = "4f12e8846be4e319e892504594bfe34ac15a5bfe952f350b7498f0952abce81f"
-ALLOW_ORIGIN = "https://volunteers.grassrootsmvt.org"
+ENVIRONMENT = "local"
+ALLOW_ORIGIN = "http://localhost:8788"
 
-# ✅ D1 database binding for Pages Functions
-[[d1_databases]]
-binding = "DB"
-database_name = "wy"
-database_id = "4b4227f1-bf30-4fcf-8a08-6967b536a5ab"
+# ✅ This tells Wrangler (and Pages) where to find your functions.
+functions = "ui/functions"
+
+# ✅ Cloudflare Pages build output (UI directory)
+pages_build_output_dir = "ui"

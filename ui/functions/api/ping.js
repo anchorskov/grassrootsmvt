@@ -1,19 +1,13 @@
-import { handleOptions, getCorsHeaders, isAllowedOrigin } from '../_utils/cors.js';
+// ui/functions/api/ping.js
+import { handleCorsPreflight, getCorsHeaders } from '../_utils/cors.js';
 
-export async function onRequestOptions(context) {
-  return handleOptions(context.request);
+export async function onRequestOptions({ request, env }) {
+  return handleCorsPreflight(request, env);
 }
 
-export async function onRequestGet(context) {
-  const origin = context.request.headers.get('Origin') || '*';
-  if (!isAllowedOrigin(origin)) {
-    return new Response('CORS not allowed', { status: 403 });
-  }
-
-  return new Response(JSON.stringify({ ok: true, env: context.env.ENVIRONMENT }), {
-    headers: {
-      ...getCorsHeaders(origin),
-      'Content-Type': 'application/json',
-    },
+export async function onRequestGet({ env, request }) {
+  const origin = request.headers.get('Origin');
+  return new Response(JSON.stringify({ ok: true, env: env.ENVIRONMENT || 'unknown' }), {
+    headers: { ...getCorsHeaders(env, origin), 'Content-Type': 'application/json' },
   });
 }

@@ -1,9 +1,9 @@
 // ui/functions/api/call/next.js
-import { handleOptions, getCorsHeaders } from '../../_utils/cors.js';
+import { handleCorsPreflight, getCorsHeaders } from '../../_utils/cors.js';
 import { verifyAccessJWT } from '../../_utils/verifyAccessJWT.js';
 
 export async function onRequestOptions({ request, env }) {
-  return handleOptions(request, env);
+  return handleCorsPreflight(request, env);
 }
 
 export async function onRequestPost({ request, env }) {

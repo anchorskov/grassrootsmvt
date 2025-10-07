@@ -17,23 +17,30 @@ jobs:
 
       - name: Install deterministic dependencies
         run: |
-          echo "📦 Installing dependencies in ui/_functions"
-          if [[ -f "ui/_functions/package.json" ]]; then
-            if [[ -f "ui/_functions/package-lock.json" ]]; then
+          echo "📦 Installing dependencies in ui/functions"
+          if [[ -f "ui/functions/package.json" ]]; then
+            if [[ -f "ui/functions/package-lock.json" ]]; then
               echo "Found package-lock.json — running npm ci"
-              npm ci --prefix ui/_functions --omit=dev --no-audit --no-fund
+              npm ci --prefix ui/functions --omit=dev --no-audit --no-fund
             else
               echo "No lockfile found — using npm install"
-              npm install --prefix ui/_functions --omit=dev --no-audit --no-fund
+              npm install --prefix ui/functions --omit=dev --no-audit --no-fund
             fi
           else
-            echo "⚠️ ui/_functions/package.json not found — skipping function dependency install"
+            echo "⚠️ ui/functions/package.json not found — skipping function dependency install"
           fi
 
-      - name: Debug list ui/_functions
+      - name: Debug list ui/functions
         run: |
           echo "Listing Cloudflare functions directory:"
-          ls -R ui/_functions || echo "Functions directory missing!"
+          ls -R ui/functions || echo "Functions directory missing!"
+
+      - name: Deep debug list functions
+        run: |
+          echo "Full tree of ui/functions:"
+          find ui/functions -type f | sort || echo "No files found or directory missing"
+          echo "File count:"
+          find ui/functions -type f | wc -l || true
 
       - name: Deploy to Cloudflare Pages
         env:
@@ -41,6 +48,7 @@ jobs:
         run: |
           npx wrangler@4.42.0 pages deploy ./ui \
             --project-name=grassrootsmvt \
+            --functions ./ui/functions \
             --commit-dirty=true
 
       - name: Verify deployment includes functions

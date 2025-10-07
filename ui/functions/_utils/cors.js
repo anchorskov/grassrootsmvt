@@ -1,66 +1,73 @@
-// ui/functions/_utils/cors.js
+/**
+ * Cloudflare Pages Functions — universal CORS utility
+ * Supports: local dev, production site, API calls, and curl tests
+ */
+
+const ALLOWED_ORIGINS = [
+  "https://grassrootsmvt.pages.dev",     // production
+  "https://grassrootsmvt.org",           // custom domain (if mapped)
+  "http://localhost:8788",               // local wrangler dev
+  "http://127.0.0.1:8788"                // local direct
+];
 
 /**
- * Determines if the request origin is allowed based on environment and defaults.
+ * Returns valid CORS headers for an allowed origin or '*' fallback for dev/curl
  */
-export function getAllowedOrigin(env, origin) {
-  const allowedOrigins = [
-    'https://volunteers.grassrootsmvt.org',
-    'https://grassrootsmvt.pages.dev',
-    'http://localhost:8787',
-    'http://127.0.0.1:8787'
-  ];
+export function getCorsHeaders(request) {
+  const origin = request.headers.get("Origin");
 
-  // Add environment-configured origins (comma-separated)
-  if (env?.ALLOW_ORIGIN) {
-    const envOrigins = env.ALLOW_ORIGIN.split(',').map(o => o.trim());
-    for (const o of envOrigins) {
-      if (!allowedOrigins.includes(o)) allowedOrigins.push(o);
+  // allow known origins
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    return {
+      "Access-Control-Allow-Origin": origin,
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization"
+    };
+  }
+
+  // allow CLI/curl (no Origin header)
+  if (!origin) {
+    return {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS"
+    };
+  }
+
+  // otherwise reject
+  return null;
+}
+
+/**
+ * Handles CORS preflight requests
+ */
+export function handleCorsPreflight(request) {
+  if (request.method === "OPTIONS") {
+    const headers = getCorsHeaders(request);
+    if (!headers) {
+      return new Response("CORS not allowed", { status: 403 });
     }
+    return new Response(null, { headers });
+  }
+  return null;
+}
+
+/**
+ * Wrapper to apply CORS to your API handlers
+ * Usage:
+ *   import { applyCors } from '../_utils/cors.js'
+ *   export async function onRequest(event) { return applyCors(event, myHandler) }
+ */
+export async function applyCors(event, handler) {
+  const { request } = event;
+  const preflight = handleCorsPreflight(request);
+  if (preflight) return preflight;
+
+  const headers = getCorsHeaders(request);
+  if (!headers) {
+    return new Response("CORS not allowed", { status: 403 });
   }
 
-  // Allow local dev and matching pages domains
-  if (
-    origin &&
-    (allowedOrigins.includes(origin) ||
-      /^https:\/\/[a-z0-9-]+\.grassrootsmvt\.pages\.dev$/.test(origin) ||
-      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin))
-  ) {
-    return origin;
-  }
-
-  // Default fallback
-  return allowedOrigins[0];
-}
-
-/**
- * Builds consistent CORS headers for responses.
- */
-export function getCorsHeaders(env, origin) {
-  const allowedOrigin = getAllowedOrigin(env, origin);
-  return {
-    'Access-Control-Allow-Origin': allowedOrigin,
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers':
-      'Content-Type, Authorization, Cf-Access-Jwt-Assertion, X-Requested-With',
-    'Access-Control-Allow-Credentials': 'true',
-    'Vary': 'Origin'
-  };
-}
-
-/**
- * Handles OPTIONS (preflight) requests.
- */
-export function handleOptions(request, env) {
-  const origin = request.headers.get('Origin');
-  const headers = getCorsHeaders(env, origin);
-  return new Response(null, { status: 204, headers });
-}
-
-/**
- * Utility: quick origin validation for handlers.
- */
-export function isAllowedOrigin(origin, env) {
-  const allowedOrigin = getAllowedOrigin(env, origin);
-  return origin === allowedOrigin;
+  const response = await handler(event);
+  Object.entries(headers).forEach(([k, v]) => response.headers.set(k, v));
+  return response;
 }
