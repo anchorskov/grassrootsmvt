@@ -1,3 +1,4 @@
+---
 name: "Verify Pages API Endpoints"
 
 on:
@@ -6,7 +7,8 @@ on:
 
   # Run after the main deploy workflow completes successfully (file named deploy.yml)
   workflow_run:
-    workflows: ["deploy.yml"]
+    workflows:
+      - "deploy.yml"
     types:
       - completed
 

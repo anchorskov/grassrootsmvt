@@ -1,9 +1,12 @@
+---
 name: Deploy UI (Pages)
 
 on:
   push:
-    branches: [ main ]
-    paths: [ 'ui/**' ]
+    branches:
+      - main
+    paths:
+      - 'ui/**'
 
 jobs:
   deploy:

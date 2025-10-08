@@ -1,8 +1,10 @@
+---
 name: "🚀 Deploy Pages (build + verify functions)"
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   validate:
@@ -31,17 +33,26 @@ jobs:
       - name: "🔍 Lint workflow YAML files"
         run: |
           echo "🧩 Running yamllint..."
-          yamllint .github/workflows || { echo "❌ yamllint failed"; exit 1; }
+          yamllint .github/workflows || {
+            echo "❌ yamllint failed"
+            exit 1
+          }
+
           echo "🧩 Validating syntax with js-yaml..."
           for f in .github/workflows/*.yml; do
-            npx js-yaml "$f" >/dev/null || { echo "❌ Invalid YAML in $f"; exit 1; }
+            npx js-yaml "$f" >/dev/null || {
+              echo "❌ Invalid YAML in $f"
+              exit 1
+            }
           done
+
           echo "✅ YAML syntax OK."
 
       - name: "📂 Check working-directory consistency"
         run: |
           echo "🔍 Ensuring all wrangler/pages commands run from ui/..."
-          BAD=$(grep -rE "npx[[:space:]]+wrangler|pages[[:space:]]+(deploy|functions[[:space:]]+build)" .github/workflows | grep -v "working-directory:[[:space:]]*ui" || true)
+          PATTERN='npx[[:space:]]+wrangler|pages[[:space:]]+(deploy|functions[[:space:]]+build)'
+          BAD=$(grep -rE "$PATTERN" .github/workflows | grep -v "working-directory:[[:space:]]*ui" || true)
           if [[ -n "$BAD" ]]; then
             echo "❌ Found workflow commands not scoped to ui/:"
             echo "$BAD"
@@ -51,7 +62,8 @@ jobs:
 
   deploy:
     name: "🚀 Deploy Pages (build + verify functions)"
-    needs: validate
+    needs:
+      - validate
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -83,6 +95,7 @@ jobs:
           else
             echo "⚠️ ui/functions/package.json not found — skipping function dependency install"
           fi
+        continue-on-error: false
 
       - name: "🧪 Preflight: check required files"
         run: |
@@ -92,16 +105,19 @@ jobs:
           else
             echo "⚠️ preflight_check.sh not found — skipping file validation"
           fi
+        continue-on-error: false
 
       - name: "🏗️ Build Cloudflare Pages Functions"
         run: |
           echo "🏗️ Building Pages Functions (ui/functions)..."
           mkdir -p ui/.wrangler/functions-build
           if [[ -d "ui/functions" ]]; then
-            npx wrangler@4.42.1 pages functions build ui/functions --outdir ui/.wrangler/functions-build
+            npx wrangler@4.42.1 pages functions build ui/functions \
+              --outdir ui/.wrangler/functions-build
           else
             echo "ui/functions not present — skipping functions build"
           fi
+        continue-on-error: false
 
       - name: "🔢 Compute SHA256 and upload functions bundle artifact"
         run: |
@@ -136,16 +152,17 @@ jobs:
           npx wrangler@4.42.1 pages deploy . \
             --project-name=grassrootsmvt \
             --commit-dirty=true
+        continue-on-error: false
 
-      - name: "✅ Verify deployment includes functions"
+      - name: "✅ Verify uses_functions:true"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PROJECT: grassrootsmvt
         run: |
           echo "🔍 Checking latest deployment metadata..."
-          DEP_JSON=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1")
+          API_URL="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1"
+          DEP_JSON=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API_URL")
           echo "$DEP_JSON" | jq '.result[0] | {id: .id, uses_functions: .uses_functions, url: .url}'
           USES=$(echo "$DEP_JSON" | jq -r '.result[0].uses_functions')
           if [ "$USES" != "true" ]; then
@@ -153,6 +170,7 @@ jobs:
             exit 1
           fi
           echo "✅ Functions detected in deployment."
+        continue-on-error: false
 
       - name: "🔎 Verify deployment health"
         env:
@@ -160,9 +178,11 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PROJECT: grassrootsmvt
         run: |
-          DEPLOY_URL=$(curl -sSf -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+          DEPLOY_URL=$(curl -sSf \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1" \
             | jq -r '.result[0].url')
+
           echo "Checking $DEPLOY_URL/api/ping..."
           if ! curl -sSf "$DEPLOY_URL/api/ping"; then
             echo "❌ Failed to reach $DEPLOY_URL/api/ping"
@@ -170,12 +190,17 @@ jobs:
           else
             echo "✅ /api/ping reachable"
           fi
+        continue-on-error: false
 
       - name: "🧾 Verify Cloudflare deployment endpoints"
         working-directory: ui
         run: |
           echo "Running deployment verification..."
-          node ../scripts/verify_deploy.mjs --project grassrootsmvt --retries 5 --interval 5000
+          node ../scripts/verify_deploy.mjs \
+            --project grassrootsmvt \
+            --retries 5 \
+            --interval 5000
+        continue-on-error: false
 
       - name: "📦 Upload verification logs"
         uses: actions/upload-artifact@v4

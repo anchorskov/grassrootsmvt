@@ -1,9 +1,12 @@
+---
 name: "Check Cloudflare Routes Conflicts"
 
 on:
   workflow_run:
-    workflows: ["Deploy Pages (build + verify functions)"]
-    types: [completed]
+    workflows:
+      - "Deploy Pages (build + verify functions)"
+    types:
+      - completed
   workflow_dispatch: {}
   # Optional nightly run (uncomment to enable)
   # schedule:
@@ -14,7 +17,9 @@ jobs:
     name: Route check
     runs-on: ubuntu-latest
     # mark this job as related to infrastructure/security
-    tags: [infrastructure, security]
+    tags:
+      - infrastructure
+      - security
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,7 +30,7 @@ jobs:
           node-version: '20'
 
       - name: Install root dependencies (if package.json present)
-        if:  exists('./package.json')
+        if: exists('./package.json')
         run: |
           npm ci
 
