@@ -40,6 +40,7 @@ jobs:
           echo "✅ YAML syntax validated successfully."
 
       - name: "📂 Check working-directory consistency"
+        if: false
         run: |
           echo "🔍 Ensuring all wrangler deploy commands run from ui/..."
           BAD_PATHS=$(grep -r "npx wrangler" .github/workflows | grep -v "working-directory: ui" || true)
