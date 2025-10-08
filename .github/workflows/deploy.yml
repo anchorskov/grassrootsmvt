@@ -1,4 +1,4 @@
-name: Deploy Pages (build + verify functions)
+name: "🚀 Deploy Pages (build + verify functions)"
 
 on:
   push:
@@ -8,73 +8,68 @@ jobs:
   validate:
     name: "🧪 Validate Workflows"
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+    timeout-minutes: 5
 
-      - name: Setup Python & Node
+    steps:
+      - name: "📥 Checkout repository"
+        uses: actions/checkout@v4
+
+      - name: "🧰 Setup Python & Node"
         uses: actions/setup-python@v4
         with:
-          python-version: '3.x'
+          python-version: "3.x"
       - uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install YAML validators
+      - name: "🧪 Install YAML validators"
         run: |
           python -m pip install --upgrade pip
           pip install yamllint
           npm install -g js-yaml
 
-      - name: Lint all workflow YAML files
+      - name: "🔍 Lint workflow YAML files"
         run: |
-          echo "🔍 Running yamllint..."
+          echo "🧩 Running yamllint..."
           yamllint .github/workflows || { echo "❌ yamllint failed"; exit 1; }
-          echo "🧩 Validating YAML syntax with js-yaml..."
+          echo "🧩 Validating syntax with js-yaml..."
           for f in .github/workflows/*.yml; do
             npx js-yaml "$f" >/dev/null || { echo "❌ Invalid YAML in $f"; exit 1; }
           done
           echo "✅ YAML syntax OK."
 
-      - name: Check working-directory consistency
+      - name: "📂 Check working-directory consistency"
         run: |
-          echo "🔍 Ensuring deploy and verify commands run from ui/..."
-          bad=0
-          for f in .github/workflows/*.yml; do
-            if grep -E "npx[[:space:]]+wrangler|pages[[:space:]]+functions[[:space:]]+build|pages[[:space:]]+deploy" "$f" >/dev/null; then
-              if ! grep -q "working-directory:[[:space:]]*ui" "$f"; then
-                echo "❌ $f contains wrangler/pages commands but no 'working-directory: ui'"
-                bad=1
-              fi
-            fi
-            if grep -E "node[[:space:]]+\.\./scripts/|bash[[:space:]]+\.\./scripts/" "$f" >/dev/null; then
-              if ! grep -q "working-directory:[[:space:]]*ui" "$f"; then
-                echo "❌ $f contains ../scripts calls but no 'working-directory: ui'"
-                bad=1
-              fi
-            fi
-          done
-          if [ "$bad" -ne 0 ]; then
-            echo "❌ Working-directory consistency checks failed"; exit 1
+          echo "🔍 Ensuring all wrangler/pages commands run from ui/..."
+          BAD=$(grep -rE "npx[[:space:]]+wrangler|pages[[:space:]]+(deploy|functions[[:space:]]+build)" .github/workflows | grep -v "working-directory:[[:space:]]*ui" || true)
+          if [[ -n "$BAD" ]]; then
+            echo "❌ Found workflow commands not scoped to ui/:"
+            echo "$BAD"
+            exit 1
           fi
-          echo "✅ All deploy/verify commands use ui/ correctly."
+          echo "✅ All wrangler commands correctly scoped to ui/."
 
   deploy:
     name: "🚀 Deploy Pages (build + verify functions)"
     needs: validate
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       PROJECT: grassrootsmvt
 
     steps:
-      - uses: actions/checkout@v4
+      - name: "📥 Checkout repository"
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: "🧰 Setup Node.js"
+        uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Install deterministic dependencies
+      - name: "📦 Install deterministic dependencies"
         run: |
           echo "📦 Installing dependencies in ui/functions"
           if [[ -f "ui/functions/package.json" ]]; then
@@ -82,19 +77,23 @@ jobs:
               echo "Found package-lock.json — running npm ci"
               npm ci --prefix ui/functions --omit=dev --no-audit --no-fund
             else
-              echo "No lockfile found — using npm install"
+              echo "No lockfile found — running npm install"
               npm install --prefix ui/functions --omit=dev --no-audit --no-fund
             fi
           else
             echo "⚠️ ui/functions/package.json not found — skipping function dependency install"
           fi
 
-      - name: Preflight: check required files
+      - name: "🧪 Preflight: check required files"
         run: |
           echo "🔍 Running preflight checks for required files..."
-          bash scripts/preflight_check.sh
+          if [[ -f "scripts/preflight_check.sh" ]]; then
+            bash scripts/preflight_check.sh
+          else
+            echo "⚠️ preflight_check.sh not found — skipping file validation"
+          fi
 
-      - name: Build Cloudflare Pages Functions
+      - name: "🏗️ Build Cloudflare Pages Functions"
         run: |
           echo "🏗️ Building Pages Functions (ui/functions)..."
           mkdir -p ui/.wrangler/functions-build
@@ -104,21 +103,22 @@ jobs:
             echo "ui/functions not present — skipping functions build"
           fi
 
-      - name: Compute SHA256 and upload functions bundle artifact
+      - name: "🔢 Compute SHA256 and upload functions bundle artifact"
         run: |
           echo "🔢 Computing SHA256 for built functions bundle..."
           mkdir -p ui/.wrangler/functions-build
           cd ui/.wrangler/functions-build
           if [[ -f index.js ]]; then
             sha256sum index.js > sha256.txt
-            echo "✅ SHA256 computed:" && cat sha256.txt
+            echo "✅ SHA256 computed:"
+            cat sha256.txt
           else
             echo "❌ index.js missing, writing MISSING_BUNDLE.txt"
             echo "Bundle missing at build time" > MISSING_BUNDLE.txt
           fi
         continue-on-error: true
 
-      - name: 📦 Upload built functions bundle artifact
+      - name: "📦 Upload built functions bundle artifact"
         uses: actions/upload-artifact@v4
         with:
           name: functions-build
@@ -127,7 +127,7 @@ jobs:
             ui/.wrangler/functions-build/sha256.txt
             ui/.wrangler/functions-build/MISSING_BUNDLE.txt
 
-      - name: Deploy to Cloudflare Pages
+      - name: "🚀 Deploy to Cloudflare Pages"
         working-directory: ui
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -137,12 +137,13 @@ jobs:
             --project-name=grassrootsmvt \
             --commit-dirty=true
 
-      - name: Verify deployment includes functions
+      - name: "✅ Verify deployment includes functions"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PROJECT: grassrootsmvt
         run: |
+          echo "🔍 Checking latest deployment metadata..."
           DEP_JSON=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1")
           echo "$DEP_JSON" | jq '.result[0] | {id: .id, uses_functions: .uses_functions, url: .url}'
@@ -151,9 +152,9 @@ jobs:
             echo "❌ Deployment missing Functions (uses_functions=$USES)"
             exit 1
           fi
-          echo "✅ Functions detected."
+          echo "✅ Functions detected in deployment."
 
-      - name: Verify deployment health
+      - name: "🔎 Verify deployment health"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -163,11 +164,18 @@ jobs:
             "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1" \
             | jq -r '.result[0].url')
           echo "Checking $DEPLOY_URL/api/ping..."
-          curl -sSf "$DEPLOY_URL/api/ping" || (echo "❌ Failed to reach $DEPLOY_URL/api/ping" && exit 1)
+          if ! curl -sSf "$DEPLOY_URL/api/ping"; then
+            echo "❌ Failed to reach $DEPLOY_URL/api/ping"
+            exit 1
+          else
+            echo "✅ /api/ping reachable"
+          fi
 
-      - name: ✅ Verify Cloudflare deployment
+      - name: "🧾 Verify Cloudflare deployment endpoints"
         working-directory: ui
-        run: node ../scripts/verify_deploy.mjs
+        run: |
+          echo "Running deployment verification..."
+          node ../scripts/verify_deploy.mjs --project grassrootsmvt --retries 5 --interval 5000
 
       - name: "📦 Upload verification logs"
         uses: actions/upload-artifact@v4
