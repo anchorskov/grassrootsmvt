@@ -28,7 +28,11 @@ jobs:
       - name: "⚡ Cache npm dependencies"
         uses: actions/cache@v3
         with:
-          path: ~/.npm
+          path: |
+            ~/.npm
+            ui/functions/node_modules
+          # Only include package-lock.json in the key when present. If not present
+          # the cache key falls back to runner/os + npm so we still benefit.
           key: ${{ runner.os }}-npm-${{ hashFiles('ui/functions/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-npm-
@@ -38,17 +42,19 @@ jobs:
           echo "Installing wrangler (will use cache when available)..."
           npm install -g wrangler@4.42.1 || true
 
-      - name: "📦 Install deterministic dependencies for functions"
+      - name: "Install functions dependencies"
         run: |
-          echo "📦 Checking for ui/functions/package.json..."
-          if [[ -f "ui/functions/package.json" ]]; then
-            if [[ -f "ui/functions/package-lock.json" ]]; then
-              npm ci --prefix ui/functions --omit=dev --no-audit --no-fund
-            else
-              npm install --prefix ui/functions --omit=dev --no-audit --no-fund
-            fi
+          echo "Checking for ui/functions/package.json"
+          # Prefer clean deterministic installs with npm ci when a lockfile
+          # exists. Fall back to npm install otherwise. If the lockfile is
+          # missing in the repository, this keeps the build working while
+          # encouraging reproducible CI when it's present.
+          if [ -f ui/functions/package-lock.json ]; then
+            echo "Found package-lock.json — running npm ci --prefix ui/functions"
+            npm ci --prefix ui/functions
           else
-            echo "No ui/functions/package.json found — skipping dependency install."
+            echo "No package-lock.json — running npm install --prefix ui/functions"
+            npm install --prefix ui/functions
           fi
 
       - name: "🏗️ Build Cloudflare Pages Functions"
