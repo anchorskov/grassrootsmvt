@@ -25,6 +25,19 @@ jobs:
         with:
           node-version: 20
 
+      - name: "⚡ Cache npm dependencies"
+        uses: actions/cache@v3
+        with:
+          path: ~/.npm
+          key: ${{ runner.os }}-npm-${{ hashFiles('ui/functions/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-npm-
+
+      - name: "🧰 Install Wrangler CLI (optional cached)"
+        run: |
+          echo "Installing wrangler (will use cache when available)..."
+          npm install -g wrangler@4.42.1 || true
+
       - name: "📦 Install deterministic dependencies for functions"
         run: |
           echo "📦 Checking for ui/functions/package.json..."
