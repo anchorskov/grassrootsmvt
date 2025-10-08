@@ -7,11 +7,15 @@ cd "$ROOT_DIR"
 echo "🔍 Checking required files..."
 
 MISSING=0
-if [[ -f ".env" ]]; then
-  echo "✅ .env found"
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+  echo "🧩 Running in CI — skipping .env file check (using secrets instead)"
 else
-  echo "❌ .env not found in repo root: $ROOT_DIR/.env"
-  MISSING=1
+  if [[ -f ".env" ]]; then
+    echo "✅ .env found"
+  else
+    echo "❌ .env not found in repo root: $ROOT_DIR/.env"
+    MISSING=1
+  fi
 fi
 
 if [[ -f "ui/wrangler.toml" ]]; then
