@@ -217,7 +217,7 @@
     try {
       const filters = getFilters();
       const exclude_ids = getSeen();              // NEW: send a short history
-      const v = await jsonFetch(API('/call/next'), {
+  const v = await jsonFetch(API('/next'), {
         method: 'POST',
         cache: 'no-store',
         headers: { 'pragma': 'no-cache' },
@@ -277,7 +277,7 @@
 
     try {
       setMsg("Saving...");
-      await jsonFetch(API("/call/complete"), { method: "POST", body: JSON.stringify(payload) });
+  await jsonFetch(API("/complete"), { method: "POST", body: JSON.stringify(payload) });
       // reset a few fields
       document.getElementById("outcome").value = "";
       document.getElementById("best_day").value = "";

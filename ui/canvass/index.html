@@ -183,7 +183,7 @@
           comments = t;
         }
         try {
-          await jsonFetch(API('/call/complete'), { method:'POST', body: JSON.stringify({ voter_id, outcome, comments }) });
+          await jsonFetch(API('/complete'), { method:'POST', body: JSON.stringify({ voter_id, outcome, comments }) });
           btn.closest('div').querySelectorAll('button').forEach(b => b.disabled = true);
         } catch (e) {
           alert('Save failed: '+e.message);
