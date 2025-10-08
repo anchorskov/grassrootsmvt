@@ -1,5 +1,5 @@
 ---
-name: "🚀 Deploy Cloudflare Pages (Minimal)"
+name: "Deploy to Cloudflare Pages"
 
 on:
   push:
@@ -25,13 +25,17 @@ jobs:
         with:
           node-version: 20
 
-      - name: "📦 Install dependencies for functions (if present)"
+      - name: "📦 Install deterministic dependencies for functions"
         run: |
           echo "📦 Checking for ui/functions/package.json..."
           if [[ -f "ui/functions/package.json" ]]; then
-            npm ci --prefix ui/functions --omit=dev --no-audit --no-fund
+            if [[ -f "ui/functions/package-lock.json" ]]; then
+              npm ci --prefix ui/functions --omit=dev --no-audit --no-fund
+            else
+              npm install --prefix ui/functions --omit=dev --no-audit --no-fund
+            fi
           else
-            echo "⚠️ No ui/functions/package.json found — skipping dependency install."
+            echo "No ui/functions/package.json found — skipping dependency install."
           fi
 
       - name: "🏗️ Build Cloudflare Pages Functions"
@@ -42,7 +46,7 @@ jobs:
           if [[ -d "functions" ]]; then
             npx wrangler@4.42.1 pages functions build functions --outdir .wrangler/functions-build
           else
-            echo "⚠️ No functions directory found, skipping build."
+            echo "No functions directory found, skipping build."
           fi
 
       - name: "🚀 Deploy to Cloudflare Pages"
@@ -51,6 +55,37 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           echo "🚀 Deploying Cloudflare Pages from ui/..."
-          npx wrangler@4.42.1 pages deploy . \
-            --project-name=grassrootsmvt \
-            --commit-dirty=true
+          set -o pipefail
+          npx wrangler@4.42.1 pages deploy . --project-name=grassrootsmvt --commit-dirty=true 2>&1 | tee deploy.log
+          EXIT_CODE=${PIPESTATUS[0]}
+          if [ "$EXIT_CODE" -ne 0 ]; then
+            echo "❌ wrangler deploy failed with exit code $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
+      - name: "📦 Upload deploy log"
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-log
+          path: ui/deploy.log
+
+      - name: "✅ Verify Cloudflare deployment"
+        working-directory: ui
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: grassrootsmvt
+        run: |
+          node ../scripts/verify_deploy.mjs --project grassrootsmvt --retries 5 --interval 5000
+
+      - name: "📦 Upload verification logs"
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-results
+          path: |
+            verify__api_*.txt
+
+      - name: "🔎 Lint this workflow with yamllint"
+        run: |
+          python -m pip install --upgrade pip
+          pip install yamllint
+          yamllint -c .yamllint .github/workflows/deploy.yml
