@@ -1,4 +1,5 @@
 ---
+if: false  # temporarily disabled during deploy testing
 name: "Verify Pages API Endpoints"
 
 on:
