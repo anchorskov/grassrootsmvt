@@ -178,9 +178,10 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           PROJECT: grassrootsmvt
         run: |
+          API_DEPLOYMENTS_URL="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1"
           DEPLOY_URL=$(curl -sSf \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1" \
+            "$API_DEPLOYMENTS_URL" \
             | jq -r '.result[0].url')
 
           echo "Checking $DEPLOY_URL/api/ping..."
