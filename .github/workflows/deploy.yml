@@ -1,5 +1,5 @@
 ---
-name: "🚀 Deploy Pages (build + verify functions)"
+name: "🚀 Deploy Cloudflare Pages (Minimal)"
 
 on:
   push:
@@ -8,8 +8,8 @@ on:
 
 jobs:
   deploy:
+    name: "🚀 Deploy to Cloudflare Pages"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
 
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -25,284 +25,32 @@ jobs:
         with:
           node-version: 20
 
-      - name: "📦 Install deterministic dependencies"
+      - name: "📦 Install dependencies for functions (if present)"
         run: |
-          echo "📦 Installing dependencies in ui/functions"
+          echo "📦 Checking for ui/functions/package.json..."
           if [[ -f "ui/functions/package.json" ]]; then
-            if [[ -f "ui/functions/package-lock.json" ]]; then
-              npm ci --prefix ui/functions --omit=dev --no-audit --no-fund
-            else
-              npm install --prefix ui/functions --omit=dev --no-audit --no-fund
-            fi
+            npm ci --prefix ui/functions --omit=dev --no-audit --no-fund
           else
-            echo "⚠️ ui/functions/package.json not found — skipping function dependency install"
+            echo "⚠️ No ui/functions/package.json found — skipping dependency install."
           fi
-
-      - name: "🧪 Preflight: check required files"
-        run: |
-          echo "🔍 Running preflight checks..."
-          if [[ -f "scripts/preflight_check.sh" ]]; then
-            bash scripts/preflight_check.sh
-          else
-            echo "⚠️ preflight_check.sh not found — skipping"
-          fi
-
-      - name: "🏗️ Build Cloudflare Pages Functions"
-        run: |
-          echo "🏗️ Building Pages Functions (ui/functions)..."
-          mkdir -p ui/.wrangler/functions-build
-          if [[ -d "ui/functions" ]]; then
-            npx wrangler@4.42.1 pages functions build ui/functions --outdir ui/.wrangler/functions-build
-          else
-            echo "ui/functions not present — skipping"
-          fi
-
-      - name: "🔢 Compute SHA256 and upload functions bundle artifact"
-        run: |
-          echo "🔢 Computing SHA256..."
-          mkdir -p ui/.wrangler/functions-build
-          cd ui/.wrangler/functions-build
-          if [[ -f index.js ]]; then
-            sha256sum index.js > sha256.txt
-            cat sha256.txt
-          else
-            echo "Bundle missing" > MISSING_BUNDLE.txt
-          fi
-        continue-on-error: true
-
-      - name: "📦 Upload built functions bundle artifact"
-        uses: actions/upload-artifact@v4
-        with:
-          name: functions-build
-          path: |
-            ui/.wrangler/functions-build/index.js
-            ui/.wrangler/functions-build/sha256.txt
-            ui/.wrangler/functions-build/MISSING_BUNDLE.txt
-
-      - name: "🚀 Deploy to Cloudflare Pages"
-        working-directory: ui
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        run: |
-          echo "🚀 Deploying from ui/"
-          bash ../scripts/check_env.sh || (echo "Env sanity check failed" && exit 1)
-          npx wrangler@4.42.1 pages deploy . --project-name=grassrootsmvt --commit-dirty=true
-
-      - name: "✅ Verify Cloudflare deployment"
-        working-directory: ui
-        run: node ../scripts/verify_deploy.mjs --project grassrootsmvt --retries 5 --interval 5000
-
-      - name: "📦 Upload verification logs"
-        uses: actions/upload-artifact@v4
-        with:
-          name: verification-results
-          path: ui/verify__api_*.txt
----
-name: "🚀 Deploy Pages (build + verify functions)"
-
-on:
-  push:
-    branches:
-      - main
-
-jobs:
-  validate:
-    name: "🧪 Validate Workflows"
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-
-    steps:
-      - name: "📥 Checkout repository"
-        uses: actions/checkout@v4
-
-      - name: "🧰 Setup Python & Node"
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.x"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: "🧪 Install YAML validators"
-        run: |
-          python -m pip install --upgrade pip
-          pip install yamllint
-          npm install -g js-yaml
-
-      - name: "🔍 Lint workflow YAML files"
-        run: |
-          echo "🧩 Running yamllint..."
-          yamllint .github/workflows || {
-            echo "❌ yamllint failed"
-            exit 1
-          }
-
-          echo "🧩 Validating syntax with js-yaml..."
-          for f in .github/workflows/*.yml; do
-            npx js-yaml "$f" >/dev/null || {
-              echo "❌ Invalid YAML in $f"
-              exit 1
-            }
-          done
-
-          echo "✅ YAML syntax OK."
-
-      - name: "📂 Check working-directory consistency"
-        run: |
-          echo "🔍 Ensuring all wrangler/pages commands run from ui/..."
-          PATTERN='npx[[:space:]]+wrangler|pages[[:space:]]+(deploy|functions[[:space:]]+build)'
-          BAD=$(grep -rE "$PATTERN" .github/workflows | grep -v "working-directory:[[:space:]]*ui" || true)
-          if [[ -n "$BAD" ]]; then
-            echo "❌ Found workflow commands not scoped to ui/:"
-            echo "$BAD"
-            exit 1
-          fi
-          echo "✅ All wrangler commands correctly scoped to ui/."
-
-  deploy:
-    name: "🚀 Deploy Pages (build + verify functions)"
-    needs:
-      - validate
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      PROJECT: grassrootsmvt
-
-    steps:
-      - name: "📥 Checkout repository"
-        uses: actions/checkout@v4
-
-      - name: "🧰 Setup Node.js"
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: "📦 Install deterministic dependencies"
-        run: |
-          echo "📦 Installing dependencies in ui/functions"
-          if [[ -f "ui/functions/package.json" ]]; then
-            if [[ -f "ui/functions/package-lock.json" ]]; then
-              echo "Found package-lock.json — running npm ci"
-              npm ci --prefix ui/functions --omit=dev --no-audit --no-fund
-            else
-              echo "No lockfile found — running npm install"
-              npm install --prefix ui/functions --omit=dev --no-audit --no-fund
-            fi
-          else
-            echo "⚠️ ui/functions/package.json not found — skipping function dependency install"
-          fi
-        continue-on-error: false
-
-      - name: "🧪 Preflight: check required files"
-        run: |
-          echo "🔍 Running preflight checks for required files..."
-          if [[ -f "scripts/preflight_check.sh" ]]; then
-            bash scripts/preflight_check.sh
-          else
-            echo "⚠️ preflight_check.sh not found — skipping file validation"
-          fi
-        continue-on-error: false
 
       - name: "🏗️ Build Cloudflare Pages Functions"
         working-directory: ui
         run: |
-          echo "🏗️ Building Pages Functions (functions)..."
+          echo "🏗️ Building Cloudflare Pages Functions..."
           mkdir -p .wrangler/functions-build
           if [[ -d "functions" ]]; then
-              npx wrangler@4.42.1 pages functions build functions --outdir .wrangler/functions-build
-              --outdir .wrangler/functions-build
+            npx wrangler@4.42.1 pages functions build functions --outdir .wrangler/functions-build
           else
-            echo "functions not present — skipping functions build"
+            echo "⚠️ No functions directory found, skipping build."
           fi
-        continue-on-error: false
-
-      - name: "🔢 Compute SHA256 and upload functions bundle artifact"
-        working-directory: ui
-        run: |
-          echo "🔢 Computing SHA256 for built functions bundle..."
-          mkdir -p .wrangler/functions-build
-          cd .wrangler/functions-build
-          if [[ -f index.js ]]; then
-            sha256sum index.js > sha256.txt
-            echo "✅ SHA256 computed:"
-            cat sha256.txt
-          else
-            echo "❌ index.js missing, writing MISSING_BUNDLE.txt"
-            echo "Bundle missing at build time" > MISSING_BUNDLE.txt
-          fi
-        continue-on-error: true
-
-      - name: "📦 Upload built functions bundle artifact"
-        uses: actions/upload-artifact@v4
-        with:
-          name: functions-build
-          path: |
-            .wrangler/functions-build/index.js
-            .wrangler/functions-build/sha256.txt
-            .wrangler/functions-build/MISSING_BUNDLE.txt
 
       - name: "🚀 Deploy to Cloudflare Pages"
         working-directory: ui
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          echo "🚀 Deploying to Cloudflare Pages from ui/"
-          npx wrangler@4.42.1 pages deploy . \ # working-directory: ui
+          echo "🚀 Deploying Cloudflare Pages from ui/..."
+          npx wrangler@4.42.1 pages deploy . \
             --project-name=grassrootsmvt \
             --commit-dirty=true
-        continue-on-error: false
-
-      - name: "✅ Verify uses_functions:true"
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          PROJECT: grassrootsmvt
-        run: |
-          echo "🔍 Checking latest deployment metadata..."
-          API_URL="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1"
-          DEP_JSON=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API_URL")
-          echo "$DEP_JSON" | jq '.result[0] | {id: .id, uses_functions: .uses_functions, url: .url}'
-          USES=$(echo "$DEP_JSON" | jq -r '.result[0].uses_functions')
-          if [ "$USES" != "true" ]; then
-            echo "❌ Deployment missing Functions (uses_functions=$USES)"
-            exit 1
-          fi
-          echo "✅ Functions detected in deployment."
-        continue-on-error: false
-
-      - name: "🔎 Verify deployment health"
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          PROJECT: grassrootsmvt
-        run: |
-          API_DEPLOYMENTS_URL="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1"
-          DEPLOY_URL=$(curl -sSf -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API_DEPLOYMENTS_URL" | jq -r '.result[0].url')
-
-          echo "Checking $DEPLOY_URL/api/ping..."
-          if ! curl -sSf "$DEPLOY_URL/api/ping"; then
-            echo "❌ Failed to reach $DEPLOY_URL/api/ping"
-            exit 1
-          else
-            echo "✅ /api/ping reachable"
-          fi
-        continue-on-error: false
-
-      - name: "🧾 Verify Cloudflare deployment endpoints"
-        working-directory: ui
-        run: |
-          echo "Running deployment verification..."
-          node ../scripts/verify_deploy.mjs \
-            --project grassrootsmvt \
-            --retries 5 \
-            --interval 5000
-        continue-on-error: false
-
-      - name: "📦 Upload verification logs"
-        uses: actions/upload-artifact@v4
-        with:
-          name: verification-results
-          path: ui/verify__api_*.txt
