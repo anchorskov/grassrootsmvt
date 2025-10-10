@@ -1,0 +1,91 @@
+---
+name: "🧪 Validate configuration and CI"
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    name: "🧩 Validate Workflows"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+
+    steps:
+      - name: "📥 Checkout repository"
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: "🧰 Install YAML tooling"
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y python3-pip
+          python3 -m pip install --upgrade pip
+          pip install yamllint
+          npm install -g js-yaml || true
+
+      - name: "🔍 Lint all YAML workflows"
+        run: |
+          echo "🧪 Running yamllint..."
+          yamllint -c .yamllint .github/workflows || true
+          echo "🧩 Validating YAML syntax with js-yaml..."
+          for f in .github/workflows/*.yml; do
+            echo "Checking $f..."
+            npx js-yaml "$f" >/dev/null || echo "❌ Invalid YAML in $f"
+          done
+          echo "✅ YAML syntax checks completed."
+
+      - name: "� Check working-directory for wrangler steps"
+        run: |
+          echo "Running working-directory consistency checker..."
+          python3 scripts/check_working_directory.py || {
+            if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+              echo "Errors found in workflows (see above)";
+              exit 1;
+            else
+              echo "Warnings found in workflows; not blocking PRs.";
+            fi
+          }
+
+      - name: "�🔐 Check required secrets (main only)"
+        run: |
+          echo "🔍 Checking presence of required secrets (values will NOT be printed)..."
+          REQUIRED=("CLOUDFLARE_API_TOKEN" "CLOUDFLARE_ACCOUNT_ID" "PROJECT")
+          MISSING=()
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            for S in "${REQUIRED[@]}"; do
+              if [ -z "${{ secrets["$S"] }}" ]; then
+                MISSING+=("$S")
+              fi
+            done
+            if [ ${#MISSING[@]} -gt 0 ]; then
+              echo "❌ Missing required secrets: ${MISSING[*]}"
+            else
+              echo "✅ All required secrets appear to be configured for main."
+            fi
+          else
+            echo "Skipping secrets check (not on main branch)."
+          fi
+
+      - name: "🧠 Confirm file structure"
+        run: |
+          echo "🔍 Verifying required files exist..."
+          REQUIRED_FILES=("ui/wrangler.toml" "ui/functions" "scripts/verify_deploy.mjs" ".github/workflows/deploy.yml")
+          for FILE in "${REQUIRED_FILES[@]}"; do
+            if [ ! -e "$FILE" ]; then
+              echo "❌ Missing required file or directory: $FILE"
+            else
+              echo "✅ Found: $FILE"
+            fi
+          done
+
+      - name: "✨ Validation Summary"
+        run: |
+          echo ""
+          echo "✅ Validation checks completed (non-blocking)."
