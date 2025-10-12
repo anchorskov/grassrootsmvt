@@ -170,22 +170,41 @@
   <script>
     let metadata = null;
 
-    // API Configuration
-    const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+    // API Configuration with environment detection
+    const API_BASE = window.location.hostname.includes('localhost') 
+      ? 'http://localhost:8787' 
+      : 'https://api.grassrootsmvt.org';
 
-    async function fetchMetadata(state = 'wy') {
+    // Fallback data in case API fails
+    const FALLBACK_DATA = {
+      ok: false,
+      state: "WY",
+      counties: ["ALBANY", "BIG HORN", "CAMPBELL", "JOHNSON", "LARAMIE", "NATRONA", "PARK"],
+      house_districts: ["03", "13", "14", "24", "26", "27", "28"],
+      senate_districts: ["01", "09", "10", "18", "19", "20", "22"]
+    };
+
+    async function fetchMetadata() {
       try {
-        const response = await fetch(`${API_BASE}/api/metadata?state=${state}`);
+        console.log('🌐 Fetching metadata from:', `${API_BASE}/api/metadata`);
+        const response = await fetch(`${API_BASE}/api/metadata`);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
         const data = await response.json();
         
         if (!data.ok) {
-          throw new Error(data.error || 'Failed to fetch metadata');
+          throw new Error(data.message || 'API returned error status');
         }
         
+        console.log('✅ Metadata loaded successfully:', data);
         return data;
       } catch (error) {
-        console.error('Error fetching metadata:', error);
-        throw error;
+        console.error('❌ Error fetching metadata:', error);
+        console.warn('🔄 Using fallback data');
+        return FALLBACK_DATA;
       }
     }
 
@@ -208,19 +227,28 @@
       });
 
       // Populate house districts
-      data.houseDistricts.forEach(district => {
+      data.house_districts.forEach(district => {
         const option = document.createElement('option');
         option.value = district;
         option.textContent = district;
         houseSelect.appendChild(option);
       });
 
-      // Populate senate districts
-      data.senateDistricts.forEach(district => {
+      // Populate senate districts  
+      data.senate_districts.forEach(district => {
         const option = document.createElement('option');
         option.value = district;
         option.textContent = district;
         senateSelect.appendChild(option);
+      });
+
+      // Add fade-in animation
+      [countySelect, houseSelect, senateSelect].forEach(select => {
+        select.style.opacity = '0';
+        select.style.transition = 'opacity 0.3s ease-in-out';
+        setTimeout(() => {
+          select.style.opacity = '1';
+        }, 100);
       });
     }
 
@@ -230,7 +258,28 @@
       document.getElementById('errorState').classList.add('hidden');
     }
 
-    function showError() {
+    function showError(showFallbackNotice = false) {
+      document.getElementById('loadingState').classList.add('hidden');
+      document.getElementById('mainCard').classList.remove('hidden');
+      document.getElementById('errorState').classList.add('hidden');
+      
+      if (showFallbackNotice) {
+        // Show fallback notice
+        const notice = document.createElement('div');
+        notice.className = 'mb-4 p-3 bg-red-50 border border-red-200 rounded-lg';
+        notice.innerHTML = `
+          <div class="flex items-center">
+            <svg class="w-5 h-5 text-red-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
+            </svg>
+            <span class="text-red-700 text-sm font-medium">Using fallback data - some options may be limited</span>
+          </div>
+        `;
+        document.getElementById('mainCard').prepend(notice);
+      }
+    }
+
+    function showCriticalError() {
       document.getElementById('loadingState').classList.add('hidden');
       document.getElementById('mainCard').classList.add('hidden');
       document.getElementById('errorState').classList.remove('hidden');
@@ -239,13 +288,19 @@
     // Initialize page
     document.addEventListener('DOMContentLoaded', async function() {
       try {
-        metadata = await fetchMetadata('wy');
+        metadata = await fetchMetadata();
         populateDropdowns(metadata);
-        showCard();
+        
+        if (metadata.ok) {
+          showCard();
+        } else {
+          showError(true); // Show with fallback notice
+        }
+        
         setupEventListeners();
       } catch (error) {
-        console.error('Failed to initialize page:', error);
-        showError();
+        console.error('💥 Critical error initializing page:', error);
+        showCriticalError();
       }
     });
 
@@ -253,13 +308,23 @@
       const form = document.getElementById('volunteerForm');
       const startButton = document.getElementById('startButton');
       const activitySelect = document.getElementById('activity');
+      const countySelect = document.getElementById('county');
+      const houseSelect = document.getElementById('house');
+      const senateSelect = document.getElementById('senate');
 
-      // Update button state based on activity selection
+      // Enhanced validation function
       function updateButtonState() {
         const activity = activitySelect.value;
-        startButton.disabled = !activity;
+        const county = countySelect.value;
+        const house = houseSelect.value;
+        const senate = senateSelect.value;
         
-        if (activity) {
+        // Require activity, county, and at least one district
+        const isValid = activity && county && (house || senate);
+        
+        startButton.disabled = !isValid;
+        
+        if (isValid) {
           startButton.classList.remove('opacity-50', 'cursor-not-allowed');
           startButton.classList.add('hover:scale-[1.02]', 'hover:shadow-lg');
         } else {
@@ -268,8 +333,10 @@
         }
       }
 
-      // Listen for activity changes
-      activitySelect.addEventListener('change', updateButtonState);
+      // Listen for changes on all relevant fields
+      [activitySelect, countySelect, houseSelect, senateSelect].forEach(select => {
+        select.addEventListener('change', updateButtonState);
+      });
 
       // Initial button state
       updateButtonState();
@@ -280,18 +347,33 @@
         
         const formData = new FormData(form);
         const activity = formData.get('activity');
+        const county = formData.get('county');
+        const house = formData.get('house');
+        const senate = formData.get('senate');
         
         if (!activity) {
           alert('Please select a volunteer activity first.');
           return;
         }
+        
+        if (!county) {
+          alert('Please select a county.');
+          return;
+        }
+        
+        if (!house && !senate) {
+          alert('Please select at least one district (House or Senate).');
+          return;
+        }
 
         // Build query parameters
         const params = new URLSearchParams();
+        params.append('activity', activity);
+        params.append('state', 'WY');
         
         // Add all non-empty form values to query string
         for (const [key, value] of formData.entries()) {
-          if (value && value.trim()) {
+          if (value && value.trim() && key !== 'activity') {
             params.append(key, value.trim());
           }
         }
@@ -321,7 +403,7 @@
 
         // Navigate with query parameters
         const url = `${targetPage}?${params.toString()}`;
-        console.log('Navigating to:', url);
+        console.log('🚀 Navigating to:', url);
         
         // Small delay for UX, then navigate
         setTimeout(() => {
