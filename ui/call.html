@@ -114,8 +114,7 @@
         console.log("🔐 Access token present:", !!token);
         if (!token) console.warn("No access_token in localStorage — /api/whoami will return 401");
         try {
-          const r = await fetch('/api/ping');
-          const j = await r.json();
+          const j = await window.apiFetch('/ping');
           console.log('🌎 /api/ping result:', j);
         } catch (err) {
           console.error('Failed to reach /api/ping:', err);

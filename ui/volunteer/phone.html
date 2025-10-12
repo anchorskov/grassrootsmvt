@@ -32,8 +32,7 @@
       console.log("🔐 Access token present:", !!token);
       if (!token) console.warn("No access_token in localStorage — /api/whoami will return 401");
       try {
-        const r = await fetch('/api/ping');
-        const j = await r.json();
+        const j = await window.apiFetch('/ping');
         console.log('🌎 /api/ping result:', j);
       } catch (err) {
         console.error('Failed to reach /api/ping:', err);
@@ -75,11 +74,9 @@ loadWho(); renderFilters(getFilters());
 <script>
 async function fetchVoters() {
   try {
-    const res = await fetch('/api/voters');
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.error);
+    const voters = await window.fetchVoters(); // Use the API client function
     const list = document.getElementById('voterList');
-    list.innerHTML = data.voters.map(v => 
+    list.innerHTML = voters.map(v => 
       `<li>
         <strong>${v.voter_id}</strong> — ${v.county} (${v.political_party})
         <button onclick="logCall('${v.voter_id}', 'Contacted', '')">Log Call</button>
@@ -92,12 +89,11 @@ async function fetchVoters() {
 
 async function logCall(voter_id, call_result, notes) {
   try {
-    const res = await fetch('/api/call', {
+    const data = await window.apiFetch('/call', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ voter_id, call_result, notes })
     });
-    const data = await res.json();
     if (data.ok) alert('Call logged!');
     else alert('Error: ' + data.error);
   } catch (e) {
@@ -106,8 +102,7 @@ async function logCall(voter_id, call_result, notes) {
 }
 
 async function fetchActivity() {
-  const res = await fetch('/api/activity');
-  const data = await res.json();
+  const data = await window.apiFetch('/activity');
   const div = document.getElementById('activity');
   if (data.ok) {
     div.innerHTML = data.activity.map(a => 
