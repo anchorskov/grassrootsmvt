@@ -1,1 +1,501 @@
-<!-- DELETED: old debug canvass page. The modern mobile canvass UI lives at /canvass/ -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grassroots Canvassing</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'grassroots': {
+              50: '#f0f9ff',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1'
+            }
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+  <div class="container mx-auto px-4 py-4 max-w-4xl">
+    
+    <!-- Header -->
+    <div class="bg-white rounded-xl shadow-lg p-4 md:p-6 mb-4">
+      <div class="flex items-center justify-between mb-4">
+        <h1 class="text-2xl md:text-3xl font-bold text-gray-800">
+          🏘️ Grassroots Canvassing
+        </h1>
+        <a href="/volunteer/" 
+           class="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors duration-200 text-sm font-medium">
+          ← Back
+        </a>
+      </div>
+      
+      <!-- Dynamic Targeting Info -->
+      <div id="targeting-info" class="bg-grassroots-50 rounded-lg p-4">
+        <div class="flex items-center">
+          <svg class="w-5 h-5 text-grassroots-600 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path>
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path>
+          </svg>
+          <span id="target-label" class="text-grassroots-700 font-semibold">
+            Loading targeting information...
+          </span>
+        </div>
+      </div>
+      
+      <!-- Progress Display -->
+      <div id="progress-display" class="mt-4 hidden">
+        <div class="flex items-center justify-between text-sm text-gray-600">
+          <span id="progress-text">0 of 0 completed</span>
+          <button id="cached-button" class="hidden px-3 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-700 rounded-lg text-xs font-medium">
+            Use Cached List
+          </button>
+        </div>
+        <div class="w-full bg-gray-200 rounded-full h-2 mt-2">
+          <div id="progress-bar" class="bg-grassroots-500 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="loading-voters" class="bg-white rounded-xl shadow-lg p-8">
+      <div class="text-center">
+        <svg class="animate-spin mx-auto h-8 w-8 text-grassroots-500 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 714 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <p class="text-gray-600">Loading your walk list...</p>
+      </div>
+    </div>
+    
+    <!-- Error State -->
+    <div id="error-voters" class="hidden bg-white rounded-xl shadow-lg p-8">
+      <div class="text-center">
+        <svg class="mx-auto h-12 w-12 text-red-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16c-.77.833.192 2.5 1.732 2.5z"></path>
+        </svg>
+        <p class="text-red-700 font-medium mb-4">⚠️ Error loading walk list</p>
+        <div class="space-y-2">
+          <button id="retry-voters" class="px-4 py-2 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg transition-colors duration-200">
+            Retry
+          </button>
+          <button id="use-cached" class="hidden px-4 py-2 bg-yellow-100 hover:bg-yellow-200 text-yellow-700 rounded-lg transition-colors duration-200 ml-2">
+            Use Cached List
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- No Voters State -->
+    <div id="no-voters" class="hidden bg-white rounded-xl shadow-lg p-8">
+      <div class="text-center">
+        <svg class="mx-auto h-12 w-12 text-yellow-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2 2v-5m16 0h-2.586a1 1 0 00-.707.293l-1.414 1.414a1 1 0 01-.707.293h-2.172a1 1 0 01-.707-.293L9.586 13H7"></path>
+        </svg>
+        <p class="text-yellow-700 font-medium">🎯 No matching voters found.</p>
+        <p class="text-yellow-600 text-sm mt-2">Try adjusting your targeting criteria.</p>
+      </div>
+    </div>
+    
+    <!-- Voter Walk List -->
+    <div id="voter-list" class="hidden space-y-4">
+      <!-- Voter cards will be populated here -->
+    </div>
+    
+  </div>
+
+  <!-- JavaScript -->
+  <script type="module" src="/src/api-shim.js"></script>
+  <script>
+    let voters = [];
+    let urlParams = {};
+    let completedCount = 0;
+    let voterResults = new Map(); // Track voter results
+
+    // API Configuration with environment detection
+    const API_BASE = window.location.hostname.includes('localhost') 
+      ? 'http://localhost:8787' 
+      : 'https://api.grassrootsmvt.org';
+
+    // Parse URL parameters
+    function parseUrlParams() {
+      const params = new URLSearchParams(window.location.search);
+      return {
+        activity: params.get('activity'),
+        city: params.get('city'),
+        house_district: params.get('house_district'),
+        senate_district: params.get('senate_district'),
+        state: params.get('state')
+      };
+    }
+
+    // Build targeting info display
+    function buildTargetingInfo(params) {
+      let label = 'Target: ';
+      
+      if (params.city && params.house_district) {
+        label += `City: ${params.city}, House District ${params.house_district}`;
+      } else if (params.city && params.senate_district) {
+        label += `City: ${params.city}, Senate District ${params.senate_district}`;
+      } else if (params.city) {
+        label += `City: ${params.city}`;
+      } else if (params.house_district) {
+        if (params.city === '(ALL)') {
+          label += `House District ${params.house_district} (All Cities)`;
+        } else {
+          label += `House District ${params.house_district}`;
+        }
+      } else if (params.senate_district) {
+        if (params.city === '(ALL)') {
+          label += `Senate District ${params.senate_district} (All Cities)`;
+        } else {
+          label += `Senate District ${params.senate_district}`;
+        }
+      } else {
+        label += 'General Population';
+      }
+      
+      return label;
+    }
+
+    // Cache voter data for offline use
+    function cacheVoterData(data) {
+      try {
+        const cacheData = {
+          timestamp: Date.now(),
+          urlParams: urlParams,
+          data: data
+        };
+        localStorage.setItem("last_canvass_payload", JSON.stringify(cacheData));
+        console.log('✅ Cached voter data for offline use');
+      } catch (error) {
+        console.warn('⚠️ Failed to cache voter data:', error);
+      }
+    }
+
+    // Load cached voter data
+    function loadCachedData() {
+      try {
+        const cached = localStorage.getItem("last_canvass_payload");
+        if (cached) {
+          const cacheData = JSON.parse(cached);
+          const age = Date.now() - cacheData.timestamp;
+          const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+          
+          if (age < maxAge) {
+            console.log('📦 Found cached voter data');
+            return cacheData.data;
+          } else {
+            console.log('⏰ Cached data expired, removing');
+            localStorage.removeItem("last_canvass_payload");
+          }
+        }
+      } catch (error) {
+        console.warn('⚠️ Failed to load cached data:', error);
+      }
+      return null;
+    }
+
+    // Check if cached data is available
+    function hasCachedData() {
+      return loadCachedData() !== null;
+    }
+
+    // Fetch voters from API
+    async function fetchVoters() {
+      try {
+        // Show loading state
+        showLoadingState();
+        
+        // Build query parameters
+        const query = [];
+        if (urlParams.city) query.push(`city=${encodeURIComponent(urlParams.city)}`);
+        if (urlParams.house_district) query.push(`house_district=${encodeURIComponent(urlParams.house_district)}`);
+        if (urlParams.senate_district) query.push(`senate_district=${encodeURIComponent(urlParams.senate_district)}`);
+        
+        const apiUrl = `${API_BASE}/api/voters${query.length ? '?' + query.join('&') : ''}`;
+        console.log('🌐 Fetching voters from:', apiUrl);
+        
+        const response = await fetch(apiUrl);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!data.ok) {
+          throw new Error(data.message || 'Failed to fetch voters');
+        }
+        
+        console.log('✅ Voters loaded:', data);
+        
+        // Cache the data
+        cacheVoterData(data);
+        
+        return data;
+        
+      } catch (error) {
+        console.error('❌ Error fetching voters:', error);
+        throw error;
+      }
+    }
+
+    // Show different UI states
+    function showLoadingState() {
+      document.getElementById('loading-voters').classList.remove('hidden');
+      document.getElementById('error-voters').classList.add('hidden');
+      document.getElementById('no-voters').classList.add('hidden');
+      document.getElementById('voter-list').classList.add('hidden');
+    }
+
+    function showErrorState() {
+      document.getElementById('loading-voters').classList.add('hidden');
+      document.getElementById('error-voters').classList.remove('hidden');
+      document.getElementById('no-voters').classList.add('hidden');
+      document.getElementById('voter-list').classList.add('hidden');
+      
+      // Show cached option if available
+      if (hasCachedData()) {
+        document.getElementById('use-cached').classList.remove('hidden');
+      }
+    }
+
+    function showNoVotersState() {
+      document.getElementById('loading-voters').classList.add('hidden');
+      document.getElementById('error-voters').classList.add('hidden');
+      document.getElementById('no-voters').classList.remove('hidden');
+      document.getElementById('voter-list').classList.add('hidden');
+    }
+
+    function showVoterListState() {
+      document.getElementById('loading-voters').classList.add('hidden');
+      document.getElementById('error-voters').classList.add('hidden');
+      document.getElementById('no-voters').classList.add('hidden');
+      document.getElementById('voter-list').classList.remove('hidden');
+      document.getElementById('progress-display').classList.remove('hidden');
+    }
+
+    // Populate voter list
+    function populateVoterList(voterData) {
+      voters = voterData || [];
+      
+      if (voters.length === 0) {
+        showNoVotersState();
+        return;
+      }
+      
+      const voterList = document.getElementById('voter-list');
+      
+      voterList.innerHTML = voters.map((voter, index) => `
+        <div id="voter-card-${voter.voter_id}" class="voter-card bg-white rounded-xl shadow-lg p-4 md:p-6 transition-all duration-300">
+          <div class="flex flex-col md:flex-row md:items-center md:justify-between">
+            <!-- Voter Info -->
+            <div class="mb-4 md:mb-0">
+              <div class="font-bold text-lg text-gray-800 mb-2">Voter #${index + 1}</div>
+              <div class="space-y-1 text-sm text-gray-600">
+                <div><span class="font-medium">ID:</span> ${voter.voter_id}</div>
+                <div><span class="font-medium">County:</span> ${voter.county || 'Unknown'}</div>
+                <div><span class="font-medium">Party:</span> ${voter.political_party || 'No Party'}</div>
+                <div><span class="font-medium">Districts:</span> H${voter.house || 'N/A'} | S${voter.senate || 'N/A'}</div>
+              </div>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="grid grid-cols-2 md:grid-cols-1 gap-2 md:w-48">
+              <button onclick="markResult('${voter.voter_id}', 'Visited')" 
+                      class="result-btn px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-medium transition-colors duration-200 text-sm">
+                ✅ Visited
+              </button>
+              
+              <button onclick="markResult('${voter.voter_id}', 'Not Home')" 
+                      class="result-btn px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg font-medium transition-colors duration-200 text-sm">
+                🚪 Not Home
+              </button>
+              
+              <button onclick="markResult('${voter.voter_id}', 'Refused')" 
+                      class="result-btn px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium transition-colors duration-200 text-sm">
+                ❌ Refused
+              </button>
+              
+              <button onclick="markResult('${voter.voter_id}', 'Follow Up')" 
+                      class="result-btn px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-medium transition-colors duration-200 text-sm">
+                📝 Follow Up
+              </button>
+            </div>
+          </div>
+          
+          <!-- Result Display (hidden by default) -->
+          <div id="result-${voter.voter_id}" class="result-display hidden mt-4 p-3 rounded-lg">
+            <div class="flex items-center">
+              <span class="result-icon mr-2"></span>
+              <span class="result-text font-medium"></span>
+              <span class="result-timestamp text-xs text-gray-500 ml-auto"></span>
+            </div>
+          </div>
+        </div>
+      `).join('');
+      
+      showVoterListState();
+      updateProgress();
+    }
+
+    // Mark canvassing result
+    async function markResult(voterId, result) {
+      try {
+        console.log(`📋 Marking ${voterId} as ${result}`);
+        
+        // Store result locally
+        voterResults.set(voterId, {
+          result: result,
+          timestamp: new Date().toLocaleTimeString()
+        });
+        
+        // Update UI
+        const card = document.getElementById(`voter-card-${voterId}`);
+        const resultDisplay = document.getElementById(`result-${voterId}`);
+        const resultIcon = resultDisplay.querySelector('.result-icon');
+        const resultText = resultDisplay.querySelector('.result-text');
+        const resultTimestamp = resultDisplay.querySelector('.result-timestamp');
+        
+        // Disable buttons
+        card.querySelectorAll('.result-btn').forEach(btn => {
+          btn.disabled = true;
+          btn.classList.add('opacity-50', 'cursor-not-allowed');
+        });
+        
+        // Gray out the card
+        card.classList.add('bg-gray-50', 'opacity-75');
+        
+        // Show result
+        resultDisplay.classList.remove('hidden');
+        resultText.textContent = `Marked as: ${result}`;
+        resultTimestamp.textContent = voterResults.get(voterId).timestamp;
+        
+        // Style based on result
+        switch(result) {
+          case 'Visited':
+            resultDisplay.classList.add('bg-green-50', 'border', 'border-green-200');
+            resultIcon.textContent = '✅';
+            break;
+          case 'Not Home':
+            resultDisplay.classList.add('bg-yellow-50', 'border', 'border-yellow-200');
+            resultIcon.textContent = '🚪';
+            break;
+          case 'Refused':
+            resultDisplay.classList.add('bg-red-50', 'border', 'border-red-200');
+            resultIcon.textContent = '❌';
+            break;
+          case 'Follow Up':
+            resultDisplay.classList.add('bg-blue-50', 'border', 'border-blue-200');
+            resultIcon.textContent = '📝';
+            break;
+        }
+        
+        // Update progress
+        completedCount++;
+        updateProgress();
+        
+        // TODO: Send POST to /api/canvass when endpoint is ready
+        // const response = await fetch(`${API_BASE}/api/canvass`, {
+        //   method: 'POST',
+        //   headers: { 'Content-Type': 'application/json' },
+        //   body: JSON.stringify({ voter_id: voterId, canvass_result: result })
+        // });
+        
+        console.log('✅ Result marked successfully');
+        
+      } catch (error) {
+        console.error('❌ Error marking result:', error);
+        alert('Error marking result. Please try again.');
+      }
+    }
+
+    // Update progress display
+    function updateProgress() {
+      const total = voters.length;
+      const percentage = total > 0 ? (completedCount / total) * 100 : 0;
+      
+      document.getElementById('progress-text').textContent = `${completedCount} of ${total} completed`;
+      document.getElementById('progress-bar').style.width = `${percentage}%`;
+    }
+
+    // Load data (either from API or cache)
+    async function loadVoterData(useCache = false) {
+      try {
+        let data;
+        
+        if (useCache) {
+          data = loadCachedData();
+          if (!data) {
+            throw new Error('No cached data available');
+          }
+          console.log('📦 Using cached voter data');
+        } else {
+          data = await fetchVoters();
+        }
+        
+        populateVoterList(data.voters || []);
+        
+      } catch (error) {
+        console.error('❌ Error loading voter data:', error);
+        showErrorState();
+      }
+    }
+
+    // Setup event listeners
+    function setupEventListeners() {
+      // Retry button
+      document.getElementById('retry-voters').addEventListener('click', () => {
+        loadVoterData(false);
+      });
+      
+      // Use cached button
+      document.getElementById('use-cached').addEventListener('click', () => {
+        loadVoterData(true);
+      });
+      
+      // Cached button in header
+      document.getElementById('cached-button').addEventListener('click', () => {
+        loadVoterData(true);
+      });
+      
+      // Show cached option in header if available
+      if (hasCachedData()) {
+        document.getElementById('cached-button').classList.remove('hidden');
+      }
+    }
+
+    // Initialize page
+    document.addEventListener('DOMContentLoaded', function() {
+      // Parse URL parameters
+      urlParams = parseUrlParams();
+      console.log('📋 URL Parameters:', urlParams);
+      
+      // Update targeting info
+      const targetLabel = buildTargetingInfo(urlParams);
+      document.getElementById('target-label').textContent = targetLabel;
+      
+      // Setup event listeners
+      setupEventListeners();
+      
+      // Load voter data
+      loadVoterData(false);
+      
+      console.log('✅ Canvassing page initialized successfully');
+    });
+
+    // Make functions globally available
+    window.markResult = markResult;
+  </script>
+
+</body>
+</html>
