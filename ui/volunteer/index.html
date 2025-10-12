@@ -61,74 +61,80 @@
           </label>
           <select id="activity" name="activity" required 
                   class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200">
-            <option value="">Choose an activity...</option>
+            <option value="">Select Activity</option>
             <option value="phone">Phone Banking</option>
             <option value="canvass">Canvassing</option>
           </select>
         </div>
 
-        <!-- Geographic Targeting -->
+        <!-- Dynamic District-City Targeting -->
         <div class="bg-gray-50 rounded-lg p-6 space-y-4">
           <h3 class="text-lg font-semibold text-gray-800 mb-4">Geographic Targeting</h3>
           
-          <!-- State -->
+          <!-- District Type Selection -->
           <div class="space-y-2">
-            <label for="state" class="block text-sm font-medium text-gray-700">State</label>
-            <select id="state" name="state" 
-                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200">
-              <option value="wy" selected>Wyoming (WY)</option>
+            <label for="district-type" class="block text-sm font-medium text-gray-700">District Type</label>
+            <select id="district-type" name="district-type" disabled
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+              <option value="">Select District Type</option>
+              <option value="house">House District</option>
+              <option value="senate">Senate District</option>
             </select>
           </div>
 
-          <!-- County -->
+          <!-- District Number Selection -->
           <div class="space-y-2">
-            <label for="county" class="block text-sm font-medium text-gray-700">County</label>
-            <select id="county" name="county" 
-                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200">
-              <option value="">All Counties</option>
+            <label for="district-number" class="block text-sm font-medium text-gray-700">District Number</label>
+            <select id="district-number" name="district-number" disabled
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+              <option value="">Select District</option>
             </select>
           </div>
 
-          <!-- City (Optional) -->
+          <!-- City Selection -->
           <div class="space-y-2">
             <label for="city" class="block text-sm font-medium text-gray-700">
-              City <span class="text-gray-400 text-xs">(optional)</span>
+              City <span class="text-gray-400 text-xs">(automatically populated)</span>
             </label>
-            <input type="text" id="city" name="city" placeholder="Enter city name..." 
-                   class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200">
+            <select id="city" name="city" disabled
+                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+              <option value="">Select City</option>
+            </select>
           </div>
 
-          <!-- Legislative Districts -->
-          <div class="grid md:grid-cols-2 gap-4">
-            <!-- House District -->
-            <div class="space-y-2">
-              <label for="house" class="block text-sm font-medium text-gray-700">House District</label>
-              <select id="house" name="house" 
-                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200">
-                <option value="">All Districts</option>
-              </select>
+          <!-- Loading Indicator for Cities -->
+          <div id="city-loading" class="hidden">
+            <div class="flex items-center justify-center py-2">
+              <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-grassroots-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span class="text-sm text-gray-600">Loading cities...</span>
             </div>
+          </div>
 
-            <!-- Senate District -->
-            <div class="space-y-2">
-              <label for="senate" class="block text-sm font-medium text-gray-700">Senate District</label>
-              <select id="senate" name="senate" 
-                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200">
-                <option value="">All Districts</option>
-              </select>
+          <!-- City Error State -->
+          <div id="city-error" class="hidden">
+            <div class="p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div class="flex items-center justify-between">
+                <span class="text-red-700 text-sm">Unable to load cities</span>
+                <button type="button" id="retry-cities" class="text-red-600 hover:text-red-800 text-sm font-medium">
+                  Retry
+                </button>
+              </div>
             </div>
           </div>
         </div>
 
         <!-- Start Button -->
         <div class="pt-4">
-          <button type="submit" id="startButton" 
+          <button type="submit" id="start-btn" disabled
                   class="w-full bg-grassroots-500 hover:bg-grassroots-600 text-white font-semibold py-4 px-6 rounded-lg transition-all duration-200 transform hover:scale-[1.02] hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none">
             <span class="flex items-center justify-center">
               <svg class="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
               </svg>
-              Start Volunteering
+              Start
             </span>
           </button>
         </div>
@@ -138,7 +144,7 @@
       <!-- Help Text -->
       <div class="mt-6 p-4 bg-blue-50 rounded-lg">
         <p class="text-sm text-blue-700">
-          <strong>Need help?</strong> Select your preferred volunteer activity and choose geographic filters to focus your efforts. Phone banking connects you with voters via telephone, while canvassing involves door-to-door outreach.
+          <strong>Dynamic Selection:</strong> Choose your activity, then select a district type and number. Cities will automatically load based on your district selection. Select "(ALL)" to include all cities in the district, or choose a specific city for targeted outreach.
         </p>
       </div>
 
@@ -175,15 +181,31 @@
       ? 'http://localhost:8787' 
       : 'https://api.grassrootsmvt.org';
 
-    // Fallback data in case API fails
-    const FALLBACK_DATA = {
-      ok: false,
-      state: "WY",
-      counties: ["ALBANY", "BIG HORN", "CAMPBELL", "JOHNSON", "LARAMIE", "NATRONA", "PARK"],
-      house_districts: ["03", "13", "14", "24", "26", "27", "28"],
-      senate_districts: ["01", "09", "10", "18", "19", "20", "22"]
+    // DOM Elements
+    const elements = {
+      activity: null,
+      districtType: null,
+      districtNumber: null,
+      city: null,
+      startBtn: null,
+      cityLoading: null,
+      cityError: null,
+      retryCities: null
     };
 
+    // Initialize DOM elements
+    function initElements() {
+      elements.activity = document.getElementById('activity');
+      elements.districtType = document.getElementById('district-type');
+      elements.districtNumber = document.getElementById('district-number');
+      elements.city = document.getElementById('city');
+      elements.startBtn = document.getElementById('start-btn');
+      elements.cityLoading = document.getElementById('city-loading');
+      elements.cityError = document.getElementById('city-error');
+      elements.retryCities = document.getElementById('retry-cities');
+    }
+
+    // Fetch metadata from API
     async function fetchMetadata() {
       try {
         console.log('🌐 Fetching metadata from:', `${API_BASE}/api/metadata`);
@@ -203,82 +225,254 @@
         return data;
       } catch (error) {
         console.error('❌ Error fetching metadata:', error);
-        console.warn('🔄 Using fallback data');
-        return FALLBACK_DATA;
+        throw error;
       }
     }
 
-    function populateDropdowns(data) {
-      const countySelect = document.getElementById('county');
-      const houseSelect = document.getElementById('house');
-      const senateSelect = document.getElementById('senate');
+    // Populate district numbers based on type
+    function populateDistricts(metadata) {
+      const districtNumber = elements.districtNumber;
+      districtNumber.innerHTML = '<option value="">Select District</option>';
+      
+      // Store metadata for later use
+      districtNumber.dataset.houseDistricts = JSON.stringify(metadata.house_districts);
+      districtNumber.dataset.senateDistricts = JSON.stringify(metadata.senate_districts);
+    }
 
-      // Clear existing options (except the first "All" option)
-      countySelect.innerHTML = '<option value="">All Counties</option>';
-      houseSelect.innerHTML = '<option value="">All Districts</option>';
-      senateSelect.innerHTML = '<option value="">All Districts</option>';
+    // Update district number options based on selected type
+    function updateDistrictNumbers() {
+      const districtType = elements.districtType.value;
+      const districtNumber = elements.districtNumber;
+      
+      districtNumber.innerHTML = '<option value="">Select District</option>';
+      
+      if (districtType === 'house') {
+        const houseDistricts = JSON.parse(districtNumber.dataset.houseDistricts || '[]');
+        houseDistricts.forEach(district => {
+          const option = document.createElement('option');
+          option.value = district;
+          option.textContent = `House District ${district}`;
+          districtNumber.appendChild(option);
+        });
+        districtNumber.disabled = false;
+      } else if (districtType === 'senate') {
+        const senateDistricts = JSON.parse(districtNumber.dataset.senateDistricts || '[]');
+        senateDistricts.forEach(district => {
+          const option = document.createElement('option');
+          option.value = district;
+          option.textContent = `Senate District ${district}`;
+          districtNumber.appendChild(option);
+        });
+        districtNumber.disabled = false;
+      } else {
+        districtNumber.disabled = true;
+      }
+      
+      // Reset downstream elements
+      resetCitySelection();
+      updateStartButton();
+    }
 
-      // Populate counties
-      data.counties.forEach(county => {
-        const option = document.createElement('option');
-        option.value = county;
-        option.textContent = county;
-        countySelect.appendChild(option);
+    // Fetch cities for selected district
+    async function fetchCitiesForDistrict() {
+      const districtType = elements.districtType.value;
+      const districtValue = elements.districtNumber.value;
+      
+      if (!districtType || !districtValue) return;
+      
+      try {
+        // Show loading state
+        elements.cityLoading.classList.remove('hidden');
+        elements.cityError.classList.add('hidden');
+        elements.city.disabled = true;
+        
+        console.log(`🏙️ Fetching cities for ${districtType} district ${districtValue}`);
+        
+        const queryParam = `${districtType}_district=${districtValue}`;
+        const response = await fetch(`${API_BASE}/api/voters?${queryParam}`);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!data.ok) {
+          throw new Error(data.message || 'Failed to fetch cities');
+        }
+        
+        console.log('✅ Cities loaded:', data.cities);
+        populateCityDropdown(data.cities);
+        
+      } catch (error) {
+        console.error('❌ Error fetching cities:', error);
+        showCityError();
+      } finally {
+        elements.cityLoading.classList.add('hidden');
+      }
+    }
+
+    // Populate city dropdown with fetched data
+    function populateCityDropdown(cities) {
+      const citySelect = elements.city;
+      citySelect.innerHTML = '<option value="">Select City</option>';
+      
+      if (cities && cities.length > 0) {
+        cities.forEach(city => {
+          const option = document.createElement('option');
+          option.value = city;
+          option.textContent = city;
+          citySelect.appendChild(option);
+        });
+        citySelect.disabled = false;
+      } else {
+        // No cities available - hide city dropdown and enable start button
+        console.log('ℹ️ No cities found - enabling start button immediately');
+        citySelect.disabled = true;
+        updateStartButton();
+      }
+    }
+
+    // Show city loading error
+    function showCityError() {
+      elements.cityError.classList.remove('hidden');
+      elements.city.disabled = true;
+    }
+
+    // Reset city selection
+    function resetCitySelection() {
+      elements.city.innerHTML = '<option value="">Select City</option>';
+      elements.city.disabled = true;
+      elements.cityLoading.classList.add('hidden');
+      elements.cityError.classList.add('hidden');
+    }
+
+    // Update start button state
+    function updateStartButton() {
+      const activity = elements.activity.value;
+      const districtType = elements.districtType.value;
+      const districtNumber = elements.districtNumber.value;
+      const city = elements.city.value;
+      
+      // Enable if: activity + district type + district number + (city OR city disabled)
+      const isValid = activity && districtType && districtNumber && 
+                     (city || elements.city.disabled);
+      
+      elements.startBtn.disabled = !isValid;
+      
+      if (isValid) {
+        elements.startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        elements.startBtn.classList.add('hover:scale-[1.02]', 'hover:shadow-lg');
+      } else {
+        elements.startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        elements.startBtn.classList.remove('hover:scale-[1.02]', 'hover:shadow-lg');
+      }
+    }
+
+    // Handle form submission
+    function handleFormSubmit(e) {
+      e.preventDefault();
+      
+      const activity = elements.activity.value;
+      const districtType = elements.districtType.value;
+      const districtValue = elements.districtNumber.value;
+      const cityValue = elements.city.value;
+      
+      if (!activity || !districtType || !districtValue) {
+        alert('Please complete all required selections.');
+        return;
+      }
+      
+      // Build query parameters
+      const params = new URLSearchParams({
+        activity: activity,
+        state: 'WY',
+        [`${districtType}_district`]: districtValue
       });
+      
+      // Add city if selected
+      if (cityValue) {
+        params.append('city', cityValue);
+      }
+      
+      // Determine target page
+      const targetPage = `/volunteer/${activity}.html`;
+      const url = `${targetPage}?${params.toString()}`;
+      
+      console.log('🚀 Redirecting to:', url);
+      
+      // Add loading state
+      elements.startBtn.innerHTML = `
+        <span class="flex items-center justify-center">
+          <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          Loading...
+        </span>
+      `;
+      elements.startBtn.disabled = true;
+      
+      // Navigate after brief delay
+      setTimeout(() => {
+        window.location.href = url;
+      }, 500);
+    }
 
-      // Populate house districts
-      data.house_districts.forEach(district => {
-        const option = document.createElement('option');
-        option.value = district;
-        option.textContent = district;
-        houseSelect.appendChild(option);
+    // Setup event listeners
+    function setupEventListeners() {
+      // Activity selection enables district type
+      elements.activity.addEventListener('change', () => {
+        const hasActivity = elements.activity.value;
+        elements.districtType.disabled = !hasActivity;
+        
+        if (!hasActivity) {
+          // Reset everything if no activity
+          elements.districtType.value = '';
+          elements.districtType.disabled = true;
+          updateDistrictNumbers();
+        }
+        
+        updateStartButton();
       });
-
-      // Populate senate districts  
-      data.senate_districts.forEach(district => {
-        const option = document.createElement('option');
-        option.value = district;
-        option.textContent = district;
-        senateSelect.appendChild(option);
-      });
-
-      // Add fade-in animation
-      [countySelect, houseSelect, senateSelect].forEach(select => {
-        select.style.opacity = '0';
-        select.style.transition = 'opacity 0.3s ease-in-out';
-        setTimeout(() => {
-          select.style.opacity = '1';
-        }, 100);
+      
+      // District type change updates district numbers
+      elements.districtType.addEventListener('change', updateDistrictNumbers);
+      
+      // District number change fetches cities
+      elements.districtNumber.addEventListener('change', fetchCitiesForDistrict);
+      
+      // City selection updates start button
+      elements.city.addEventListener('change', updateStartButton);
+      
+      // Retry cities button
+      elements.retryCities.addEventListener('click', fetchCitiesForDistrict);
+      
+      // Form submission
+      document.getElementById('volunteerForm').addEventListener('submit', handleFormSubmit);
+      
+      // Add smooth focus animations
+      document.querySelectorAll('select').forEach(element => {
+        element.addEventListener('focus', function() {
+          if (!this.disabled) {
+            this.parentElement.classList.add('scale-[1.02]');
+          }
+        });
+        
+        element.addEventListener('blur', function() {
+          this.parentElement.classList.remove('scale-[1.02]');
+        });
       });
     }
 
+    // Show main card
     function showCard() {
       document.getElementById('loadingState').classList.add('hidden');
       document.getElementById('mainCard').classList.remove('hidden');
       document.getElementById('errorState').classList.add('hidden');
     }
 
-    function showError(showFallbackNotice = false) {
-      document.getElementById('loadingState').classList.add('hidden');
-      document.getElementById('mainCard').classList.remove('hidden');
-      document.getElementById('errorState').classList.add('hidden');
-      
-      if (showFallbackNotice) {
-        // Show fallback notice
-        const notice = document.createElement('div');
-        notice.className = 'mb-4 p-3 bg-red-50 border border-red-200 rounded-lg';
-        notice.innerHTML = `
-          <div class="flex items-center">
-            <svg class="w-5 h-5 text-red-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
-              <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path>
-            </svg>
-            <span class="text-red-700 text-sm font-medium">Using fallback data - some options may be limited</span>
-          </div>
-        `;
-        document.getElementById('mainCard').prepend(notice);
-      }
-    }
-
+    // Show critical error
     function showCriticalError() {
       document.getElementById('loadingState').classList.add('hidden');
       document.getElementById('mainCard').classList.add('hidden');
@@ -288,140 +482,17 @@
     // Initialize page
     document.addEventListener('DOMContentLoaded', async function() {
       try {
+        initElements();
         metadata = await fetchMetadata();
-        populateDropdowns(metadata);
-        
-        if (metadata.ok) {
-          showCard();
-        } else {
-          showError(true); // Show with fallback notice
-        }
-        
+        populateDistricts(metadata);
+        showCard();
         setupEventListeners();
+        console.log('✅ Volunteer landing page initialized successfully');
       } catch (error) {
         console.error('💥 Critical error initializing page:', error);
         showCriticalError();
       }
     });
-
-    function setupEventListeners() {
-      const form = document.getElementById('volunteerForm');
-      const startButton = document.getElementById('startButton');
-      const activitySelect = document.getElementById('activity');
-      const countySelect = document.getElementById('county');
-      const houseSelect = document.getElementById('house');
-      const senateSelect = document.getElementById('senate');
-
-      // Enhanced validation function
-      function updateButtonState() {
-        const activity = activitySelect.value;
-        const county = countySelect.value;
-        const house = houseSelect.value;
-        const senate = senateSelect.value;
-        
-        // Require activity, county, and at least one district
-        const isValid = activity && county && (house || senate);
-        
-        startButton.disabled = !isValid;
-        
-        if (isValid) {
-          startButton.classList.remove('opacity-50', 'cursor-not-allowed');
-          startButton.classList.add('hover:scale-[1.02]', 'hover:shadow-lg');
-        } else {
-          startButton.classList.add('opacity-50', 'cursor-not-allowed');
-          startButton.classList.remove('hover:scale-[1.02]', 'hover:shadow-lg');
-        }
-      }
-
-      // Listen for changes on all relevant fields
-      [activitySelect, countySelect, houseSelect, senateSelect].forEach(select => {
-        select.addEventListener('change', updateButtonState);
-      });
-
-      // Initial button state
-      updateButtonState();
-
-      // Handle form submission
-      form.addEventListener('submit', function(e) {
-        e.preventDefault();
-        
-        const formData = new FormData(form);
-        const activity = formData.get('activity');
-        const county = formData.get('county');
-        const house = formData.get('house');
-        const senate = formData.get('senate');
-        
-        if (!activity) {
-          alert('Please select a volunteer activity first.');
-          return;
-        }
-        
-        if (!county) {
-          alert('Please select a county.');
-          return;
-        }
-        
-        if (!house && !senate) {
-          alert('Please select at least one district (House or Senate).');
-          return;
-        }
-
-        // Build query parameters
-        const params = new URLSearchParams();
-        params.append('activity', activity);
-        params.append('state', 'WY');
-        
-        // Add all non-empty form values to query string
-        for (const [key, value] of formData.entries()) {
-          if (value && value.trim() && key !== 'activity') {
-            params.append(key, value.trim());
-          }
-        }
-
-        // Determine target page based on activity
-        let targetPage;
-        if (activity === 'phone') {
-          targetPage = '/volunteer/phone.html';
-        } else if (activity === 'canvass') {
-          targetPage = '/volunteer/canvass.html';
-        } else {
-          alert('Invalid activity selected.');
-          return;
-        }
-
-        // Add loading state
-        startButton.innerHTML = `
-          <span class="flex items-center justify-center">
-            <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            Loading...
-          </span>
-        `;
-        startButton.disabled = true;
-
-        // Navigate with query parameters
-        const url = `${targetPage}?${params.toString()}`;
-        console.log('🚀 Navigating to:', url);
-        
-        // Small delay for UX, then navigate
-        setTimeout(() => {
-          window.location.href = url;
-        }, 500);
-      });
-
-      // Add smooth focus animations
-      document.querySelectorAll('select, input').forEach(element => {
-        element.addEventListener('focus', function() {
-          this.parentElement.classList.add('scale-[1.02]');
-        });
-        
-        element.addEventListener('blur', function() {
-          this.parentElement.classList.remove('scale-[1.02]');
-        });
-      });
-    }
   </script>
 
 </body>
