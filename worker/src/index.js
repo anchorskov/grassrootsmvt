@@ -109,10 +109,9 @@ export default {
     // 📍 Geographic Metadata for Forms
     if (url.pathname === '/api/metadata') {
       try {
-        const state = url.searchParams.get('state') || 'wy';
         const db = env.d1;
         
-        // Get unique counties and districts for the state
+        // Query distinct values from Wyoming database (no state filtering needed)
         const [counties, houseDistricts, senateDistricts] = await Promise.all([
           db.prepare(`
             SELECT DISTINCT county FROM voters 
@@ -136,18 +135,49 @@ export default {
         return new Response(
           JSON.stringify({
             ok: true,
-            state: state.toUpperCase(),
+            state: "WY",
             counties: counties.results?.map(r => r.county) || [],
-            cities: [], // Cities not available in current dataset
-            houseDistricts: houseDistricts.results?.map(r => r.house) || [],
-            senateDistricts: senateDistricts.results?.map(r => r.senate) || []
+            house_districts: houseDistricts.results?.map(r => r.house) || [],
+            senate_districts: senateDistricts.results?.map(r => r.senate) || []
           }),
-          { headers }
+          { 
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*",
+              "Access-Control-Allow-Methods": "GET, OPTIONS",
+              "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            }
+          }
         );
       } catch (error) {
+        // Fallback with static Wyoming data if D1 query fails
         return new Response(
-          JSON.stringify({ ok: false, error: error.message }),
-          { status: 500, headers }
+          JSON.stringify({
+            ok: false,
+            error: "metadata_query_failed",
+            message: error.message,
+            state: "WY",
+            counties: ["ALBANY", "BIG HORN", "CAMPBELL", "CARBON", "CONVERSE", "CROOK", 
+                      "FREMONT", "GOSHEN", "HOT SPRINGS", "JOHNSON", "LARAMIE", "LINCOLN",
+                      "NATRONA", "NIOBRARA", "PARK", "PLATTE", "SHERIDAN", "SUBLETTE",
+                      "SWEETWATER", "TETON", "UINTA", "WASHAKIE", "WESTON"],
+            house_districts: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
+                             "11", "12", "13", "14", "15", "16", "17", "18", "19", "20",
+                             "21", "22", "23", "24", "25", "26", "27", "28", "29", "30",
+                             "31", "32", "33", "34", "35", "36", "37", "38", "39", "40",
+                             "41", "42", "43", "44", "45", "46", "47", "48", "49", "50",
+                             "51", "52", "53", "54", "55", "56", "57", "58", "59", "60"],
+            senate_districts: ["01", "02", "03", "04", "05", "06", "07", "08", "09", "10",
+                              "11", "12", "13", "14", "15", "16", "17", "18", "19", "20",
+                              "21", "22", "23", "24", "25", "26", "27", "28", "29", "30"]
+          }),
+          { 
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*"
+            },
+            status: 500
+          }
         );
       }
     }
@@ -172,6 +202,37 @@ export default {
         );
       } catch (error) {
         console.error('DB Error:', error);
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error: error.message,
+            environment: env.ENVIRONMENT || 'unknown'
+          }),
+          { status: 500, headers }
+        );
+      }
+    }
+
+    // 🔍 Check table schema
+    if (url.pathname === '/api/db/schema' && url.searchParams.get('table')) {
+      try {
+        const db = env.d1;
+        const tableName = url.searchParams.get('table');
+        
+        const result = await db.prepare(
+          `PRAGMA table_info(${tableName});`
+        ).all();
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            table: tableName,
+            columns: result.results || [],
+            environment: env.ENVIRONMENT || 'unknown'
+          }),
+          { headers }
+        );
+      } catch (error) {
         return new Response(
           JSON.stringify({
             ok: false,
