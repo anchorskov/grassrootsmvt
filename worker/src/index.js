@@ -203,12 +203,104 @@ export default {
       }
     }
 
-    // 📍 Geographic Metadata for Forms
+    // 📍 Geographic Metadata for Forms with Smart City/District Logic
     if (url.pathname === '/api/metadata') {
       try {
         const db = env.d1;
         
-        // Query distinct values from Wyoming database (no state filtering needed)
+        // Parse query parameters for smart mode detection
+        const city = url.searchParams.get('city');
+        const houseDistrict = url.searchParams.get('house_district');
+        const senateDistrict = url.searchParams.get('senate_district');
+        
+        // CITY MODE: User starts by selecting a city
+        if (city) {
+          console.log(`City mode: querying districts for city=${city}`);
+          
+          const [houseResult, senateResult] = await Promise.all([
+            db.prepare(`
+              SELECT DISTINCT house FROM voters 
+              WHERE county = ?1 AND house IS NOT NULL AND house != ''
+              ORDER BY CAST(house AS INTEGER)
+            `).bind(city).all(),
+            
+            db.prepare(`
+              SELECT DISTINCT senate FROM voters 
+              WHERE county = ?1 AND senate IS NOT NULL AND senate != ''
+              ORDER BY CAST(senate AS INTEGER)
+            `).bind(city).all()
+          ]);
+          
+          const houseDistricts = houseResult.results?.map(r => r.house) || [];
+          const senateDistricts = senateResult.results?.map(r => r.senate) || [];
+          
+          // Auto-populate if both house and senate have exactly one district
+          const autoPopulate = houseDistricts.length === 1 && senateDistricts.length === 1;
+          
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              mode: "city",
+              city: city,
+              house_districts: houseDistricts,
+              senate_districts: senateDistricts,
+              auto_populate: autoPopulate,
+              city_mode: autoPopulate ? "unique" : "multiple_districts"
+            }),
+            { 
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization"
+              }
+            }
+          );
+        }
+        
+        // DISTRICT MODE: User starts by selecting a district
+        if (houseDistrict || senateDistrict) {
+          const districtField = houseDistrict ? 'house' : 'senate';
+          const districtValue = houseDistrict || senateDistrict;
+          const districtType = houseDistrict ? 'house_district' : 'senate_district';
+          
+          console.log(`District mode: querying cities for ${districtType}=${districtValue}`);
+          
+          const citiesResult = await db.prepare(`
+            SELECT DISTINCT county FROM voters 
+            WHERE ${districtField} = ?1 AND county IS NOT NULL AND county != ''
+            ORDER BY county
+          `).bind(districtValue).all();
+          
+          const cities = citiesResult.results?.map(r => r.county) || [];
+          
+          // Auto-populate if exactly one city found
+          const autoPopulate = cities.length === 1;
+          
+          // Always include "(ALL)" as first option when multiple cities
+          const citiesWithAll = cities.length > 1 ? ['(ALL)', ...cities] : cities;
+          
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              mode: "district",
+              [districtType]: districtValue,
+              cities: citiesWithAll,
+              auto_populate: autoPopulate,
+              district_mode: autoPopulate ? "unique_city" : "multiple_cities"
+            }),
+            { 
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization"
+              }
+            }
+          );
+        }
+        
+        // DEFAULT MODE: No specific parameters, return all metadata
         const [counties, houseDistricts, senateDistricts] = await Promise.all([
           db.prepare(`
             SELECT DISTINCT county FROM voters 
@@ -232,10 +324,12 @@ export default {
         return new Response(
           JSON.stringify({
             ok: true,
+            mode: "default",
             state: "WY",
             counties: counties.results?.map(r => r.county) || [],
             house_districts: houseDistricts.results?.map(r => r.house) || [],
-            senate_districts: senateDistricts.results?.map(r => r.senate) || []
+            senate_districts: senateDistricts.results?.map(r => r.senate) || [],
+            auto_populate: false
           }),
           { 
             headers: {
