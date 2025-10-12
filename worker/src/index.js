@@ -30,7 +30,83 @@ export default {
       }
     }
 
-    // 🗄️ List D1 Tables
+    // � Volunteer & Call Logging API
+
+    if (url.pathname === '/api/voters') {
+      // Return small voter sample for volunteers
+      try {
+        const db = env.d1;
+        const result = await db.prepare(`
+          SELECT voter_id, political_party, county, senate, house
+          FROM voters
+          LIMIT 25;
+        `).all();
+
+        return new Response(
+          JSON.stringify({ ok: true, voters: result.results || [] }),
+          { headers }
+        );
+      } catch (error) {
+        return new Response(
+          JSON.stringify({ ok: false, error: error.message }),
+          { status: 500, headers }
+        );
+      }
+    }
+
+    if (url.pathname === '/api/call' && request.method === 'POST') {
+      // Log a call activity from volunteer
+      try {
+        const payload = await verifyAccessJWT(request, env);
+        const email = payload.email;
+        const { voter_id, call_result, notes } = await request.json();
+
+        const db = env.d1;
+        await db.prepare(
+          `INSERT INTO call_activity (voter_id, volunteer_email, call_result, notes)
+           VALUES (?1, ?2, ?3, ?4)`
+        ).bind(voter_id, email, call_result, notes).run();
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            message: 'Call logged successfully',
+            volunteer: email
+          }),
+          { headers }
+        );
+      } catch (error) {
+        return new Response(
+          JSON.stringify({ ok: false, error: error.message }),
+          { status: 401, headers }
+        );
+      }
+    }
+
+    if (url.pathname === '/api/activity') {
+      // Return recent call activity by authenticated volunteer
+      try {
+        const payload = await verifyAccessJWT(request, env);
+        const email = payload.email;
+
+        const db = env.d1;
+        const result = await db.prepare(
+          `SELECT * FROM call_activity WHERE volunteer_email = ?1 ORDER BY created_at DESC LIMIT 10;`
+        ).bind(email).all();
+
+        return new Response(
+          JSON.stringify({ ok: true, activity: result.results || [] }),
+          { headers }
+        );
+      } catch (error) {
+        return new Response(
+          JSON.stringify({ ok: false, error: error.message }),
+          { status: 401, headers }
+        );
+      }
+    }
+
+    // �🗄️ List D1 Tables
     if (url.pathname === '/api/db/tables') {
       try {
         const db = env.d1;

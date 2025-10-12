@@ -71,3 +71,58 @@ document.getElementById('getNext').addEventListener('click', async()=>{
 
 loadWho(); renderFilters(getFilters());
 </script>
+
+<script>
+async function fetchVoters() {
+  try {
+    const res = await fetch('/api/voters');
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    const list = document.getElementById('voterList');
+    list.innerHTML = data.voters.map(v => 
+      `<li>
+        <strong>${v.voter_id}</strong> — ${v.county} (${v.political_party})
+        <button onclick="logCall('${v.voter_id}', 'Contacted', '')">Log Call</button>
+      </li>`
+    ).join('');
+  } catch (e) {
+    alert('Error fetching voters: ' + e.message);
+  }
+}
+
+async function logCall(voter_id, call_result, notes) {
+  try {
+    const res = await fetch('/api/call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voter_id, call_result, notes })
+    });
+    const data = await res.json();
+    if (data.ok) alert('Call logged!');
+    else alert('Error: ' + data.error);
+  } catch (e) {
+    alert('Network error logging call.');
+  }
+}
+
+async function fetchActivity() {
+  const res = await fetch('/api/activity');
+  const data = await res.json();
+  const div = document.getElementById('activity');
+  if (data.ok) {
+    div.innerHTML = data.activity.map(a => 
+      `<div>${a.created_at}: ${a.voter_id} — ${a.call_result}</div>`
+    ).join('');
+  }
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  fetchVoters();
+  fetchActivity();
+});
+</script>
+
+<h2>Volunteer Call Dashboard</h2>
+<ul id="voterList"></ul>
+<h3>Recent Activity</h3>
+<div id="activity"></div>
