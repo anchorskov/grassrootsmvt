@@ -33,88 +33,114 @@ export default {
     // � Volunteer & Call Logging API
 
     if (url.pathname === '/api/voters') {
-      // Advanced voter filtering with district-city refinement
+      // Enhanced voter filtering with context-aware queries
       try {
         const db = env.d1;
         
         // Parse query parameters
-        const county = url.searchParams.get('county');
         const city = url.searchParams.get('city');
         const houseDistrict = url.searchParams.get('house_district');
         const senateDistrict = url.searchParams.get('senate_district');
         
-        console.log("Filters applied:", { county, city, houseDistrict, senateDistrict });
+        console.log("Enhanced filters applied:", { city, houseDistrict, senateDistrict });
         
         let sql = '';
         let bindings = [];
         let filtersApplied = {
-          county: county || null,
           city: city || null,
           house_district: houseDistrict || null,
           senate_district: senateDistrict || null,
           city_mode: null
         };
         
-        // District-based filtering (priority)
-        if (houseDistrict || senateDistrict) {
-          const districtField = houseDistrict ? 'house' : 'senate';
-          const districtValue = houseDistrict || senateDistrict;
-          
-          // Check city filter
-          if (city && city.toLowerCase() === '(all)') {
-            console.warn("City override: returning full district set");
-            // Return all voters in district
+        // Enhanced conditional priority logic
+        if (houseDistrict) {
+          if (city && city.toUpperCase() !== "(ALL)") {
+            // Voters in specific house district + specific city
             sql = `
               SELECT voter_id, political_party, county, house, senate
               FROM voters 
-              WHERE ${districtField} = ?1
+              WHERE house = ?1 AND county = ?2
               LIMIT 25
             `;
-            bindings = [districtValue];
-            filtersApplied.city_mode = 'all';
+            bindings = [houseDistrict, city];
+            filtersApplied.city_mode = 'specific';
           } else {
-            // Return voters in district (city filtering not available in current schema)
+            // All voters in house district
             sql = `
               SELECT voter_id, political_party, county, house, senate
               FROM voters 
-              WHERE ${districtField} = ?1
+              WHERE house = ?1
               LIMIT 25
             `;
-            bindings = [districtValue];
-            filtersApplied.city_mode = 'district_sample';
+            bindings = [houseDistrict];
+            filtersApplied.city_mode = city === '(ALL)' ? 'all' : 'district_only';
           }
-        } else {
-          // County fallback filtering
-          let whereConditions = [];
-          bindings = [];
-          
-          if (county) {
-            whereConditions.push('county = ?');
-            bindings.push(county);
+        } else if (senateDistrict) {
+          if (city && city.toUpperCase() !== "(ALL)") {
+            // Voters in specific senate district + specific city
+            sql = `
+              SELECT voter_id, political_party, county, house, senate
+              FROM voters 
+              WHERE senate = ?1 AND county = ?2
+              LIMIT 25
+            `;
+            bindings = [senateDistrict, city];
+            filtersApplied.city_mode = 'specific';
+          } else {
+            // All voters in senate district
+            sql = `
+              SELECT voter_id, political_party, county, house, senate
+              FROM voters 
+              WHERE senate = ?1
+              LIMIT 25
+            `;
+            bindings = [senateDistrict];
+            filtersApplied.city_mode = city === '(ALL)' ? 'all' : 'district_only';
           }
-          
-          const whereClause = whereConditions.length > 0 
-            ? `WHERE ${whereConditions.join(' AND ')}` 
-            : '';
-          
+        } else if (city) {
+          // Voters by city only
           sql = `
             SELECT voter_id, political_party, county, house, senate
             FROM voters 
-            ${whereClause}
+            WHERE county = ?1
             LIMIT 25
           `;
-          
-          if (county) {
-            filtersApplied.city_mode = 'county_sample';
-          }
+          bindings = [city];
+          filtersApplied.city_mode = 'city_only';
+        } else {
+          // Default fallback - all voters
+          sql = `
+            SELECT voter_id, political_party, county, house, senate
+            FROM voters 
+            LIMIT 25
+          `;
+          bindings = [];
+          filtersApplied.city_mode = 'fallback';
         }
         
         // Execute query
         const votersResult = await db.prepare(sql).bind(...bindings).all();
         
-        // Cities array (placeholder - not available in current schema)
-        const cities = city && city.toLowerCase() === '(all)' ? ['(ALL)'] : [];
-        
+        // Get related cities for current selection (for UI context)
+        let cities = [];
+        try {
+          if (houseDistrict || senateDistrict) {
+            const districtField = houseDistrict ? 'house' : 'senate';
+            const districtValue = houseDistrict || senateDistrict;
+            
+            const citiesResult = await db.prepare(`
+              SELECT DISTINCT county FROM voters 
+              WHERE ${districtField} = ?1 AND county IS NOT NULL AND county != ''
+              ORDER BY county
+            `).bind(districtValue).all();
+            
+            cities = ['(ALL)', ...(citiesResult.results?.map(r => r.county) || [])];
+          }
+        } catch (cityError) {
+          console.warn('Failed to fetch related cities:', cityError);
+        }
+
         return new Response(
           JSON.stringify({
             ok: true,
@@ -133,7 +159,7 @@ export default {
           }
         );
       } catch (error) {
-        console.error('Voters query error:', error);
+        console.error('Enhanced voters query error:', error);
         return new Response(
           JSON.stringify({ 
             ok: false, 
@@ -203,19 +229,57 @@ export default {
       }
     }
 
-    // 📍 Geographic Metadata for Forms with Smart City/District Logic
+    // 📍 Geographic Metadata for Forms with Enhanced District↔City Logic
     if (url.pathname === '/api/metadata') {
       try {
         const db = env.d1;
         
         // Parse query parameters for smart mode detection
-        const city = url.searchParams.get('city');
+        const city = url.searchParams.get('city'); // This will be treated as county
         const houseDistrict = url.searchParams.get('house_district');
         const senateDistrict = url.searchParams.get('senate_district');
         
-        // CITY MODE: User starts by selecting a city
+        // DISTRICT→COUNTY MODE: User selects district, get counties in that district
+        if (houseDistrict || senateDistrict) {
+          const districtField = houseDistrict ? 'house' : 'senate';
+          const districtValue = houseDistrict || senateDistrict;
+          const districtType = houseDistrict ? 'house_district' : 'senate_district';
+          
+          console.log(`District→County mode: querying counties for ${districtType}=${districtValue}`);
+          
+          const countiesResult = await db.prepare(`
+            SELECT DISTINCT county FROM voters 
+            WHERE ${districtField} = ?1 AND county IS NOT NULL AND county != ''
+            ORDER BY county
+          `).bind(districtValue).all();
+          
+          const counties = countiesResult.results?.map(r => r.county) || [];
+          
+          // Always include "(ALL)" as first option, then sorted counties
+          const countiesWithAll = ['(ALL)', ...counties];
+          
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              mode: "district_to_city",
+              [districtType]: districtValue,
+              district: districtValue,
+              cities: countiesWithAll  // Using 'cities' for API consistency
+            }),
+            { 
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*",
+                "Access-Control-Allow-Methods": "GET, OPTIONS",
+                "Access-Control-Allow-Headers": "Content-Type, Authorization"
+              }
+            }
+          );
+        }
+        
+        // COUNTY→DISTRICT MODE: User selects county, get districts in that county
         if (city) {
-          console.log(`City mode: querying districts for city=${city}`);
+          console.log(`County→District mode: querying districts for county=${city}`);
           
           const [houseResult, senateResult] = await Promise.all([
             db.prepare(`
@@ -234,60 +298,13 @@ export default {
           const houseDistricts = houseResult.results?.map(r => r.house) || [];
           const senateDistricts = senateResult.results?.map(r => r.senate) || [];
           
-          // Auto-populate if both house and senate have exactly one district
-          const autoPopulate = houseDistricts.length === 1 && senateDistricts.length === 1;
-          
           return new Response(
             JSON.stringify({
               ok: true,
-              mode: "city",
+              mode: "city_to_district",
               city: city,
               house_districts: houseDistricts,
-              senate_districts: senateDistricts,
-              auto_populate: autoPopulate,
-              city_mode: autoPopulate ? "unique" : "multiple_districts"
-            }),
-            { 
-              headers: {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*",
-                "Access-Control-Allow-Methods": "GET, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization"
-              }
-            }
-          );
-        }
-        
-        // DISTRICT MODE: User starts by selecting a district
-        if (houseDistrict || senateDistrict) {
-          const districtField = houseDistrict ? 'house' : 'senate';
-          const districtValue = houseDistrict || senateDistrict;
-          const districtType = houseDistrict ? 'house_district' : 'senate_district';
-          
-          console.log(`District mode: querying cities for ${districtType}=${districtValue}`);
-          
-          const citiesResult = await db.prepare(`
-            SELECT DISTINCT county FROM voters 
-            WHERE ${districtField} = ?1 AND county IS NOT NULL AND county != ''
-            ORDER BY county
-          `).bind(districtValue).all();
-          
-          const cities = citiesResult.results?.map(r => r.county) || [];
-          
-          // Auto-populate if exactly one city found
-          const autoPopulate = cities.length === 1;
-          
-          // Always include "(ALL)" as first option when multiple cities
-          const citiesWithAll = cities.length > 1 ? ['(ALL)', ...cities] : cities;
-          
-          return new Response(
-            JSON.stringify({
-              ok: true,
-              mode: "district",
-              [districtType]: districtValue,
-              cities: citiesWithAll,
-              auto_populate: autoPopulate,
-              district_mode: autoPopulate ? "unique_city" : "multiple_cities"
+              senate_districts: senateDistricts
             }),
             { 
               headers: {
@@ -327,6 +344,7 @@ export default {
             mode: "default",
             state: "WY",
             counties: counties.results?.map(r => r.county) || [],
+            cities: counties.results?.map(r => r.county) || [], // For API consistency
             house_districts: houseDistricts.results?.map(r => r.house) || [],
             senate_districts: senateDistricts.results?.map(r => r.senate) || [],
             auto_populate: false

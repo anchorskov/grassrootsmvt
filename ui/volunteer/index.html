@@ -351,12 +351,12 @@
     function setupCityMode() {
       console.log('🏙️ Setting up city mode');
       
-      // Populate counties
+      // Populate counties (called cities in API for consistency)
       const countySelect = elements.countySelector;
       countySelect.innerHTML = '<option value="">Select County</option>';
       
-      if (metadata.counties) {
-        metadata.counties.forEach(county => {
+      if (metadata.cities) {
+        metadata.cities.forEach(county => {
           const option = document.createElement('option');
           option.value = county;
           option.textContent = county;
@@ -379,29 +379,30 @@
       try {
         console.log(`📍 County selected: ${county}`);
         
-        // Fetch districts for this county
+        // Fetch districts for this county using enhanced API
         const smartData = await fetchSmartMetadata({ city: county });
         
-        if (smartData.auto_populate) {
-          // Unique districts found - show auto-populated info
+        if (smartData.house_districts || smartData.senate_districts) {
+          const houseDistricts = smartData.house_districts || [];
+          const senateDistricts = smartData.senate_districts || [];
+          
+          // Show districts found
           elements.foundDistricts.innerHTML = `
-            House: ${smartData.house_districts.join(', ')} | 
-            Senate: ${smartData.senate_districts.join(', ')}
+            House: ${houseDistricts.length ? houseDistricts.join(', ') : 'None'} | 
+            Senate: ${senateDistricts.length ? senateDistricts.join(', ') : 'None'}
           `;
           elements.autoDistricts.classList.remove('hidden');
           
-          // Store the auto-populated data for form submission
-          elements.countySelector.dataset.autoHouse = JSON.stringify(smartData.house_districts);
-          elements.countySelector.dataset.autoSenate = JSON.stringify(smartData.senate_districts);
+          // Store the data for form submission
+          elements.countySelector.dataset.autoHouse = JSON.stringify(houseDistricts);
+          elements.countySelector.dataset.autoSenate = JSON.stringify(senateDistricts);
           elements.countySelector.dataset.autoPopulate = 'true';
           
         } else {
-          // Multiple districts - user needs to choose
+          // No districts found
           elements.autoDistricts.classList.add('hidden');
           elements.countySelector.dataset.autoPopulate = 'false';
-          
-          // Could potentially show district selectors here for non-unique cases
-          console.log('⚠️ Multiple districts found for county, user needs to select');
+          console.log('⚠️ No districts found for county');
         }
         
         updateStartButton();
