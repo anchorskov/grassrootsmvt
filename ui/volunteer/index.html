@@ -34,11 +34,22 @@
         </svg>
       </div>
       <h1 class="text-3xl font-bold text-gray-800 mb-2">Grassroots Volunteer Portal</h1>
-      <p class="text-gray-600 text-lg">Select your volunteer activity and targeting region to get started</p>
+      <p class="text-gray-600 text-lg">Select your activity and region to begin outreach.</p>
     </div>
 
-    <!-- Main Card -->
-    <div class="bg-white rounded-xl shadow-lg p-8 transition-all duration-300 hover:shadow-xl">
+    <!-- Loading State -->
+    <div id="loadingState" class="bg-white rounded-xl shadow-lg p-8 text-center">
+      <div class="inline-flex items-center">
+        <svg class="animate-spin -ml-1 mr-3 h-8 w-8 text-grassroots-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span class="text-lg text-gray-600">Loading geographic data...</span>
+      </div>
+    </div>
+
+    <!-- Main Card (Initially Hidden) -->
+    <div id="mainCard" class="bg-white rounded-xl shadow-lg p-8 transition-all duration-300 hover:shadow-xl hidden">
       
       <!-- Form -->
       <form id="volunteerForm" class="space-y-6">
@@ -65,9 +76,7 @@
             <label for="state" class="block text-sm font-medium text-gray-700">State</label>
             <select id="state" name="state" 
                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200">
-              <option value="WY" selected>Wyoming</option>
-              <option value="CO">Colorado</option>
-              <option value="MT">Montana</option>
+              <option value="wy" selected>Wyoming (WY)</option>
             </select>
           </div>
 
@@ -77,29 +86,6 @@
             <select id="county" name="county" 
                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200">
               <option value="">All Counties</option>
-              <option value="Albany">Albany</option>
-              <option value="Big Horn">Big Horn</option>
-              <option value="Campbell">Campbell</option>
-              <option value="Carbon">Carbon</option>
-              <option value="Converse">Converse</option>
-              <option value="Crook">Crook</option>
-              <option value="Fremont">Fremont</option>
-              <option value="Goshen">Goshen</option>
-              <option value="Hot Springs">Hot Springs</option>
-              <option value="Johnson">Johnson</option>
-              <option value="Laramie">Laramie</option>
-              <option value="Lincoln">Lincoln</option>
-              <option value="Natrona">Natrona</option>
-              <option value="Niobrara">Niobrara</option>
-              <option value="Park">Park</option>
-              <option value="Platte">Platte</option>
-              <option value="Sheridan">Sheridan</option>
-              <option value="Sublette">Sublette</option>
-              <option value="Sweetwater">Sweetwater</option>
-              <option value="Teton">Teton</option>
-              <option value="Uinta">Uinta</option>
-              <option value="Washakie">Washakie</option>
-              <option value="Weston">Weston</option>
             </select>
           </div>
 
@@ -116,109 +102,19 @@
           <div class="grid md:grid-cols-2 gap-4">
             <!-- House District -->
             <div class="space-y-2">
-              <label for="house_district" class="block text-sm font-medium text-gray-700">House District</label>
-              <select id="house_district" name="house_district" 
+              <label for="house" class="block text-sm font-medium text-gray-700">House District</label>
+              <select id="house" name="house" 
                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200">
                 <option value="">All Districts</option>
-                <option value="01">01</option>
-                <option value="02">02</option>
-                <option value="03">03</option>
-                <option value="04">04</option>
-                <option value="05">05</option>
-                <option value="06">06</option>
-                <option value="07">07</option>
-                <option value="08">08</option>
-                <option value="09">09</option>
-                <option value="10">10</option>
-                <option value="11">11</option>
-                <option value="12">12</option>
-                <option value="13">13</option>
-                <option value="14">14</option>
-                <option value="15">15</option>
-                <option value="16">16</option>
-                <option value="17">17</option>
-                <option value="18">18</option>
-                <option value="19">19</option>
-                <option value="20">20</option>
-                <option value="21">21</option>
-                <option value="22">22</option>
-                <option value="23">23</option>
-                <option value="24">24</option>
-                <option value="25">25</option>
-                <option value="26">26</option>
-                <option value="27">27</option>
-                <option value="28">28</option>
-                <option value="29">29</option>
-                <option value="30">30</option>
-                <option value="31">31</option>
-                <option value="32">32</option>
-                <option value="33">33</option>
-                <option value="34">34</option>
-                <option value="35">35</option>
-                <option value="36">36</option>
-                <option value="37">37</option>
-                <option value="38">38</option>
-                <option value="39">39</option>
-                <option value="40">40</option>
-                <option value="41">41</option>
-                <option value="42">42</option>
-                <option value="43">43</option>
-                <option value="44">44</option>
-                <option value="45">45</option>
-                <option value="46">46</option>
-                <option value="47">47</option>
-                <option value="48">48</option>
-                <option value="49">49</option>
-                <option value="50">50</option>
-                <option value="51">51</option>
-                <option value="52">52</option>
-                <option value="53">53</option>
-                <option value="54">54</option>
-                <option value="55">55</option>
-                <option value="56">56</option>
-                <option value="57">57</option>
-                <option value="58">58</option>
-                <option value="59">59</option>
-                <option value="60">60</option>
               </select>
             </div>
 
             <!-- Senate District -->
             <div class="space-y-2">
-              <label for="senate_district" class="block text-sm font-medium text-gray-700">Senate District</label>
-              <select id="senate_district" name="senate_district" 
+              <label for="senate" class="block text-sm font-medium text-gray-700">Senate District</label>
+              <select id="senate" name="senate" 
                       class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200">
                 <option value="">All Districts</option>
-                <option value="01">01</option>
-                <option value="02">02</option>
-                <option value="03">03</option>
-                <option value="04">04</option>
-                <option value="05">05</option>
-                <option value="06">06</option>
-                <option value="07">07</option>
-                <option value="08">08</option>
-                <option value="09">09</option>
-                <option value="10">10</option>
-                <option value="11">11</option>
-                <option value="12">12</option>
-                <option value="13">13</option>
-                <option value="14">14</option>
-                <option value="15">15</option>
-                <option value="16">16</option>
-                <option value="17">17</option>
-                <option value="18">18</option>
-                <option value="19">19</option>
-                <option value="20">20</option>
-                <option value="21">21</option>
-                <option value="22">22</option>
-                <option value="23">23</option>
-                <option value="24">24</option>
-                <option value="25">25</option>
-                <option value="26">26</option>
-                <option value="27">27</option>
-                <option value="28">28</option>
-                <option value="29">29</option>
-                <option value="30">30</option>
               </select>
             </div>
           </div>
@@ -248,6 +144,20 @@
 
     </div>
 
+    <!-- Error State -->
+    <div id="errorState" class="bg-red-50 border border-red-200 rounded-xl p-6 text-center hidden">
+      <div class="text-red-600 mb-2">
+        <svg class="w-12 h-12 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16c-.77.833.192 2.5 1.732 2.5z"></path>
+        </svg>
+      </div>
+      <h3 class="text-lg font-semibold text-red-800 mb-2">Unable to Load Data</h3>
+      <p class="text-red-600 mb-4">There was an error loading geographic data from the server.</p>
+      <button onclick="location.reload()" class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors">
+        Try Again
+      </button>
+    </div>
+
     <!-- Footer -->
     <footer class="text-center mt-8 text-gray-500 text-sm">
       GrassrootsMVT © 2025
@@ -256,8 +166,90 @@
   </div>
 
   <!-- JavaScript -->
+  <script type="module" src="/src/api-shim.js"></script>
   <script>
-    document.addEventListener('DOMContentLoaded', function() {
+    let metadata = null;
+
+    // API Configuration
+    const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+
+    async function fetchMetadata(state = 'wy') {
+      try {
+        const response = await fetch(`${API_BASE}/api/metadata?state=${state}`);
+        const data = await response.json();
+        
+        if (!data.ok) {
+          throw new Error(data.error || 'Failed to fetch metadata');
+        }
+        
+        return data;
+      } catch (error) {
+        console.error('Error fetching metadata:', error);
+        throw error;
+      }
+    }
+
+    function populateDropdowns(data) {
+      const countySelect = document.getElementById('county');
+      const houseSelect = document.getElementById('house');
+      const senateSelect = document.getElementById('senate');
+
+      // Clear existing options (except the first "All" option)
+      countySelect.innerHTML = '<option value="">All Counties</option>';
+      houseSelect.innerHTML = '<option value="">All Districts</option>';
+      senateSelect.innerHTML = '<option value="">All Districts</option>';
+
+      // Populate counties
+      data.counties.forEach(county => {
+        const option = document.createElement('option');
+        option.value = county;
+        option.textContent = county;
+        countySelect.appendChild(option);
+      });
+
+      // Populate house districts
+      data.houseDistricts.forEach(district => {
+        const option = document.createElement('option');
+        option.value = district;
+        option.textContent = district;
+        houseSelect.appendChild(option);
+      });
+
+      // Populate senate districts
+      data.senateDistricts.forEach(district => {
+        const option = document.createElement('option');
+        option.value = district;
+        option.textContent = district;
+        senateSelect.appendChild(option);
+      });
+    }
+
+    function showCard() {
+      document.getElementById('loadingState').classList.add('hidden');
+      document.getElementById('mainCard').classList.remove('hidden');
+      document.getElementById('errorState').classList.add('hidden');
+    }
+
+    function showError() {
+      document.getElementById('loadingState').classList.add('hidden');
+      document.getElementById('mainCard').classList.add('hidden');
+      document.getElementById('errorState').classList.remove('hidden');
+    }
+
+    // Initialize page
+    document.addEventListener('DOMContentLoaded', async function() {
+      try {
+        metadata = await fetchMetadata('wy');
+        populateDropdowns(metadata);
+        showCard();
+        setupEventListeners();
+      } catch (error) {
+        console.error('Failed to initialize page:', error);
+        showError();
+      }
+    });
+
+    function setupEventListeners() {
       const form = document.getElementById('volunteerForm');
       const startButton = document.getElementById('startButton');
       const activitySelect = document.getElementById('activity');
@@ -347,7 +339,7 @@
           this.parentElement.classList.remove('scale-[1.02]');
         });
       });
-    });
+    }
   </script>
 
 </body>

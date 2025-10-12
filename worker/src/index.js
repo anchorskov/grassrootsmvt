@@ -106,7 +106,53 @@ export default {
       }
     }
 
-    // �🗄️ List D1 Tables
+    // 📍 Geographic Metadata for Forms
+    if (url.pathname === '/api/metadata') {
+      try {
+        const state = url.searchParams.get('state') || 'wy';
+        const db = env.d1;
+        
+        // Get unique counties and districts for the state
+        const [counties, houseDistricts, senateDistricts] = await Promise.all([
+          db.prepare(`
+            SELECT DISTINCT county FROM voters 
+            WHERE county IS NOT NULL AND county != '' 
+            ORDER BY county
+          `).all(),
+          
+          db.prepare(`
+            SELECT DISTINCT house FROM voters 
+            WHERE house IS NOT NULL AND house != '' 
+            ORDER BY CAST(house AS INTEGER)
+          `).all(),
+          
+          db.prepare(`
+            SELECT DISTINCT senate FROM voters 
+            WHERE senate IS NOT NULL AND senate != '' 
+            ORDER BY CAST(senate AS INTEGER)
+          `).all()
+        ]);
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            state: state.toUpperCase(),
+            counties: counties.results?.map(r => r.county) || [],
+            cities: [], // Cities not available in current dataset
+            houseDistricts: houseDistricts.results?.map(r => r.house) || [],
+            senateDistricts: senateDistricts.results?.map(r => r.senate) || []
+          }),
+          { headers }
+        );
+      } catch (error) {
+        return new Response(
+          JSON.stringify({ ok: false, error: error.message }),
+          { status: 500, headers }
+        );
+      }
+    }
+
+    // 🗄️ List D1 Tables
     if (url.pathname === '/api/db/tables') {
       try {
         const db = env.d1;
