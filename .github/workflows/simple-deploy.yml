@@ -1,0 +1,50 @@
+---
+name: 🚀 Deploy to Cloudflare
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  deploy:
+    name: Deploy Worker + Pages
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: 📥 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 📦 Install Wrangler
+        run: npm install -g wrangler@latest
+
+      - name: 🔧 Deploy Worker API
+        working-directory: worker
+        run: |
+          npm install --no-fund --no-audit
+          npx wrangler deploy --env production
+
+      - name: 🎨 Deploy Pages UI
+        working-directory: ui
+        run: |
+          if [ -f package.json ]; then
+            npm install --no-fund --no-audit
+          fi
+          npx wrangler pages deploy . --project-name=grassrootsmvt --commit-dirty=true
+
+      - name: ✅ Verify Deployment
+        run: |
+          sleep 10
+          curl -f "https://api.grassrootsmvt.org/api/ping" || echo "API check failed"
+          curl -f "https://grassrootsmvt.org/" || echo "Pages check failed"
+          echo "🎉 Deployment completed!"
