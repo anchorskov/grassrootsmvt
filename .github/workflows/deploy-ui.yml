@@ -33,3 +33,4 @@ jobs:
             --project-name=grassrootsmvt \
             --functions ./functions \
             --commit-dirty=true
+

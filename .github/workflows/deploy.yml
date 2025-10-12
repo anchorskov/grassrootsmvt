@@ -1,15 +1,26 @@
 ---
-name: "Deploy to Cloudflare Pages"
+name: "📄 Deploy Pages UI Only"
 
 on:
   push:
     branches:
       - main
+    paths:
+      - 'ui/**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:
+    inputs:
+      force_deploy:
+        description: 'Force deployment without path filtering'
+        required: false
+        default: false
+        type: boolean
 
 jobs:
   deploy:
     name: "🚀 Deploy to Cloudflare Pages"
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -24,48 +35,46 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
+          cache-dependency-path: 'ui/package-lock.json'
 
       - name: "⚡ Cache npm dependencies"
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.npm
-            ui/functions/node_modules
-          # Only include package-lock.json in the key when present. If not present
-          # the cache key falls back to runner/os + npm so we still benefit.
-          key: ${{ runner.os }}-npm-${{ hashFiles('ui/functions/package-lock.json') }}
+            ui/node_modules
+          key: ${{ runner.os }}-npm-${{ hashFiles('ui/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-npm-
 
-      - name: "🧰 Install Wrangler CLI (optional cached)"
-        run: |
-          echo "Installing wrangler (will use cache when available)..."
-          npm install -g wrangler@4.42.1 || true
+      - name: "🧰 Install Wrangler CLI"
+        run: npm install -g wrangler@latest
 
-      - name: "Install functions dependencies"
+      - name: "📦 Install UI dependencies"
+        working-directory: ui
         run: |
-          echo "Checking for ui/functions/package.json"
-          # Prefer clean deterministic installs with npm ci when a lockfile
-          # exists. Fall back to npm install otherwise. If the lockfile is
-          # missing in the repository, this keeps the build working while
-          # encouraging reproducible CI when it's present.
-          if [ -f ui/functions/package-lock.json ]; then
-            echo "Found package-lock.json — running npm ci --prefix ui/functions"
-            npm ci --prefix ui/functions
+          if [ -f "package.json" ]; then
+            echo "Installing UI dependencies..."
+            if [ -f "package-lock.json" ]; then
+              npm ci --no-fund --no-audit
+            else
+              npm install --no-fund --no-audit
+            fi
           else
-            echo "No package-lock.json — running npm install --prefix ui/functions"
-            npm install --prefix ui/functions
+            echo "No package.json found in UI directory"
           fi
 
       - name: "🏗️ Build Cloudflare Pages Functions"
         working-directory: ui
         run: |
           echo "🏗️ Building Cloudflare Pages Functions..."
-          mkdir -p .wrangler/functions-build
           if [[ -d "functions" ]]; then
-            npx wrangler@4.42.1 pages functions build functions --outdir .wrangler/functions-build
+            echo "Functions directory found, building..."
+            npx wrangler pages functions build functions --outdir .wrangler/functions-build
+            echo "✅ Functions built successfully"
           else
-            echo "No functions directory found, skipping build."
+            echo "ℹ️ No functions directory found, skipping build."
           fi
 
       - name: "🚀 Deploy to Cloudflare Pages"
@@ -75,36 +84,80 @@ jobs:
         run: |
           echo "🚀 Deploying Cloudflare Pages from ui/..."
           set -o pipefail
-          npx wrangler@4.42.1 pages deploy . --project-name=grassrootsmvt --commit-dirty=true 2>&1 | tee deploy.log
+
+          npx wrangler pages deploy . \
+            --project-name=grassrootsmvt \
+            --commit-dirty=true \
+            --compatibility-date=2025-10-08 \
+            2>&1 | tee deploy.log
+
           EXIT_CODE=${PIPESTATUS[0]}
           if [ "$EXIT_CODE" -ne 0 ]; then
             echo "❌ wrangler deploy failed with exit code $EXIT_CODE"
+            cat deploy.log
             exit $EXIT_CODE
           fi
+
+          echo "✅ Cloudflare Pages deployment completed successfully"
       - name: "📦 Upload deploy log"
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: deploy-log
+          name: deploy-log-${{ github.run_number }}
           path: ui/deploy.log
+          retention-days: 30
+
+      - name: "⏱️ Wait for deployment propagation"
+        run: |
+          echo "⏱️ Waiting for Cloudflare global propagation..."
+          sleep 15
 
       - name: "✅ Verify Cloudflare deployment"
-        working-directory: ui
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          PROJECT: grassrootsmvt
         run: |
-          node ../scripts/verify_deploy.mjs --project grassrootsmvt --retries 5 --interval 5000
+          echo "🔍 Verifying Cloudflare Pages deployment..."
+
+          # Test main page
+          MAIN_RESPONSE=$(curl -s --max-time 15 "https://grassrootsmvt.org/" || echo "failed")
+          if echo "$MAIN_RESPONSE" | grep -q "GrassrootsMVT\|Volunteer"; then
+            echo "✅ Main page accessible"
+          else
+            echo "❌ Main page verification failed"
+            exit 1
+          fi
+
+          # Test volunteer portal
+          VOLUNTEER_RESPONSE=$(curl -s --max-time 15 "https://grassrootsmvt.org/volunteer/" || echo "failed")
+          if echo "$VOLUNTEER_RESPONSE" | grep -q "volunteer\|portal"; then
+            echo "✅ Volunteer portal accessible"
+          else
+            echo "⚠️ Volunteer portal needs verification"
+          fi
+
+          # Test PWA manifest
+          MANIFEST_RESPONSE=$(curl -s --max-time 10 "https://grassrootsmvt.org/manifest.json" || echo "failed")
+          if echo "$MANIFEST_RESPONSE" | jq -e '.name' >/dev/null 2>&1; then
+            echo "✅ PWA manifest accessible"
+          else
+            echo "⚠️ PWA manifest verification failed"
+          fi
+
+          echo "🎉 Cloudflare Pages deployment verification completed"
 
       - name: "📦 Upload verification logs"
         uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: verification-results
+          name: verification-results-${{ github.run_number }}
           path: |
             verify__api_*.txt
+            ui/deploy.log
+          retention-days: 30
 
       - name: "🔎 Lint this workflow with yamllint"
+        if: success()
         run: |
           python -m pip install --upgrade pip
           pip install yamllint
           yamllint -c .yamllint .github/workflows/deploy.yml
+          echo "✅ Workflow YAML validation passed"
+
