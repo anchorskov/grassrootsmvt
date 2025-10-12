@@ -71,35 +71,70 @@
         <div class="bg-gray-50 rounded-lg p-6 space-y-4">
           <h3 class="text-lg font-semibold text-gray-800 mb-4">Geographic Targeting</h3>
           
-          <!-- District Type Selection -->
+          <!-- Smart Selection Mode -->
           <div class="space-y-2">
-            <label for="district-type" class="block text-sm font-medium text-gray-700">District Type</label>
-            <select id="district-type" name="district-type" disabled
+            <label for="selection-mode" class="block text-sm font-medium text-gray-700">Start By</label>
+            <select id="selection-mode" name="selection-mode" disabled
                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
-              <option value="">Select District Type</option>
-              <option value="house">House District</option>
-              <option value="senate">Senate District</option>
+              <option value="">Choose your starting point</option>
+              <option value="district">District (recommended)</option>
+              <option value="city">City/County</option>
             </select>
           </div>
 
-          <!-- District Number Selection -->
-          <div class="space-y-2">
-            <label for="district-number" class="block text-sm font-medium text-gray-700">District Number</label>
-            <select id="district-number" name="district-number" disabled
-                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
-              <option value="">Select District</option>
-            </select>
+          <!-- City-First Mode -->
+          <div id="city-first-mode" class="hidden space-y-4">
+            <div class="space-y-2">
+              <label for="county-selector" class="block text-sm font-medium text-gray-700">County</label>
+              <select id="county-selector" name="county" disabled
+                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                <option value="">Select County</option>
+              </select>
+            </div>
+            
+            <!-- Auto-populated Districts (City Mode) -->
+            <div id="auto-districts" class="hidden space-y-2">
+              <div class="p-3 bg-green-50 border border-green-200 rounded-lg">
+                <div class="text-sm text-green-700">
+                  <strong>Districts found:</strong>
+                  <div id="found-districts" class="mt-1 text-xs"></div>
+                </div>
+              </div>
+            </div>
           </div>
 
-          <!-- City Selection -->
-          <div class="space-y-2">
-            <label for="city" class="block text-sm font-medium text-gray-700">
-              City <span class="text-gray-400 text-xs">(automatically populated)</span>
-            </label>
-            <select id="city" name="city" disabled
-                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
-              <option value="">Select City</option>
-            </select>
+          <!-- District-First Mode (existing) -->
+          <div id="district-first-mode" class="hidden space-y-4">
+            <!-- District Type Selection -->
+            <div class="space-y-2">
+              <label for="district-type" class="block text-sm font-medium text-gray-700">District Type</label>
+              <select id="district-type" name="district-type" disabled
+                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                <option value="">Select District Type</option>
+                <option value="house">House District</option>
+                <option value="senate">Senate District</option>
+              </select>
+            </div>
+
+            <!-- District Number Selection -->
+            <div class="space-y-2">
+              <label for="district-number" class="block text-sm font-medium text-gray-700">District Number</label>
+              <select id="district-number" name="district-number" disabled
+                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                <option value="">Select District</option>
+              </select>
+            </div>
+
+            <!-- City Selection (District Mode) -->
+            <div class="space-y-2">
+              <label for="city" class="block text-sm font-medium text-gray-700">
+                City <span class="text-gray-400 text-xs">(automatically populated)</span>
+              </label>
+              <select id="city" name="city" disabled
+                      class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-grassroots-500 focus:border-grassroots-500 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed">
+                <option value="">Select City</option>
+              </select>
+            </div>
           </div>
 
           <!-- Loading Indicator for Cities -->
@@ -144,7 +179,9 @@
       <!-- Help Text -->
       <div class="mt-6 p-4 bg-blue-50 rounded-lg">
         <p class="text-sm text-blue-700">
-          <strong>Dynamic Selection:</strong> Choose your activity, then select a district type and number. Cities will automatically load based on your district selection. Select "(ALL)" to include all cities in the district, or choose a specific city for targeted outreach.
+          <strong>Smart Selection:</strong> Choose to start by <em>District</em> (recommended) or <em>City/County</em>. 
+          District mode shows available cities for your chosen district. City mode shows available districts for your chosen county.
+          When selections are unique, fields auto-populate for a streamlined experience.
         </p>
       </div>
 
@@ -175,6 +212,7 @@
   <script type="module" src="/src/api-shim.js"></script>
   <script>
     let metadata = null;
+    let currentMode = null; // 'district' or 'city'
 
     // API Configuration with environment detection
     const API_BASE = window.location.hostname.includes('localhost') 
@@ -184,9 +222,18 @@
     // DOM Elements
     const elements = {
       activity: null,
+      selectionMode: null,
+      // District mode elements
+      districtFirstMode: null,
       districtType: null,
       districtNumber: null,
       city: null,
+      // City mode elements
+      cityFirstMode: null,
+      countySelector: null,
+      autoDistricts: null,
+      foundDistricts: null,
+      // Common elements
       startBtn: null,
       cityLoading: null,
       cityError: null,
@@ -196,19 +243,28 @@
     // Initialize DOM elements
     function initElements() {
       elements.activity = document.getElementById('activity');
+      elements.selectionMode = document.getElementById('selection-mode');
+      // District mode
+      elements.districtFirstMode = document.getElementById('district-first-mode');
       elements.districtType = document.getElementById('district-type');
       elements.districtNumber = document.getElementById('district-number');
       elements.city = document.getElementById('city');
+      // City mode
+      elements.cityFirstMode = document.getElementById('city-first-mode');
+      elements.countySelector = document.getElementById('county-selector');
+      elements.autoDistricts = document.getElementById('auto-districts');
+      elements.foundDistricts = document.getElementById('found-districts');
+      // Common
       elements.startBtn = document.getElementById('start-btn');
       elements.cityLoading = document.getElementById('city-loading');
       elements.cityError = document.getElementById('city-error');
       elements.retryCities = document.getElementById('retry-cities');
     }
 
-    // Fetch metadata from API
+    // Fetch metadata from API (default mode)
     async function fetchMetadata() {
       try {
-        console.log('🌐 Fetching metadata from:', `${API_BASE}/api/metadata`);
+        console.log('🌐 Fetching default metadata from:', `${API_BASE}/api/metadata`);
         const response = await fetch(`${API_BASE}/api/metadata`);
         
         if (!response.ok) {
@@ -221,7 +277,7 @@
           throw new Error(data.message || 'API returned error status');
         }
         
-        console.log('✅ Metadata loaded successfully:', data);
+        console.log('✅ Default metadata loaded successfully:', data);
         return data;
       } catch (error) {
         console.error('❌ Error fetching metadata:', error);
@@ -229,17 +285,135 @@
       }
     }
 
-    // Populate district numbers based on type
-    function populateDistricts(metadata) {
-      const districtNumber = elements.districtNumber;
-      districtNumber.innerHTML = '<option value="">Select District</option>';
-      
-      // Store metadata for later use
-      districtNumber.dataset.houseDistricts = JSON.stringify(metadata.house_districts);
-      districtNumber.dataset.senateDistricts = JSON.stringify(metadata.senate_districts);
+    // Fetch smart metadata based on selection
+    async function fetchSmartMetadata(params) {
+      try {
+        const queryString = new URLSearchParams(params).toString();
+        const url = `${API_BASE}/api/metadata?${queryString}`;
+        console.log('🧠 Fetching smart metadata from:', url);
+        
+        const response = await fetch(url);
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        
+        if (!data.ok) {
+          throw new Error(data.message || 'API returned error status');
+        }
+        
+        console.log('✅ Smart metadata loaded:', data);
+        return data;
+      } catch (error) {
+        console.error('❌ Error fetching smart metadata:', error);
+        throw error;
+      }
     }
 
-    // Update district number options based on selected type
+    // Switch between District and City modes
+    function switchSelectionMode() {
+      const mode = elements.selectionMode.value;
+      currentMode = mode;
+      
+      // Hide both modes
+      elements.districtFirstMode.classList.add('hidden');
+      elements.cityFirstMode.classList.add('hidden');
+      
+      // Reset form state
+      resetAllSelections();
+      
+      if (mode === 'district') {
+        elements.districtFirstMode.classList.remove('hidden');
+        setupDistrictMode();
+      } else if (mode === 'city') {
+        elements.cityFirstMode.classList.remove('hidden');
+        setupCityMode();
+      }
+      
+      updateStartButton();
+    }
+
+    // Setup District Mode
+    function setupDistrictMode() {
+      console.log('🏛️ Setting up district mode');
+      
+      // Populate district types
+      elements.districtType.disabled = false;
+      
+      // Store metadata for district population
+      elements.districtNumber.dataset.houseDistricts = JSON.stringify(metadata.house_districts);
+      elements.districtNumber.dataset.senateDistricts = JSON.stringify(metadata.senate_districts);
+    }
+
+    // Setup City Mode
+    function setupCityMode() {
+      console.log('🏙️ Setting up city mode');
+      
+      // Populate counties
+      const countySelect = elements.countySelector;
+      countySelect.innerHTML = '<option value="">Select County</option>';
+      
+      if (metadata.counties) {
+        metadata.counties.forEach(county => {
+          const option = document.createElement('option');
+          option.value = county;
+          option.textContent = county;
+          countySelect.appendChild(option);
+        });
+        countySelect.disabled = false;
+      }
+    }
+
+    // Handle county selection in city mode
+    async function handleCountySelection() {
+      const county = elements.countySelector.value;
+      
+      if (!county) {
+        elements.autoDistricts.classList.add('hidden');
+        updateStartButton();
+        return;
+      }
+      
+      try {
+        console.log(`📍 County selected: ${county}`);
+        
+        // Fetch districts for this county
+        const smartData = await fetchSmartMetadata({ city: county });
+        
+        if (smartData.auto_populate) {
+          // Unique districts found - show auto-populated info
+          elements.foundDistricts.innerHTML = `
+            House: ${smartData.house_districts.join(', ')} | 
+            Senate: ${smartData.senate_districts.join(', ')}
+          `;
+          elements.autoDistricts.classList.remove('hidden');
+          
+          // Store the auto-populated data for form submission
+          elements.countySelector.dataset.autoHouse = JSON.stringify(smartData.house_districts);
+          elements.countySelector.dataset.autoSenate = JSON.stringify(smartData.senate_districts);
+          elements.countySelector.dataset.autoPopulate = 'true';
+          
+        } else {
+          // Multiple districts - user needs to choose
+          elements.autoDistricts.classList.add('hidden');
+          elements.countySelector.dataset.autoPopulate = 'false';
+          
+          // Could potentially show district selectors here for non-unique cases
+          console.log('⚠️ Multiple districts found for county, user needs to select');
+        }
+        
+        updateStartButton();
+        
+      } catch (error) {
+        console.error('❌ Error handling county selection:', error);
+        elements.autoDistricts.classList.add('hidden');
+        updateStartButton();
+      }
+    }
+
+    // Update district numbers based on selected type (District Mode)
     function updateDistrictNumbers() {
       const districtType = elements.districtType.value;
       const districtNumber = elements.districtNumber;
@@ -273,7 +447,7 @@
       updateStartButton();
     }
 
-    // Fetch cities for selected district
+    // Fetch cities for selected district (District Mode)
     async function fetchCitiesForDistrict() {
       const districtType = elements.districtType.value;
       const districtValue = elements.districtNumber.value;
@@ -288,21 +462,13 @@
         
         console.log(`🏙️ Fetching cities for ${districtType} district ${districtValue}`);
         
-        const queryParam = `${districtType}_district=${districtValue}`;
-        const response = await fetch(`${API_BASE}/api/voters?${queryParam}`);
+        // Use smart metadata endpoint
+        const params = {};
+        params[`${districtType}_district`] = districtValue;
+        const smartData = await fetchSmartMetadata(params);
         
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
-        
-        if (!data.ok) {
-          throw new Error(data.message || 'Failed to fetch cities');
-        }
-        
-        console.log('✅ Cities loaded:', data.cities);
-        populateCityDropdown(data.cities);
+        console.log('✅ Cities loaded:', smartData.cities);
+        populateCityDropdown(smartData.cities, smartData.auto_populate);
         
       } catch (error) {
         console.error('❌ Error fetching cities:', error);
@@ -313,7 +479,7 @@
     }
 
     // Populate city dropdown with fetched data
-    function populateCityDropdown(cities) {
+    function populateCityDropdown(cities, autoPopulate) {
       const citySelect = elements.city;
       citySelect.innerHTML = '<option value="">Select City</option>';
       
@@ -325,12 +491,18 @@
           citySelect.appendChild(option);
         });
         citySelect.disabled = false;
+        
+        // Auto-select if only one option (besides (ALL))
+        if (autoPopulate && cities.length === 1) {
+          citySelect.value = cities[0];
+        }
       } else {
         // No cities available - hide city dropdown and enable start button
         console.log('ℹ️ No cities found - enabling start button immediately');
         citySelect.disabled = true;
-        updateStartButton();
       }
+      
+      updateStartButton();
     }
 
     // Show city loading error
@@ -347,16 +519,51 @@
       elements.cityError.classList.add('hidden');
     }
 
+    // Reset all selections
+    function resetAllSelections() {
+      // District mode
+      if (elements.districtType) {
+        elements.districtType.value = '';
+        elements.districtType.disabled = true;
+      }
+      if (elements.districtNumber) {
+        elements.districtNumber.value = '';
+        elements.districtNumber.disabled = true;
+      }
+      resetCitySelection();
+      
+      // City mode
+      if (elements.countySelector) {
+        elements.countySelector.value = '';
+        elements.countySelector.disabled = true;
+      }
+      if (elements.autoDistricts) {
+        elements.autoDistricts.classList.add('hidden');
+      }
+    }
+
     // Update start button state
     function updateStartButton() {
       const activity = elements.activity.value;
-      const districtType = elements.districtType.value;
-      const districtNumber = elements.districtNumber.value;
-      const city = elements.city.value;
+      let isValid = false;
       
-      // Enable if: activity + district type + district number + (city OR city disabled)
-      const isValid = activity && districtType && districtNumber && 
-                     (city || elements.city.disabled);
+      if (activity && currentMode) {
+        if (currentMode === 'district') {
+          // District mode validation
+          const districtType = elements.districtType.value;
+          const districtNumber = elements.districtNumber.value;
+          const city = elements.city.value;
+          
+          isValid = districtType && districtNumber && (city || elements.city.disabled);
+          
+        } else if (currentMode === 'city') {
+          // City mode validation
+          const county = elements.countySelector.value;
+          const autoPopulate = elements.countySelector.dataset.autoPopulate === 'true';
+          
+          isValid = county && autoPopulate;
+        }
+      }
       
       elements.startBtn.disabled = !isValid;
       
@@ -374,25 +581,55 @@
       e.preventDefault();
       
       const activity = elements.activity.value;
-      const districtType = elements.districtType.value;
-      const districtValue = elements.districtNumber.value;
-      const cityValue = elements.city.value;
       
-      if (!activity || !districtType || !districtValue) {
+      if (!activity || !currentMode) {
         alert('Please complete all required selections.');
         return;
       }
       
-      // Build query parameters
+      // Build query parameters based on mode
       const params = new URLSearchParams({
         activity: activity,
-        state: 'WY',
-        [`${districtType}_district`]: districtValue
+        state: 'WY'
       });
       
-      // Add city if selected
-      if (cityValue) {
-        params.append('city', cityValue);
+      if (currentMode === 'district') {
+        // District mode submission
+        const districtType = elements.districtType.value;
+        const districtValue = elements.districtNumber.value;
+        const cityValue = elements.city.value;
+        
+        if (!districtType || !districtValue) {
+          alert('Please complete all district selections.');
+          return;
+        }
+        
+        params.append(`${districtType}_district`, districtValue);
+        
+        if (cityValue) {
+          params.append('city', cityValue);
+        }
+        
+      } else if (currentMode === 'city') {
+        // City mode submission
+        const county = elements.countySelector.value;
+        const autoHouse = JSON.parse(elements.countySelector.dataset.autoHouse || '[]');
+        const autoSenate = JSON.parse(elements.countySelector.dataset.autoSenate || '[]');
+        
+        if (!county) {
+          alert('Please select a county.');
+          return;
+        }
+        
+        params.append('city', county);
+        
+        // Add auto-populated districts for reference
+        if (autoHouse.length === 1) {
+          params.append('house_district', autoHouse[0]);
+        }
+        if (autoSenate.length === 1) {
+          params.append('senate_district', autoSenate[0]);
+        }
       }
       
       // Determine target page
@@ -421,29 +658,31 @@
 
     // Setup event listeners
     function setupEventListeners() {
-      // Activity selection enables district type
+      // Activity selection enables selection mode
       elements.activity.addEventListener('change', () => {
         const hasActivity = elements.activity.value;
-        elements.districtType.disabled = !hasActivity;
+        elements.selectionMode.disabled = !hasActivity;
         
         if (!hasActivity) {
           // Reset everything if no activity
-          elements.districtType.value = '';
-          elements.districtType.disabled = true;
-          updateDistrictNumbers();
+          elements.selectionMode.value = '';
+          currentMode = null;
+          switchSelectionMode();
         }
         
         updateStartButton();
       });
       
-      // District type change updates district numbers
+      // Selection mode change
+      elements.selectionMode.addEventListener('change', switchSelectionMode);
+      
+      // District mode event listeners
       elements.districtType.addEventListener('change', updateDistrictNumbers);
-      
-      // District number change fetches cities
       elements.districtNumber.addEventListener('change', fetchCitiesForDistrict);
-      
-      // City selection updates start button
       elements.city.addEventListener('change', updateStartButton);
+      
+      // City mode event listeners
+      elements.countySelector.addEventListener('change', handleCountySelection);
       
       // Retry cities button
       elements.retryCities.addEventListener('click', fetchCitiesForDistrict);
@@ -484,10 +723,9 @@
       try {
         initElements();
         metadata = await fetchMetadata();
-        populateDistricts(metadata);
         showCard();
         setupEventListeners();
-        console.log('✅ Volunteer landing page initialized successfully');
+        console.log('✅ Smart volunteer landing page initialized successfully');
       } catch (error) {
         console.error('💥 Critical error initializing page:', error);
         showCriticalError();
