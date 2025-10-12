@@ -125,7 +125,7 @@ if __name__ == '__main__':
     print('CANVASS:', ' '.join(canvass_cmd))
     subprocess.run(canvass_cmd)
     # call next
-    callnext_cmd = ['curl','-sS','-X','POST','http://127.0.0.1:8787/api/call/next']
+    callnext_cmd = ['curl','-sS','-X','POST','http://127.0.0.1:8787/api/next']
     print('\nCALL NEXT:', ' '.join(callnext_cmd))
     subprocess.run(callnext_cmd)
     print('\nAll done')

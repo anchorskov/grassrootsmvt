@@ -1,8 +1,0 @@
-name = "grassrootsmvt"
-pages_build_output_dir = "."
-functions = "functions"
-compatibility_date = "2025-10-07"
-
-[vars]
-ENVIRONMENT = "local"
-ALLOW_ORIGIN = "http://localhost:8788"

@@ -1,0 +1,15 @@
+{
+  "name": "grassrootsmvt-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "itty-router": "^5.0.22",
+    "jose": "^6.1.0",
+    "wrangler": "^4.42.2"
+  }
+}

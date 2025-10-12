@@ -1,0 +1,52 @@
+# 🏷️ worker/wrangler.toml
+# Cloudflare Worker configuration for grassrootsmvt (Zero Trust JWT-secured)
+
+name = "grassrootsmvt"
+account_id = "8bfd3f60fbdcc89183e9e312fb03e86e"
+main = "src/index.js"
+compatibility_date = "2025-10-08"
+workers_dev = true
+
+# 🌍 Shared Environment Variables (safe for version control)
+[vars]
+ENVIRONMENT = "local"
+ALLOW_ORIGIN = "http://localhost:8788"
+DATA_BACKEND = "d1"
+ACCESS_HEADER = "Cf-Access-Authenticated-User-Email"
+ACCESS_JWT_HEADER = "Cf-Access-Jwt-Assertion"
+DEBUG_CORS = "true"
+
+# 🗄️ Local D1 binding (development / preview)
+[[d1_databases]]
+binding = "d1"
+database_name = "wy_preview"
+database_id = "de78cb41-176d-40e8-bd3b-e053e347ac3f"
+migrations_dir = "db/migrations"
+
+# 🌐 Production Environment
+[env.production]
+preview_urls = true
+# 🌐 Route to production API
+routes = [
+  { pattern = "api.grassrootsmvt.org/*", zone_name = "grassrootsmvt.org" }
+]
+
+# ✅ Explicitly define vars for production (not inherited automatically)
+[env.production.vars]
+ENVIRONMENT = "production"
+ALLOW_ORIGIN = "https://grassrootsmvt.org"
+ACCESS_HEADER = "Cf-Access-Authenticated-User-Email"
+ACCESS_JWT_HEADER = "Cf-Access-Jwt-Assertion"
+DATA_BACKEND = "d1"
+DEBUG_CORS = "false"
+
+# ✅ Production D1 binding
+[[env.production.d1_databases]]
+binding = "d1"
+database_name = "wy"
+database_id = "4b4227f1-bf30-4fcf-8a08-6967b536a5ab"
+migrations_dir = "db/migrations"
+
+# 🔒 Secure Secrets (set via CLI)
+#   TEAM_DOMAIN   = skovgard.cloudflareaccess.com
+#   POLICY_AUD    = <Access AUD tag>

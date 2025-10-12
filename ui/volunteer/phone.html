@@ -63,7 +63,7 @@ function getFilters(){
 document.getElementById('getNext').addEventListener('click', async()=>{
   el('voter').textContent='Loading…';
   try{
-    const j = await window.apiFetch('/call/next', { method: 'POST' });
+  const j = await window.apiFetch('/next', { method: 'POST' });
     if(!j || !j.voter_id) el('voter').textContent='No voter available';
     else el('voter').innerHTML = `<strong>${j.first_name||'—'} ${j.last_name||''}</strong><br>${j.ra_city||''} ${j.ra_zip||''}<br>Phone: ${j.phone_e164||'—'}`;
   }catch(e){el('voter').textContent='Error: '+(e && e.message || e)}

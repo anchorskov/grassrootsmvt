@@ -72,9 +72,9 @@ main() {
   check_json "POST" "/api/ping" "{}"
 
   # 2) Call flow: next + complete
-  check_json "POST" "/api/call/next" "{}"
+  check_json "POST" "/api/next" "{}"
   # Save a minimal outcome
-  check_json "POST" "/api/call/complete" '{"voter_id":"TEST123","outcome":"vm"}'
+  check_json "POST" "/api/complete" '{"voter_id":"TEST123","outcome":"vm"}'
 
   # 3) Canvass list supports GET+POST and returns JSON
   check_json "GET"  "/api/canvass/list"

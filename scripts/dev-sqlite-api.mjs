@@ -575,7 +575,7 @@ app.post("/api/canvass/nearby", (req, res) => {
 });
 
 // --- Call next: GET/POST (one record) ---
-app.all("/api/call/next", (req, res) => {
+app.all("/api/next", (req, res) => {
   try {
     const filters = parseFilters(req);
     const exclude_ids = getExcludeIds(req);
@@ -607,7 +607,7 @@ app.all("/api/call/next", (req, res) => {
     if (!row) return res.json({ ok:true, filters, empty:true });
     res.json({ ok:true, ...row, filters });
   } catch (e) {
-    console.error("ALL /api/call/next error:", e);
+  console.error("ALL /api/next error:", e);
     res.status(500).json({ ok:false, error:"call_next_failed" });
   }
 });
@@ -641,7 +641,7 @@ app.get('/api/voter/:id', (req, res) => {
 });
 
 // --- Call complete: POST (echo stub) ---
-app.post("/api/call/complete", (req, res) => {
+app.post("/api/complete", (req, res) => {
   try {
     const body = req.body || {};
     const email = (req.headers && (req.headers['x-volunteer-email'] || req.headers['x-user-email'])) || DEV_EMAIL || null;
@@ -679,7 +679,7 @@ app.post("/api/call/complete", (req, res) => {
 
     res.json({ ok:true, saved: body, persisted: "sqlite", warning: Object.keys(warning).length ? warning : undefined, ts: new Date().toISOString() });
   } catch (e) {
-    console.error("POST /api/call/complete error:", e);
+  console.error("POST /api/complete error:", e);
     res.status(500).json({ ok:false, error:"call_complete_failed" });
   }
 });

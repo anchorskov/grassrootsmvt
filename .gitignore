@@ -11,6 +11,7 @@ backups/
 *.pdf
 .env
 .env.*
+.ebvrc
 # Node / build
 node_modules/
 dist/
@@ -35,7 +36,7 @@ ui/_worker*.js
 dist/_worker*
 # Local temp files used during development
  tmp/
- .dev.vars
+ worker/.dev.vars
  /home/anchor/projects/voterdata/
 
 # Ignore generated worker artifacts that may shadow Pages Functions
@@ -47,3 +48,19 @@ dist/_worker*
 _worker.js
 _worker.bundle*
 dist/_worker*
+
+# Generated Pages / deployment artifacts
+.vercel/
+ui/.vercel/
+ui/.wrangler/
+.wrangler/
+_archive_grassrootsmvt-functions/
+
+# Ignore function node modules for UI/functions (we build in CI)
+ui/functions/node_modules/
+
+# Allow local dev copies but not generated bundling
+ui/_worker.dev.js
+ui/_worker.build.js
+worker/.dev.vars
+

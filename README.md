@@ -53,7 +53,7 @@ wrangler pages dev ./ui --compatibility-date=2025-09-30
 Smoke tests
 ```bash
 curl -s http://127.0.0.1:8788/api/ping | jq .
-curl -s -X POST http://127.0.0.1:8788/api/call/next | jq .
+curl -s -X POST http://127.0.0.1:8788/api/next | jq .
 
 # Local verification helper
 # You can run the post-deploy verifier locally against your Pages dev or a real deployment.

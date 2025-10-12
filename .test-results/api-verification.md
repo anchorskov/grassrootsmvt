@@ -3,7 +3,7 @@
 Endpoint | Tried Method | Status | Access-Control-Allow-Origin
 --- | --- | --- | ---
 /call/complete | GET | 200 | *
-/call/next | GET | 200 | *
+/next | GET | 200 | *
 /canvass/list | GET | 200 | *
 /canvass/search | GET | 200 | *
 /echo | GET | 200 | *
