@@ -1,6 +1,5 @@
 ---
 name: "🧪 Validate configuration and CI"
-
 on:
   push:
     branches:
@@ -8,20 +7,17 @@ on:
   pull_request:
     branches:
       - main
-
 jobs:
   validate:
     name: "🧩 Validate Workflows"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     continue-on-error: true
-
     steps:
       - name: "📥 Checkout repository"
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: "🧰 Install YAML tooling"
         run: |
           sudo apt-get update -qq
@@ -29,7 +25,6 @@ jobs:
           python3 -m pip install --upgrade pip
           pip install yamllint
           npm install -g js-yaml || true
-
       - name: "🔍 Lint all YAML workflows"
         run: |
           echo "🧪 Running yamllint..."
@@ -40,7 +35,6 @@ jobs:
             npx js-yaml "$f" >/dev/null || echo "❌ Invalid YAML in $f"
           done
           echo "✅ YAML syntax checks completed."
-
       - name: "� Check working-directory for wrangler steps"
         run: |
           echo "Running working-directory consistency checker..."
@@ -52,7 +46,6 @@ jobs:
               echo "Warnings found in workflows; not blocking PRs.";
             fi
           }
-
       - name: "�🔐 Check required secrets (main only)"
         run: |
           echo "🔍 Checking presence of required secrets (values will NOT be printed)..."
@@ -72,7 +65,6 @@ jobs:
           else
             echo "Skipping secrets check (not on main branch)."
           fi
-
       - name: "🧠 Confirm file structure"
         run: |
           echo "🔍 Verifying required files exist..."
@@ -84,7 +76,6 @@ jobs:
               echo "✅ Found: $FILE"
             fi
           done
-
       - name: "✨ Validation Summary"
         run: |
           echo ""

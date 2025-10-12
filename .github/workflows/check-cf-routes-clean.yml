@@ -1,6 +1,6 @@
+---
 if: false  # temporarily disabled during deploy testing
 name: "Check Cloudflare Routes Conflicts"
-
 on:
   workflow_run:
     workflows:

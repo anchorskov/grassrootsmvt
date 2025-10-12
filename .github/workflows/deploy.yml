@@ -1,6 +1,5 @@
 ---
 name: "📄 Deploy Pages UI Only"
-
 on:
   push:
     branches:
@@ -15,29 +14,24 @@ on:
         required: false
         default: false
         type: boolean
-
 jobs:
   deploy:
     name: "🚀 Deploy to Cloudflare Pages"
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       PROJECT: grassrootsmvt
-
     steps:
       - name: "📥 Checkout repository"
         uses: actions/checkout@v4
-
       - name: "🧰 Setup Node.js"
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: 'npm'
           cache-dependency-path: 'ui/package-lock.json'
-
       - name: "⚡ Cache npm dependencies"
         uses: actions/cache@v4
         with:
@@ -47,10 +41,8 @@ jobs:
           key: ${{ runner.os }}-npm-${{ hashFiles('ui/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-npm-
-
       - name: "🧰 Install Wrangler CLI"
         run: npm install -g wrangler@latest
-
       - name: "📦 Install UI dependencies"
         working-directory: ui
         run: |
@@ -64,7 +56,6 @@ jobs:
           else
             echo "No package.json found in UI directory"
           fi
-
       - name: "🏗️ Build Cloudflare Pages Functions"
         working-directory: ui
         run: |
@@ -76,7 +67,6 @@ jobs:
           else
             echo "ℹ️ No functions directory found, skipping build."
           fi
-
       - name: "🚀 Deploy to Cloudflare Pages"
         working-directory: ui
         env:
@@ -84,20 +74,17 @@ jobs:
         run: |
           echo "🚀 Deploying Cloudflare Pages from ui/..."
           set -o pipefail
-
           npx wrangler pages deploy . \
             --project-name=grassrootsmvt \
             --commit-dirty=true \
             --compatibility-date=2025-10-08 \
             2>&1 | tee deploy.log
-
           EXIT_CODE=${PIPESTATUS[0]}
           if [ "$EXIT_CODE" -ne 0 ]; then
             echo "❌ wrangler deploy failed with exit code $EXIT_CODE"
             cat deploy.log
             exit $EXIT_CODE
           fi
-
           echo "✅ Cloudflare Pages deployment completed successfully"
       - name: "📦 Upload deploy log"
         uses: actions/upload-artifact@v4
@@ -106,16 +93,13 @@ jobs:
           name: deploy-log-${{ github.run_number }}
           path: ui/deploy.log
           retention-days: 30
-
       - name: "⏱️ Wait for deployment propagation"
         run: |
           echo "⏱️ Waiting for Cloudflare global propagation..."
           sleep 15
-
       - name: "✅ Verify Cloudflare deployment"
         run: |
           echo "🔍 Verifying Cloudflare Pages deployment..."
-
           # Test main page
           MAIN_RESPONSE=$(curl -s --max-time 15 "https://grassrootsmvt.org/" || echo "failed")
           if echo "$MAIN_RESPONSE" | grep -q "GrassrootsMVT\|Volunteer"; then
@@ -124,7 +108,6 @@ jobs:
             echo "❌ Main page verification failed"
             exit 1
           fi
-
           # Test volunteer portal
           VOLUNTEER_RESPONSE=$(curl -s --max-time 15 "https://grassrootsmvt.org/volunteer/" || echo "failed")
           if echo "$VOLUNTEER_RESPONSE" | grep -q "volunteer\|portal"; then
@@ -132,7 +115,6 @@ jobs:
           else
             echo "⚠️ Volunteer portal needs verification"
           fi
-
           # Test PWA manifest
           MANIFEST_RESPONSE=$(curl -s --max-time 10 "https://grassrootsmvt.org/manifest.json" || echo "failed")
           if echo "$MANIFEST_RESPONSE" | jq -e '.name' >/dev/null 2>&1; then
@@ -140,9 +122,7 @@ jobs:
           else
             echo "⚠️ PWA manifest verification failed"
           fi
-
           echo "🎉 Cloudflare Pages deployment verification completed"
-
       - name: "📦 Upload verification logs"
         uses: actions/upload-artifact@v4
         if: always()
@@ -152,7 +132,6 @@ jobs:
             verify__api_*.txt
             ui/deploy.log
           retention-days: 30
-
       - name: "🔎 Lint this workflow with yamllint"
         if: success()
         run: |

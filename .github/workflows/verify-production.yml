@@ -1,42 +1,36 @@
+---
 name: 🌾 GrassrootsMVT Production Verification
-
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
     inputs:
       issue_number:
         description: 'GitHub Issue number to comment on'
         required: false
         default: ''
-
 jobs:
   verify-production:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
       - name: 🧭 Checkout repository
         uses: actions/checkout@v4
-
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
           cache: 'npm'
-
       - name: 📦 Install dependencies
         run: |
           npm install -g wrangler@latest
           cd ui && npm install --no-fund --no-audit || echo "No package.json in ui/"
           cd ../worker && npm install --no-fund --no-audit || echo "No package.json in worker/"
-
       - name: 🔐 Verify JWT Authentication Integration
         run: |
           echo "🔍 Verifying JWT authentication functions..."
-
           # Check if JWT functions exist in apiClient.js
           if grep -q "getJWTToken" ui/src/apiClient.js; then
             echo "✅ getJWTToken function found"
@@ -44,36 +38,30 @@ jobs:
             echo "❌ getJWTToken function missing"
             exit 1
           fi
-
           if grep -q "authenticatedFetch" ui/src/apiClient.js; then
             echo "✅ authenticatedFetch function found"
           else
             echo "❌ authenticatedFetch function missing"
             exit 1
           fi
-
           if grep -q "Cf-Access-Jwt-Assertion" ui/src/apiClient.js; then
             echo "✅ Cloudflare Access JWT header implementation found"
           else
             echo "❌ Cloudflare Access JWT header missing"
             exit 1
           fi
-
           echo "🔐 JWT authentication integration verified"
-
       - name: 🌐 Verify API Endpoints
         env:
           CF_ACCESS_JWT: ${{ secrets.CF_ACCESS_JWT }}
         run: |
           echo "🔍 Checking API endpoint accessibility..."
-
           # Test production API health
           if curl -s --max-time 10 "https://api.grassrootsmvt.org/api/ping" | grep -q "pong\|ok"; then
             echo "✅ Production API health check passed"
           else
             echo "⚠️ Production API health check failed (may require authentication)"
           fi
-
           # Test metadata endpoint structure
           METADATA_RESPONSE=$(curl -s --max-time 10 "https://api.grassrootsmvt.org/api/metadata" || echo "{}")
           if echo "$METADATA_RESPONSE" | grep -q "counties\|districts"; then
@@ -81,13 +69,10 @@ jobs:
           else
             echo "⚠️ Metadata endpoint needs authentication or has different structure"
           fi
-
           echo "🌐 API endpoint verification completed"
-
       - name: 📱 Verify Offline Integration Components
         run: |
           echo "🔍 Verifying offline integration components..."
-
           # Check service worker
           if [ -f "ui/sw.js" ]; then
             echo "✅ Service worker file exists"
@@ -101,7 +86,6 @@ jobs:
             echo "❌ Service worker file missing"
             exit 1
           fi
-
           # Check IndexedDB helper
           if [ -f "ui/src/idb.js" ]; then
             echo "✅ IndexedDB helper exists"
@@ -115,9 +99,7 @@ jobs:
             echo "❌ IndexedDB helper missing"
             exit 1
           fi
-
           echo "📱 Offline integration components verified"
-
       - name: 🧪 Run Comprehensive Verification Script
         run: |
           echo "🔍 Running comprehensive verification script..."
@@ -127,11 +109,9 @@ jobs:
           else
             echo "⚠️ Verification script not found, skipping"
           fi
-
       - name: 🎨 Verify PWA Assets
         run: |
           echo "🔍 Verifying PWA assets..."
-
           # Check favicon files
           if [ -f "ui/favicon.ico" ] && [ -f "ui/favicon.svg" ]; then
             echo "✅ Favicon files present"
@@ -139,7 +119,6 @@ jobs:
             echo "❌ Missing favicon files"
             exit 1
           fi
-
           # Check manifest
           if [ -f "ui/manifest.json" ]; then
             echo "✅ PWA manifest exists"
@@ -153,13 +132,10 @@ jobs:
             echo "❌ PWA manifest missing"
             exit 1
           fi
-
           echo "🎨 PWA assets verified"
-
       - name: 🗂️ Check Database Schema & Migrations
         run: |
           echo "🔍 Verifying database schema files..."
-
           if [ -d "db/migrations" ]; then
             echo "✅ Migration directory exists"
             MIGRATION_COUNT=$(ls db/migrations/*.sql 2>/dev/null | wc -l)
@@ -167,83 +143,65 @@ jobs:
           else
             echo "⚠️ Migration directory not found"
           fi
-
           if [ -f "db/schema/volunteer_schema.sql" ]; then
             echo "✅ Volunteer schema file exists"
           else
             echo "⚠️ Volunteer schema file not found"
           fi
-
           echo "🗂️ Database schema verification completed"
-
       - name: 📄 Generate Verification Summary
         run: |
           echo "📝 Generating verification summary..."
-
           TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
           SUMMARY_FILE="verification_summary_$(date +%Y%m%d_%H%M).md"
-
           cat > "$SUMMARY_FILE" << EOF
           # ✅ GrassrootsMVT Production Verification Summary
-
           **Verification Date**: $TIMESTAMP
           **Workflow**: ${{ github.workflow }}
           **Commit**: ${{ github.sha }}
           **Branch**: ${{ github.ref_name }}
-
           ## 🔐 Authentication Integration
           - ✅ JWT token extraction functions implemented
           - ✅ Cloudflare Access integration ready
           - ✅ Authentication retry logic present
           - ✅ Local development fallback configured
-
           ## 🌐 API Integration
           - ✅ Production API endpoints accessible
           - ✅ Metadata endpoint structure verified
           - ✅ Authentication headers implemented
           - ✅ Error handling mechanisms present
-
           ## 📱 Offline Capabilities
           - ✅ Service worker with background sync
           - ✅ IndexedDB queue management
           - ✅ Request retry mechanisms
           - ✅ Offline fallback strategies
-
           ## 🎨 PWA Assets
           - ✅ Favicon files (ICO + SVG)
           - ✅ Web app manifest
           - ✅ Service worker registration
           - ✅ Progressive web app ready
-
           ## 🗂️ Database Infrastructure
           - ✅ Migration files present
           - ✅ Schema definitions available
           - ✅ Performance optimizations documented
-
           ## 🎯 Overall Status
           **🚀 PRODUCTION READY** - All critical systems verified and operational
-
           ### Next Steps
           1. Deploy to Cloudflare Pages
           2. Configure Cloudflare Access policies
           3. Test end-to-end authentication flow
           4. Monitor production metrics
-
           ---
           *Generated by GrassrootsMVT CI Pipeline*
           EOF
-
           echo "📄 Verification summary created: $SUMMARY_FILE"
           cat "$SUMMARY_FILE"
-
       - name: 🔄 Commit Verification Summary
         if: github.ref == 'refs/heads/main'
         run: |
           git config --local user.email "ci@grassrootsmvt.org"
           git config --local user.name "GrassrootsMVT CI"
-
           SUMMARY_FILE="verification_summary_$(date +%Y%m%d_%H%M).md"
-
           if [ -f "$SUMMARY_FILE" ]; then
             git add "$SUMMARY_FILE"
             if git diff --staged --quiet; then
@@ -254,7 +212,6 @@ jobs:
               echo "📝 Verification summary committed and pushed"
             fi
           fi
-
       - name: 💬 Comment on GitHub Issue
         if: github.event.inputs.issue_number != '' || github.event_name == 'push'
         uses: actions/github-script@v7
@@ -263,46 +220,36 @@ jobs:
             const timestamp = new Date().toISOString();
             const commitSha = context.sha.substring(0, 7);
             const workflowUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-
             const commentBody = `## ✅ GrassrootsMVT Production Verification Completed
-
             **Timestamp**: ${timestamp}
             **Commit**: [\`${commitSha}\`](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})
             **Workflow**: [View Run](${workflowUrl})
-
             ### 🔐 Authentication & Security
             - ✅ JWT Authentication Integration
             - ✅ Cloudflare Access Ready
             - ✅ Authorization Headers Implemented
             - ✅ Local Development Fallback
-
             ### 🌐 API & Database
             - ✅ Production API Accessible
             - ✅ Database Schema Verified
             - ✅ Error Handling Present
             - ✅ Performance Optimizations
-
             ### 📱 Progressive Web App
             - ✅ Service Worker Active
             - ✅ Offline Queue Management
             - ✅ Background Sync Ready
             - ✅ PWA Assets Complete
-
             ### 🎯 Production Status
             **🚀 ALL SYSTEMS GO** - Ready for production deployment
-
             The volunteer portal is now fully equipped with:
             - JWT authentication via Cloudflare Access
             - Offline submission queuing with background sync
             - Progressive Web App capabilities
             - Comprehensive error handling and retry logic
-
             ---
             *Automated verification by GrassrootsMVT CI*`;
-
             // Try to find an open issue to comment on, or use provided issue number
             let issueNumber = context.payload.inputs?.issue_number;
-
             if (!issueNumber && context.eventName === 'push') {
               // Look for the most recent open issue
               const issues = await github.rest.issues.listForRepo({
@@ -312,13 +259,11 @@ jobs:
                 sort: 'updated',
                 per_page: 1
               });
-
               if (issues.data.length > 0) {
                 issueNumber = issues.data[0].number;
                 console.log(`Found recent issue #${issueNumber} to comment on`);
               }
             }
-
             if (issueNumber) {
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
@@ -330,7 +275,6 @@ jobs:
             } else {
               console.log('ℹ️ No issue number provided, skipping comment');
             }
-
       - name: 🏆 Workflow Summary
         run: |
           echo "🎉 GrassrootsMVT Production Verification Complete!"
@@ -347,3 +291,4 @@ jobs:
           echo "💬 GitHub issue updated (if applicable)"
           echo ""
           echo "Next: Deploy to Cloudflare Pages and configure Access policies"
+

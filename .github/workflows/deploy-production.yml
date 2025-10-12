@@ -1,6 +1,5 @@
 ---
 name: 🚀 Deploy Production (Worker + Pages)
-
 on:
   push:
     branches: [main]
@@ -19,43 +18,35 @@ on:
         required: false
         default: false
         type: boolean
-
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   NODE_VERSION: '20'
-
 jobs:
   # Pre-deployment validation
   validate:
     name: 🧪 Pre-deployment Validation
     runs-on: ubuntu-latest
     timeout-minutes: 10
-
     outputs:
       should_deploy: ${{ steps.validation.outputs.should_deploy }}
-
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
-
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
       - name: 📦 Install global dependencies
         run: |
           npm install -g wrangler@latest
           pip install yamllint
-
       - name: 🔍 Lint YAML workflows
         run: |
           echo "🧪 Linting GitHub Actions workflows..."
           yamllint -c .yamllint .github/workflows/
           echo "✅ YAML validation passed"
-
       - name: 🧪 Run verification script
         id: verification
         run: |
@@ -67,7 +58,6 @@ jobs:
             echo "⚠️ Verification script not found, proceeding with basic checks"
             echo "verification_passed=true" >> $GITHUB_OUTPUT
           fi
-
       - name: 🏗️ Test Worker build
         working-directory: worker
         run: |
@@ -75,13 +65,11 @@ jobs:
           npm install --no-fund --no-audit
           echo "🏗️ Testing Worker syntax..."
           npx wrangler deploy --dry-run --env production
-
       - name: 🎨 Test Pages build
         working-directory: ui
         run: |
           echo "🔧 Installing Pages dependencies..."
           npm install --no-fund --no-audit || echo "No package.json found"
-
           echo "🏗️ Building Pages Functions..."
           if [ -d "functions" ]; then
             npx wrangler pages functions build functions --outdir .wrangler/functions-build
@@ -89,13 +77,11 @@ jobs:
           else
             echo "ℹ️ No Pages Functions to build"
           fi
-
       - name: ✅ Set deployment decision
         id: validation
         run: |
           VERIFICATION_PASSED="${{ steps.verification.outputs.verification_passed }}"
           FORCE_DEPLOY="${{ github.event.inputs.force_deploy }}"
-
           if [ "$VERIFICATION_PASSED" = "true" ] || [ "$FORCE_DEPLOY" = "true" ]; then
             echo "should_deploy=true" >> $GITHUB_OUTPUT
             echo "🚀 Validation passed - proceeding with deployment"
@@ -103,7 +89,6 @@ jobs:
             echo "should_deploy=false" >> $GITHUB_OUTPUT
             echo "❌ Validation failed - blocking deployment"
           fi
-
   # Deploy Worker API
   deploy-worker:
     name: 🔧 Deploy Worker API
@@ -111,26 +96,21 @@ jobs:
     needs: validate
     if: needs.validate.outputs.should_deploy == 'true'
     timeout-minutes: 15
-
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
-
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
           cache-dependency-path: 'worker/package-lock.json'
-
       - name: 📦 Install Worker dependencies
         working-directory: worker
         run: |
           npm ci --no-fund --no-audit
-
       - name: 🔧 Install Wrangler
         run: npm install -g wrangler@latest
-
       - name: 🚀 Deploy Worker to Production
         working-directory: worker
         env:
@@ -139,23 +119,19 @@ jobs:
           echo "🚀 Deploying Worker API to production..."
           npx wrangler deploy --env production
           echo "✅ Worker deployment completed"
-
       - name: 🔍 Verify Worker deployment
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           echo "🔍 Verifying Worker API endpoints..."
-
           # Wait for deployment to propagate
           sleep 10
-
           # Test basic connectivity
           if curl -s --max-time 10 "https://api.grassrootsmvt.org/api/ping" | grep -q "pong\|ok"; then
             echo "✅ Worker API health check passed"
           else
             echo "⚠️ Worker API health check failed (may require time to propagate)"
           fi
-
           # Test metadata endpoint
           METADATA_RESPONSE=$(curl -s --max-time 10 "https://api.grassrootsmvt.org/api/metadata" || echo "{}")
           if echo "$METADATA_RESPONSE" | jq -e '.counties' >/dev/null 2>&1; then
@@ -163,7 +139,6 @@ jobs:
           else
             echo "⚠️ Metadata endpoint response needs verification"
           fi
-
   # Deploy Pages UI
   deploy-pages:
     name: 🎨 Deploy Pages UI
@@ -171,16 +146,13 @@ jobs:
     needs: [validate, deploy-worker]
     if: needs.validate.outputs.should_deploy == 'true'
     timeout-minutes: 15
-
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
-
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-
       - name: 📦 Install UI dependencies
         working-directory: ui
         run: |
@@ -189,10 +161,8 @@ jobs:
           else
             echo "ℹ️ No package.json found in UI directory"
           fi
-
       - name: 🔧 Install Wrangler
         run: npm install -g wrangler@latest
-
       - name: 🏗️ Build Pages Functions
         working-directory: ui
         run: |
@@ -203,30 +173,24 @@ jobs:
           else
             echo "ℹ️ No Pages Functions to build"
           fi
-
       - name: 🚀 Deploy to Cloudflare Pages
         working-directory: ui
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
           echo "🚀 Deploying UI to Cloudflare Pages..."
-
           # Deploy with production branch configuration
           npx wrangler pages deploy . \
             --project-name=grassrootsmvt \
             --commit-dirty=true \
             --compatibility-date=2025-10-08
-
           echo "✅ Pages deployment completed"
-
       - name: 📋 Save deployment info
         working-directory: ui
         run: |
           echo "📋 Capturing deployment information..."
-
           TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
           COMMIT_SHA="${{ github.sha }}"
-
           cat > deployment_info.json << EOF
           {
             "timestamp": "$TIMESTAMP",
@@ -237,7 +201,6 @@ jobs:
             "environment": "production"
           }
           EOF
-
       - name: 📦 Upload deployment artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -246,27 +209,22 @@ jobs:
             ui/deployment_info.json
             ui/.wrangler/functions-build/
           retention-days: 30
-
   # Post-deployment verification
   verify-deployment:
     name: ✅ Verify Production Deployment
     runs-on: ubuntu-latest
     needs: [deploy-worker, deploy-pages]
     timeout-minutes: 10
-
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
-
       - name: ⏱️ Wait for deployment propagation
         run: |
           echo "⏱️ Waiting for Cloudflare global propagation..."
           sleep 30
-
       - name: 🔍 Verify Worker API
         run: |
           echo "🔍 Comprehensive Worker API verification..."
-
           # Test API health
           API_HEALTH=$(curl -s --max-time 15 "https://api.grassrootsmvt.org/api/ping" || echo "failed")
           if echo "$API_HEALTH" | grep -q "pong\|ok"; then
@@ -275,11 +233,9 @@ jobs:
             echo "❌ Worker API health check failed: $API_HEALTH"
             exit 1
           fi
-
           # Test metadata endpoint with error handling
           echo "🔍 Testing metadata endpoint..."
           METADATA_RESPONSE=$(curl -s --max-time 15 "https://api.grassrootsmvt.org/api/metadata" || echo '{"error": "failed"}')
-
           if echo "$METADATA_RESPONSE" | jq -e '.counties' >/dev/null 2>&1; then
             COUNTY_COUNT=$(echo "$METADATA_RESPONSE" | jq '.counties | length')
             echo "✅ Metadata endpoint returned $COUNTY_COUNT counties"
@@ -287,11 +243,9 @@ jobs:
             echo "⚠️ Metadata endpoint response: $METADATA_RESPONSE"
             echo "ℹ️ May require Cloudflare Access authentication"
           fi
-
       - name: 🎨 Verify Pages UI
         run: |
           echo "🔍 Comprehensive Pages UI verification..."
-
           # Test main page
           UI_RESPONSE=$(curl -s --max-time 15 "https://grassrootsmvt.org/" || echo "failed")
           if echo "$UI_RESPONSE" | grep -q "GrassrootsMVT\|Volunteer"; then
@@ -300,7 +254,6 @@ jobs:
             echo "❌ Pages UI main page failed"
             exit 1
           fi
-
           # Test volunteer portal
           VOLUNTEER_RESPONSE=$(curl -s --max-time 15 "https://grassrootsmvt.org/volunteer/" || echo "failed")
           if echo "$VOLUNTEER_RESPONSE" | grep -q "volunteer\|portal"; then
@@ -308,7 +261,6 @@ jobs:
           else
             echo "⚠️ Volunteer portal needs verification"
           fi
-
           # Test PWA assets
           MANIFEST_RESPONSE=$(curl -s --max-time 10 "https://grassrootsmvt.org/manifest.json" || echo "failed")
           if echo "$MANIFEST_RESPONSE" | jq -e '.name' >/dev/null 2>&1; then
@@ -316,89 +268,71 @@ jobs:
           else
             echo "⚠️ PWA manifest needs verification"
           fi
-
       - name: 🔗 Test API-UI Integration
         run: |
           echo "🔍 Testing cross-origin API access..."
-
           # Test CORS configuration
           CORS_RESPONSE=$(curl -s -I --max-time 10 \
             -H "Origin: https://grassrootsmvt.org" \
             "https://api.grassrootsmvt.org/api/metadata" || echo "failed")
-
           if echo "$CORS_RESPONSE" | grep -q "Access-Control-Allow-Origin"; then
             echo "✅ CORS configuration working"
           else
             echo "⚠️ CORS configuration needs verification"
           fi
-
       - name: 📊 Generate deployment report
         run: |
           echo "📊 Generating deployment verification report..."
-
           TIMESTAMP=$(date -u '+%Y-%m-%d %H:%M:%S UTC')
           COMMIT_SHA="${{ github.sha }}"
-
           cat > deployment_report.md << EOF
           # 🚀 Production Deployment Report
-
           **Deployment Time**: $TIMESTAMP
           **Commit**: [\`${COMMIT_SHA:0:7}\`](https://github.com/${{ github.repository }}/commit/$COMMIT_SHA)
           **Workflow**: [${{ github.workflow }}](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
           **Branch**: ${{ github.ref_name }}
-
           ## 🔧 Worker API Deployment
           - ✅ Worker deployed to \`https://api.grassrootsmvt.org\`
           - ✅ Health check endpoint responding
           - ✅ Metadata endpoint accessible
           - ✅ Production environment configured
-
           ## 🎨 Pages UI Deployment
           - ✅ UI deployed to \`https://grassrootsmvt.org\`
           - ✅ Main page accessible
           - ✅ Volunteer portal available
           - ✅ PWA assets deployed
-
           ## 🔗 Integration Testing
           - ✅ CORS configuration verified
           - ✅ Cross-origin API access working
           - ✅ Authentication headers supported
-
           ## 🎯 Production Status
           **🌟 LIVE AND OPERATIONAL**
-
           The GrassrootsMVT volunteer portal is now fully deployed with:
           - JWT authentication via Cloudflare Access
           - Offline-capable Progressive Web App
           - Real-time voter data integration
           - Comprehensive error handling and retry logic
-
           ### 🔗 Production URLs
           - **Main Site**: https://grassrootsmvt.org
           - **Volunteer Portal**: https://grassrootsmvt.org/volunteer/
           - **API**: https://api.grassrootsmvt.org
-
           ---
           *Automated deployment by GrassrootsMVT CI/CD Pipeline*
           EOF
-
           echo "📄 Deployment report generated"
           cat deployment_report.md
-
       - name: 📦 Upload verification results
         uses: actions/upload-artifact@v4
         with:
           name: deployment-verification
           path: deployment_report.md
           retention-days: 90
-
   # Notification and cleanup
   notify-success:
     name: 🎉 Deployment Success Notification
     runs-on: ubuntu-latest
     needs: [verify-deployment]
     if: success()
-
     steps:
       - name: 💬 Comment on latest issue
         uses: actions/github-script@v7
@@ -407,37 +341,29 @@ jobs:
             const timestamp = new Date().toISOString();
             const commitSha = context.sha.substring(0, 7);
             const workflowUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-
             const successMessage = `## 🚀 Production Deployment Successful!
-
             **Deployment Time**: ${timestamp}
             **Commit**: [\`${commitSha}\`](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})
             **Workflow**: [View Run](${workflowUrl})
-
             ### 🌟 Live Production URLs
             - **Main Site**: https://grassrootsmvt.org
             - **Volunteer Portal**: https://grassrootsmvt.org/volunteer/
             - **API Endpoint**: https://api.grassrootsmvt.org
-
             ### ✅ Deployment Verification
             - 🔧 Worker API: Deployed and responding
             - 🎨 Pages UI: Deployed and accessible
             - 🔗 CORS Integration: Working properly
             - 🎯 Authentication: Cloudflare Access ready
             - 📱 PWA Assets: Available for installation
-
             ### 🎯 What's New
             - JWT authentication via Cloudflare Access
             - Offline submission queuing with background sync
             - Progressive Web App capabilities
             - Enhanced error handling and user feedback
             - Real-time voter data integration
-
             **The volunteer portal is now live and ready for use!** 🎉
-
             ---
             *Automated deployment notification*`;
-
             // Find the most recent open issue to comment on
             try {
               const issues = await github.rest.issues.listForRepo({
@@ -447,7 +373,6 @@ jobs:
                 sort: 'updated',
                 per_page: 1
               });
-
               if (issues.data.length > 0) {
                 const issueNumber = issues.data[0].number;
                 await github.rest.issues.createComment({
@@ -463,14 +388,12 @@ jobs:
             } catch (error) {
               console.log('⚠️ Could not post issue comment:', error.message);
             }
-
   # Handle deployment failures
   notify-failure:
     name: ❌ Deployment Failure Notification
     runs-on: ubuntu-latest
     needs: [validate, deploy-worker, deploy-pages, verify-deployment]
     if: failure()
-
     steps:
       - name: 💬 Comment on failure
         uses: actions/github-script@v7
@@ -479,33 +402,25 @@ jobs:
             const timestamp = new Date().toISOString();
             const commitSha = context.sha.substring(0, 7);
             const workflowUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-
             const failureMessage = `## ❌ Production Deployment Failed
-
             **Failed At**: ${timestamp}
             **Commit**: [\`${commitSha}\`](https://github.com/${context.repo.owner}/${context.repo.repo}/commit/${context.sha})
             **Workflow**: [View Failed Run](${workflowUrl})
-
             ### 🔍 Failure Analysis
             The deployment pipeline encountered an error. Common causes:
-
             - 🔑 **Authentication**: Cloudflare API tokens may need refresh
             - 🌐 **Network**: Cloudflare service temporary unavailability
             - 🏗️ **Build**: Syntax errors or dependency issues
             - 🔧 **Configuration**: Missing environment variables or secrets
-
             ### 🔄 Recovery Steps
             1. Check the [workflow logs](${workflowUrl}) for specific errors
             2. Verify Cloudflare API token validity in repository secrets
             3. Ensure all required environment variables are configured
             4. Re-run the workflow once issues are resolved
-
             ### 🆘 Emergency Rollback
             If needed, previous deployments remain accessible and can be restored through Cloudflare dashboard.
-
             ---
             *Automated failure notification*`;
-
             try {
               const issues = await github.rest.issues.listForRepo({
                 owner: context.repo.owner,
@@ -514,7 +429,6 @@ jobs:
                 sort: 'updated',
                 per_page: 1
               });
-
               if (issues.data.length > 0) {
                 const issueNumber = issues.data[0].number;
                 await github.rest.issues.createComment({
@@ -528,3 +442,4 @@ jobs:
             } catch (error) {
               console.log('⚠️ Could not post failure comment:', error.message);
             }
+
