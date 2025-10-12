@@ -1,0 +1,72 @@
+[
+  {
+    "title": "P1: Implement JWT Authentication Integration",
+    "body": "## Problem\nUI has no Cloudflare Access JWT token handling, causing all API calls to fail with 401 Unauthorized in production.\n\n## Impact\n- Production deployment will fail\n- Volunteers cannot access authenticated endpoints\n- No security validation for volunteer actions\n\n## Implementation Requirements\n- Extract JWT from `CF_Authorization` cookie\n- Add `Cf-Access-Jwt-Assertion` headers to all API calls\n- Handle 401/403 responses with redirect to login\n- Test authentication flow in production environment\n\n## Affected Files\n- `ui/volunteer/phone.html`\n- `ui/volunteer/canvass.html` \n- `src/apiClient.js`\n\n## Dependencies\n- Must be completed before P2 (API Integration)\n- Blocks production deployment (P5)\n\n## Subtasks\n- [ ] P1.1: Implement JWT cookie extraction from Cloudflare Access (4h)\n- [ ] P1.2: Add `Cf-Access-Jwt-Assertion` headers to all API calls (2h)\n- [ ] P1.3: Handle 401/403 responses with redirect to login (2h)\n- [ ] P1.4: Add authenticated user display from `/api/whoami` (2h)\n- [ ] P1.5: Test authentication flow in production environment (4h)",
+    "labels": ["critical", "frontend", "authentication", "production-blocker"],
+    "milestone": "GrassrootsMVT Production Launch",
+    "estimate": "2d"
+  },
+  {
+    "title": "P2: Replace Placeholder API Calls with Real Integration",
+    "body": "## Problem\nAll volunteer actions use placeholder data and commented API calls, preventing data persistence to the database.\n\n## Impact\n- No volunteer activity is saved to database\n- Volunteer actions are lost\n- Cannot track engagement or follow-ups\n\n## Implementation Requirements\n- Replace placeholder voter data with real `/api/voters` calls\n- Connect `/api/call` endpoint to phone banking form\n- Connect `/api/canvass` endpoint to canvassing form\n- Implement `/api/pulse` opt-in integration\n- Add form validation and success/error feedback\n\n## Affected Files\n- `ui/volunteer/phone.html`\n- `ui/volunteer/canvass.html`\n\n## Dependencies\n- Blocked by P1 (JWT Authentication)\n- Required for P5 (Production Deployment)\n\n## Subtasks\n- [ ] P2.1: Replace placeholder voter data with `/api/voters` calls (6h)\n- [ ] P2.2: Connect `/api/call` endpoint to phone banking form (4h)\n- [ ] P2.3: Connect `/api/canvass` endpoint to canvassing form (4h)\n- [ ] P2.4: Implement `/api/pulse` opt-in integration (3h)\n- [ ] P2.5: Add form validation and success/error feedback (4h)",
+    "labels": ["high", "frontend", "api-integration", "data-persistence"],
+    "milestone": "GrassrootsMVT Production Launch",
+    "estimate": "3d"
+  },
+  {
+    "title": "P3: Connect Template System to UI",
+    "body": "## Problem\n`/api/templates` endpoint exists but UI doesn't use it, preventing volunteers from accessing the message script library.\n\n## Impact\n- Volunteers can't access script library\n- Inconsistent messaging across volunteers\n- Feature incomplete despite backend implementation\n\n## Implementation Requirements\n- Load templates from `/api/templates?category=phone`\n- Load templates from `/api/templates?category=canvass`\n- Populate template dropdowns dynamically\n- Handle template loading errors gracefully\n\n## Affected Files\n- `ui/volunteer/phone.html`\n- `ui/volunteer/canvass.html`\n\n## Dependencies\n- Can be implemented in parallel with P2\n- Requires P1 (JWT Authentication) for API access\n\n## Subtasks\n- [ ] P3.1: Load templates from `/api/templates?category=phone` (2h)\n- [ ] P3.2: Load templates from `/api/templates?category=canvass` (2h)\n- [ ] P3.3: Populate template dropdowns dynamically (2h)\n- [ ] P3.4: Handle template loading errors gracefully (1h)",
+    "labels": ["medium", "frontend", "templates", "feature-completion"],
+    "milestone": "GrassrootsMVT Production Launch",
+    "estimate": "1d"
+  },
+  {
+    "title": "P4: Implement Comprehensive Error Handling",
+    "body": "## Problem\nBasic error handling for network failures and API errors, leading to poor user experience with connection issues.\n\n## Impact\n- Poor user experience with connection issues\n- No retry logic for failed requests\n- Missing offline fallbacks for mobile canvassing\n- Unclear error states for volunteers\n\n## Implementation Requirements\n- Add comprehensive network error handling\n- Implement retry logic for failed requests (max 3 attempts)\n- Add loading states and progress indicators\n- Create offline fallback for canvassing GPS data\n- Add toast notifications for success/error states\n\n## Affected Files\n- All UI files\n- `src/apiClient.js`\n\n## Dependencies\n- Can be implemented in parallel with P2 and P3\n- Enhances user experience post-authentication (P1)\n\n## Subtasks\n- [ ] P4.1: Add comprehensive network error handling (3h)\n- [ ] P4.2: Implement retry logic for failed requests (max 3 attempts) (2h)\n- [ ] P4.3: Add loading states and progress indicators (4h)\n- [ ] P4.4: Create offline fallback for canvassing GPS data (3h)\n- [ ] P4.5: Add toast notifications for success/error states (2h)",
+    "labels": ["medium", "frontend", "ux", "error-handling"],
+    "milestone": "GrassrootsMVT Production Launch",
+    "estimate": "2d"
+  },
+  {
+    "title": "P5: Production Deployment and Testing",
+    "body": "## Problem\nComplete production deployment and end-to-end testing to launch the volunteer portal.\n\n## Impact\n- Enables volunteer onboarding\n- Activates complete voter engagement platform\n- Validates all integrated systems work together\n\n## Implementation Requirements\n- Deploy updated UI to Cloudflare Pages\n- Configure Cloudflare Access for volunteer portal\n- Test end-to-end volunteer workflows in production\n- Monitor initial volunteer usage and fix issues\n\n## Affected Files\n- CI/CD pipeline\n- Cloudflare Dashboard configuration\n- Production monitoring setup\n\n## Dependencies\n- Blocked by P1 (JWT Authentication)\n- Blocked by P2 (API Integration)\n- Enhanced by P3 (Template System)\n- Enhanced by P4 (Error Handling)\n\n## Subtasks\n- [ ] P5.1: Deploy updated UI to Cloudflare Pages (1h)\n- [ ] P5.2: Configure Cloudflare Access for volunteer portal (1h)\n- [ ] P5.3: Test end-to-end volunteer workflows in production (2h)\n- [ ] P5.4: Monitor initial volunteer usage and fix issues (2h)",
+    "labels": ["high", "deployment", "production", "testing"],
+    "milestone": "GrassrootsMVT Production Launch",
+    "estimate": "1d"
+  },
+  {
+    "title": "P1.1: Implement JWT Cookie Extraction from Cloudflare Access",
+    "body": "## Description\nImplement JWT token extraction from the `CF_Authorization` cookie set by Cloudflare Access.\n\n## Acceptance Criteria\n- [ ] Extract JWT from `document.cookie['CF_Authorization']`\n- [ ] Handle missing or malformed cookies gracefully\n- [ ] Return null when no valid token is found\n- [ ] Validate token format before use\n\n## Implementation Details\n```javascript\nfunction getJWTToken() {\n  const cookies = document.cookie.split(';');\n  const cfAuth = cookies.find(cookie => cookie.trim().startsWith('CF_Authorization='));\n  return cfAuth ? cfAuth.split('=')[1] : null;\n}\n```\n\n## Affected Files\n- `src/apiClient.js`\n\n## Parent Task\nP1: Implement JWT Authentication Integration",
+    "labels": ["critical", "frontend", "authentication", "subtask"],
+    "milestone": "GrassrootsMVT Production Launch",
+    "estimate": "4h"
+  },
+  {
+    "title": "P1.2: Add Cf-Access-Jwt-Assertion Headers to All API Calls",
+    "body": "## Description\nAdd the required `Cf-Access-Jwt-Assertion` header to all authenticated API requests.\n\n## Acceptance Criteria\n- [ ] Modify `authenticatedFetch` function to include JWT header\n- [ ] Apply to all API calls (`/api/voters`, `/api/call`, `/api/canvass`, `/api/pulse`, `/api/templates`)\n- [ ] Ensure header is properly formatted\n- [ ] Handle cases where JWT token is missing\n\n## Implementation Details\n```javascript\nconst headers = {\n  'Content-Type': 'application/json',\n  'Cf-Access-Jwt-Assertion': token,\n  ...options.headers\n};\n```\n\n## Affected Files\n- `src/apiClient.js`\n\n## Parent Task\nP1: Implement JWT Authentication Integration",
+    "labels": ["critical", "frontend", "authentication", "subtask"],
+    "milestone": "GrassrootsMVT Production Launch",
+    "estimate": "2h"
+  },
+  {
+    "title": "P1.3: Handle 401/403 Responses with Redirect to Login",
+    "body": "## Description\nImplement proper handling of authentication failures by redirecting users to Cloudflare Access login.\n\n## Acceptance Criteria\n- [ ] Check for 401/403 status codes in API responses\n- [ ] Redirect to `/cdn-cgi/access/login` on authentication failure\n- [ ] Clear any invalid cached tokens\n- [ ] Provide user-friendly error message before redirect\n\n## Implementation Details\n```javascript\nif (response.status === 401 || response.status === 403) {\n  window.location.href = '/cdn-cgi/access/login';\n  return;\n}\n```\n\n## Affected Files\n- `src/apiClient.js`\n\n## Parent Task\nP1: Implement JWT Authentication Integration",
+    "labels": ["critical", "frontend", "authentication", "subtask"],
+    "milestone": "GrassrootsMVT Production Launch",
+    "estimate": "2h"
+  },
+  {
+    "title": "P1.4: Add Authenticated User Display from /api/whoami",
+    "body": "## Description\nDisplay the authenticated volunteer's information using the `/api/whoami` endpoint.\n\n## Acceptance Criteria\n- [ ] Call `/api/whoami` on page load\n- [ ] Display volunteer email/name in UI header\n- [ ] Handle cases where user info is unavailable\n- [ ] Add logout functionality\n\n## Implementation Details\n- Add user info section to volunteer pages\n- Display email from JWT payload or `/api/whoami` response\n- Include logout link that clears session\n\n## Affected Files\n- `ui/volunteer/phone.html`\n- `ui/volunteer/canvass.html`\n\n## Parent Task\nP1: Implement JWT Authentication Integration",
+    "labels": ["critical", "frontend", "authentication", "subtask"],
+    "milestone": "GrassrootsMVT Production Launch",
+    "estimate": "2h"
+  },
+  {
+    "title": "P1.5: Test Authentication Flow in Production Environment",
+    "body": "## Description\nComprehensively test the JWT authentication flow in the production environment.\n\n## Acceptance Criteria\n- [ ] Test initial authentication redirect\n- [ ] Verify JWT token extraction works correctly\n- [ ] Test API calls with valid authentication\n- [ ] Test token expiration handling\n- [ ] Verify re-authentication flow works\n- [ ] Test cross-browser compatibility\n\n## Test Scenarios\n1. Unauthenticated user access → redirect to login\n2. Successful login → JWT cookie set → API access granted\n3. Token expiration → automatic re-authentication\n4. Manual logout → session cleared\n\n## Affected Files\n- All volunteer pages\n- Production Cloudflare Access configuration\n\n## Parent Task\nP1: Implement JWT Authentication Integration",
+    "labels": ["critical", "testing", "authentication", "subtask"],
+    "milestone": "GrassrootsMVT Production Launch",
+    "estimate": "4h"
+  }
+]

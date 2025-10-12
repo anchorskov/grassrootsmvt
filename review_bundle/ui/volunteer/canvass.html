@@ -2,25 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Grassroots Canvassing</title>
-  
-  <!-- Favicon -->
-  <link rel="icon" type="image/x-icon" href="../favicon.ico">
-  
-  <!-- PWA Manifest -->
-  <link rel="manifest" href="../manifest.json">
-  
-  <!-- Theme and Meta Tags -->
-  <meta name="theme-color" content="#1d4ed8">
-  <meta name="description" content="GrassrootsMVT Volunteer Portal for voter outreach and engagement in Wyoming.">
-  
-  <!-- Open Graph Meta Tags -->
-  <meta property="og:title" content="GrassrootsMVT Volunteer Portal">
-  <meta property="og:description" content="Join Wyoming volunteers in connecting with voters statewide.">
-  <meta property="og:image" content="../assets/preview.png">
-  <meta property="og:type" content="website">
-  
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -49,17 +32,10 @@
         <h1 class="text-2xl md:text-3xl font-bold text-gray-800">
           🏘️ Grassroots Canvassing
         </h1>
-        <div class="flex items-center space-x-4">
-          <!-- Connection Status -->
-          <div class="flex items-center space-x-2">
-            <span class="online-indicator text-green-600">🌐 Online</span>
-            <span class="queue-indicator text-yellow-600" style="display: none;">📋 0 pending</span>
-          </div>
-          <a href="/volunteer/" 
-             class="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors duration-200 text-sm font-medium">
-            ← Back
-          </a>
-        </div>
+        <a href="/volunteer/" 
+           class="px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors duration-200 text-sm font-medium">
+          ← Back
+        </a>
       </div>
       
       <!-- Dynamic Targeting Info -->
@@ -146,25 +122,18 @@
 
   <!-- JavaScript -->
   <script type="module" src="/src/api-shim.js"></script>
-  <script type="module">
-    // Import API client with offline support and authentication
-    import { 
-      fetchVoters, 
-      fetchTemplates, 
-      logCanvass,
-      getOnlineStatus,
-      updateOfflineQueue,
-      showToast,
-      getAuthStatus,
-      authenticatedFetch
-    } from '../src/apiClient.js';
-    
+  <script>
     let currentVoter = null;
     let voters = [];
     let templates = [];
     let locationLat = null;
     let locationLng = null;
     let currentIndex = 0;
+
+    // API Configuration with environment detection
+    const API_BASE = window.location.hostname.includes('localhost') 
+      ? 'http://localhost:8787' 
+      : 'https://api.grassrootsmvt.org';
 
     // Parse URL parameters as specified
     function parseUrlParams() {
@@ -228,7 +197,7 @@
       }
     }
 
-    // Fetch voters from API using authenticated client
+    // Fetch voters from API as specified
     async function fetchVoters() {
       try {
         // Show loading state
@@ -240,34 +209,20 @@
         const { house, city } = parseUrlParams();
         
         // Build query parameters
-        const params = {};
-        if (house) params.house_district = house;
-        if (city) params.city = city;
+        const query = [];
+        if (house) query.push(`house_district=${encodeURIComponent(house)}`);
+        if (city) query.push(`city=${encodeURIComponent(city)}`);
         
-        console.log('🌐 Fetching voters with params:', params);
+        const apiUrl = `${API_BASE}/api/voters${query.length ? '?' + query.join('&') : ''}`;
+        console.log('🌐 Fetching voters from:', apiUrl);
         
-        // Check authentication status
-        const authStatus = getAuthStatus();
-        console.log('🔐 Auth Status:', authStatus);
+        const votersResp = await fetch(apiUrl);
         
-        if (!authStatus.hasToken) {
-          throw new Error('Authentication required');
+        if (!votersResp.ok) {
+          throw new Error(`HTTP ${votersResp.status}: ${votersResp.statusText}`);
         }
         
-        const votersData = await fetchVoters(params);
-        
-        if (!votersData.ok && votersData.offline) {
-          // Show offline notice but continue
-          showToast('Currently offline. Limited functionality available.', 'warning', 5000);
-          document.getElementById('loading-voters').classList.add('hidden');
-          document.getElementById('error-voters').classList.remove('hidden');
-          return;
-        }
-        
-        if (!votersData.ok) {
-          throw new Error(votersData.error || 'Failed to fetch voters');
-        }
-        
+        const votersData = await votersResp.json();
         voters = votersData.voters || [];
         
         console.log('✅ Voters loaded:', voters.length);
@@ -287,30 +242,19 @@
         console.error('❌ Error fetching voters:', error);
         document.getElementById('loading-voters').classList.add('hidden');
         document.getElementById('error-voters').classList.remove('hidden');
-        
-        if (error.message.includes('Authentication')) {
-          showToast('Authentication failed. Please log in.', 'error', 5000);
-        } else {
-          showToast('Error loading voters. Please try again.', 'error', 3000);
-        }
       }
     }
 
-    // Fetch canvass templates using authenticated client
+    // Fetch canvass templates as specified
     async function fetchTemplates() {
       try {
-        const templatesData = await fetchTemplates('canvass');
+        const templatesResp = await fetch(`${API_BASE}/api/templates?category=canvass`);
         
-        if (!templatesData.ok && templatesData.offline) {
-          console.warn('⚠️ Offline - templates unavailable');
-          templates = [];
-          return;
+        if (!templatesResp.ok) {
+          throw new Error(`HTTP ${templatesResp.status}: ${templatesResp.statusText}`);
         }
         
-        if (!templatesData.ok) {
-          throw new Error(templatesData.error || 'Failed to fetch templates');
-        }
-        
+        const templatesData = await templatesResp.json();
         templates = templatesData.templates || [];
         
         console.log('✅ Canvass templates loaded:', templates.length);
@@ -318,7 +262,6 @@
       } catch (error) {
         console.error('❌ Error fetching templates:', error);
         templates = [];
-        showToast('Error loading message templates', 'warning', 3000);
       }
     }
 
@@ -579,15 +522,6 @@
       const urlParams = parseUrlParams();
       console.log('📋 URL Parameters:', urlParams);
       
-      // Check authentication status
-      const authStatus = getAuthStatus();
-      console.log('🔐 Authentication Status:', authStatus);
-      
-      if (!authStatus.hasToken) {
-        showToast('Authentication required. Please log in.', 'error', 5000);
-        return;
-      }
-      
       // Update targeting info
       const targetLabel = buildTargetingInfo(urlParams);
       document.getElementById('target-label').textContent = targetLabel;
@@ -602,15 +536,8 @@
       fetchVoters();
       fetchTemplates();
       
-      console.log('✅ Authenticated canvassing page initialized successfully');
+      console.log('✅ Canvassing page initialized successfully');
     });
-  </script>
-
-  <!-- Service Worker Registration -->
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('../sw.js').catch(console.error);
-    }
   </script>
 
 </body>

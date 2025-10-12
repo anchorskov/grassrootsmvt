@@ -2,25 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Grassroots Phone Banking</title>
-  
-  <!-- Favicon -->
-  <link rel="icon" type="image/x-icon" href="../favicon.ico">
-  
-  <!-- PWA Manifest -->
-  <link rel="manifest" href="../manifest.json">
-  
-  <!-- Theme and Meta Tags -->
-  <meta name="theme-color" content="#1d4ed8">
-  <meta name="description" content="GrassrootsMVT Volunteer Portal for voter outreach and engagement in Wyoming.">
-  
-  <!-- Open Graph Meta Tags -->
-  <meta property="og:title" content="GrassrootsMVT Volunteer Portal">
-  <meta property="og:description" content="Join Wyoming volunteers in connecting with voters statewide.">
-  <meta property="og:image" content="../assets/preview.png">
-  <meta property="og:type" content="website">
-  
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -49,17 +32,10 @@
         <h1 class="text-3xl font-bold text-gray-800">
           📞 Grassroots Phone Banking
         </h1>
-        <div class="flex items-center space-x-4">
-          <!-- Connection Status -->
-          <div class="flex items-center space-x-2">
-            <span class="online-indicator text-green-600">🌐 Online</span>
-            <span class="queue-indicator text-yellow-600" style="display: none;">📋 0 pending</span>
-          </div>
-          <a href="/volunteer/" 
-             class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors duration-200 text-sm font-medium">
-            ← Back to Volunteer Portal
-          </a>
-        </div>
+        <a href="/volunteer/" 
+           class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors duration-200 text-sm font-medium">
+          ← Back to Volunteer Portal
+        </a>
       </div>
       
       <!-- Dynamic Targeting Info -->
@@ -211,22 +187,15 @@
 
   <!-- JavaScript -->
   <script type="module" src="/src/api-shim.js"></script>
-  <script type="module">
-    // Import API client with offline support and authentication
-    import { 
-      fetchVoters as apiFetchVoters, 
-      fetchTemplates as apiFetchTemplates, 
-      logCall,
-      getOnlineStatus,
-      updateOfflineQueue,
-      authenticatedFetch,
-      getAuthStatus,
-      showToast
-    } from '../src/apiClient.js';
-
+  <script>
     let currentVoter = null;
     let voters = [];
     let templates = [];
+
+    // API Configuration with environment detection
+    const API_BASE = window.location.hostname.includes('localhost') 
+      ? 'http://localhost:8787' 
+      : 'https://api.grassrootsmvt.org';
 
     // Parse URL parameters as specified
     function parseUrlParams() {
@@ -255,7 +224,7 @@
       return label;
     }
 
-    // Fetch voters from API using offline-capable client
+    // Fetch voters from API as specified
     async function fetchVoters() {
       try {
         // Show loading state
@@ -267,26 +236,20 @@
         const { house, city } = parseUrlParams();
         
         // Build query parameters
-        const params = {};
-        if (house) params.house_district = house;
-        if (city) params.city = city;
+        const query = [];
+        if (house) query.push(`house_district=${encodeURIComponent(house)}`);
+        if (city) query.push(`city=${encodeURIComponent(city)}`);
         
-        console.log('🌐 Fetching voters with params:', params);
+        const apiUrl = `${API_BASE}/api/voters${query.length ? '?' + query.join('&') : ''}`;
+        console.log('🌐 Fetching voters from:', apiUrl);
         
-        const votersData = await apiFetchVoters(params);
+        const votersResp = await fetch(apiUrl);
         
-        if (!votersData.ok && votersData.offline) {
-          // Show offline notice
-          showOfflineMessage('Currently offline. Showing limited functionality.');
-          document.getElementById('loading-voters').classList.add('hidden');
-          document.getElementById('error-voters').classList.remove('hidden');
-          return;
+        if (!votersResp.ok) {
+          throw new Error(`HTTP ${votersResp.status}: ${votersResp.statusText}`);
         }
         
-        if (!votersData.ok) {
-          throw new Error(votersData.error || 'Failed to fetch voters');
-        }
-        
+        const votersData = await votersResp.json();
         voters = votersData.voters || [];
         
         console.log('✅ Voters loaded:', voters.length);
@@ -311,22 +274,16 @@
       }
     }
 
-    // Fetch message templates using offline-capable client
+    // Fetch message templates as specified
     async function fetchTemplates() {
       try {
-        const templatesData = await apiFetchTemplates('phone');
+        const templatesResp = await fetch(`${API_BASE}/api/templates?category=phone`);
         
-        if (!templatesData.ok && templatesData.offline) {
-          console.warn('⚠️ Offline - templates unavailable');
-          const pitchSelect = document.getElementById('pitch');
-          pitchSelect.innerHTML = '<option value="">Templates unavailable offline</option>';
-          return;
+        if (!templatesResp.ok) {
+          throw new Error(`HTTP ${templatesResp.status}: ${templatesResp.statusText}`);
         }
         
-        if (!templatesData.ok) {
-          throw new Error(templatesData.error || 'Failed to fetch templates');
-        }
-        
+        const templatesData = await templatesResp.json();
         templates = templatesData.templates || [];
         
         console.log('✅ Templates loaded:', templates.length);
@@ -337,8 +294,8 @@
         
         templates.forEach(template => {
           const option = document.createElement('option');
-          option.value = template.title || template.template_name;
-          option.textContent = template.title || template.template_name;
+          option.value = template.template_name;
+          option.textContent = template.template_name;
           pitchSelect.appendChild(option);
         });
         
@@ -415,6 +372,7 @@
       }
       
       const form = document.getElementById('call-form');
+      const formData = new FormData(form);
       
       // Get form values
       const callResult = document.querySelector('input[name="result"]:checked');
@@ -423,9 +381,13 @@
         return;
       }
       
-      const pulseOptIn = document.getElementById('pulseOptIn').checked;
-      const notes = document.getElementById('notes').value;
-      const pitchUsed = document.getElementById('pitch').value;
+      const payload = {
+        voter_id: currentVoter.voter_id,
+        call_result: callResult.value,
+        notes: document.getElementById('notes').value,
+        pulse_opt_in: document.getElementById('pulseOptIn').checked,
+        pitch_used: document.getElementById('pitch').value
+      };
       
       try {
         // Disable submit button during submission
@@ -433,22 +395,35 @@
         submitBtn.disabled = true;
         submitBtn.textContent = '📞 Submitting...';
         
-        // Submit call using offline-capable API client
-        const callResponse = await logCall(
-          currentVoter.voter_id,
-          callResult.value,
-          notes,
-          pulseOptIn,
-          pitchUsed
-        );
+        // Submit call to /api/call
+        const callResponse = await fetch(`${API_BASE}/api/call`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
         
-        if (callResponse.queued) {
-          showMessage('Call queued for sync when online!', 'warning');
-        } else if (callResponse.ok) {
-          showMessage('Call logged successfully!', 'success');
-        } else {
-          throw new Error(callResponse.error || 'Call submission failed');
+        if (!callResponse.ok) {
+          throw new Error(`Call submission failed: ${callResponse.status}`);
         }
+        
+        // Submit pulse opt-in if checked
+        if (payload.pulse_opt_in) {
+          const pulseResponse = await fetch(`${API_BASE}/api/pulse`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              voter_id: payload.voter_id, 
+              contact_method: 'sms', 
+              consent_source: 'call' 
+            })
+          });
+          
+          if (!pulseResponse.ok) {
+            console.warn('Pulse opt-in submission failed:', pulseResponse.status);
+          }
+        }
+        
+        showMessage('Call logged successfully!', 'success');
         
         // Clear form
         form.reset();
@@ -493,25 +468,10 @@
       }
     }
 
-    // Show success/error/warning messages
+    // Show success/error messages
     function showMessage(message, type) {
       const messagesDiv = document.getElementById('form-messages');
-      let className = 'mt-4 p-3 rounded-lg ';
-      
-      switch(type) {
-        case 'success':
-          className += 'bg-green-50 text-green-700 border border-green-200';
-          break;
-        case 'warning':
-          className += 'bg-yellow-50 text-yellow-700 border border-yellow-200';
-          break;
-        case 'error':
-        default:
-          className += 'bg-red-50 text-red-700 border border-red-200';
-          break;
-      }
-      
-      messagesDiv.className = className;
+      messagesDiv.className = `mt-4 p-3 rounded-lg ${type === 'success' ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`;
       messagesDiv.textContent = message;
       messagesDiv.classList.remove('hidden');
       
@@ -521,32 +481,11 @@
       }, 3000);
     }
 
-    // Show offline-specific messages
-    function showOfflineMessage(message) {
-      const notification = document.createElement('div');
-      notification.className = 'fixed top-4 right-4 bg-orange-500 text-white px-4 py-2 rounded-lg shadow-lg z-50';
-      notification.textContent = message;
-      document.body.appendChild(notification);
-      
-      setTimeout(() => {
-        document.body.removeChild(notification);
-      }, 5000);
-    }
-
     // Initialize page
     document.addEventListener('DOMContentLoaded', function() {
       // Parse URL parameters
       const urlParams = parseUrlParams();
       console.log('📋 URL Parameters:', urlParams);
-      
-      // Check authentication status
-      const authStatus = getAuthStatus();
-      console.log('🔐 Authentication Status:', authStatus);
-      
-      if (!authStatus.hasToken) {
-        showMessage('Authentication required. Please log in.', 'error');
-        return;
-      }
       
       // Update targeting info
       const targetLabel = buildTargetingInfo(urlParams);
@@ -561,36 +500,16 @@
       // Set up retry button
       document.getElementById('retry-voters').addEventListener('click', fetchVoters);
       
-      // Set up offline/online event listeners
-      window.addEventListener('connection-lost', () => {
-        showOfflineMessage('Connection lost. Submissions will be queued for sync.');
-      });
-      
-      window.addEventListener('connection-restored', () => {
-        showOfflineMessage('Connection restored. Syncing queued submissions...');
-        updateOfflineQueue();
-      });
-      
       // Fetch data
       fetchVoters();
       fetchTemplates();
       
-      // Update offline queue status
-      updateOfflineQueue();
-      
-      console.log('✅ Authenticated phone banking page initialized successfully');
+      console.log('✅ Phone banking page initialized successfully');
     });
 
     // Make functions globally available
     window.selectVoter = selectVoter;
     window.submitCall = submitCall;
-  </script>
-
-  <!-- Service Worker Registration -->
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('../sw.js').catch(console.error);
-    }
   </script>
 
 </body>

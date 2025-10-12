@@ -2,25 +2,8 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Grassroots Volunteer Portal</title>
-  
-  <!-- Favicon -->
-  <link rel="icon" type="image/x-icon" href="../favicon.ico">
-  
-  <!-- PWA Manifest -->
-  <link rel="manifest" href="../manifest.json">
-  
-  <!-- Theme and Meta Tags -->
-  <meta name="theme-color" content="#1d4ed8">
-  <meta name="description" content="GrassrootsMVT Volunteer Portal for voter outreach and engagement in Wyoming.">
-  
-  <!-- Open Graph Meta Tags -->
-  <meta property="og:title" content="GrassrootsMVT Volunteer Portal">
-  <meta property="og:description" content="Join Wyoming volunteers in connecting with voters statewide.">
-  <meta property="og:image" content="../assets/preview.png">
-  <meta property="og:type" content="website">
-  
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -226,15 +209,8 @@
   </div>
 
   <!-- JavaScript -->
-  <script type="module" src="../src/api-shim.js"></script>
-  <script type="module">
-    // Import authentication-enabled API client
-    import { 
-      authenticatedFetch, 
-      getAuthStatus, 
-      showToast 
-    } from '../src/apiClient.js';
-    
+  <script type="module" src="/src/api-shim.js"></script>
+  <script>
     let metadata = null;
     let currentMode = null; // 'district' or 'city'
 
@@ -285,38 +261,11 @@
       elements.retryCities = document.getElementById('retry-cities');
     }
 
-    // Check authentication status before proceeding
-    async function checkAuthentication() {
-      const authStatus = getAuthStatus();
-      console.log('🔐 Authentication Status:', authStatus);
-      
-      if (!authStatus.hasToken) {
-        showToast('Authentication required. Please log in.', 'error', 5000);
-        // Show authentication notice
-        document.getElementById('loadingState').innerHTML = `
-          <div class="text-center">
-            <svg class="mx-auto h-12 w-12 text-red-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16c-.77.833.192 2.5 1.732 2.5z"></path>
-            </svg>
-            <h3 class="text-lg font-medium text-red-700 mb-2">Authentication Required</h3>
-            <p class="text-red-600 mb-4">Please log in to access the volunteer portal.</p>
-            <button onclick="window.location.reload()" class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors duration-200">
-              Retry Authentication
-            </button>
-          </div>
-        `;
-        return false;
-      }
-      
-      showToast(`Authenticated via ${authStatus.authType}`, 'success', 2000);
-      return true;
-    }
-
-    // Fetch metadata from API using authenticated requests
+    // Fetch metadata from API (default mode)
     async function fetchMetadata() {
       try {
-        console.log('🌐 Fetching metadata with authentication');
-        const response = await authenticatedFetch(`${API_BASE}/api/metadata`);
+        console.log('🌐 Fetching default metadata from:', `${API_BASE}/api/metadata`);
+        const response = await fetch(`${API_BASE}/api/metadata`);
         
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -328,25 +277,22 @@
           throw new Error(data.message || 'API returned error status');
         }
         
-        console.log('✅ Metadata loaded successfully:', data);
+        console.log('✅ Default metadata loaded successfully:', data);
         return data;
       } catch (error) {
         console.error('❌ Error fetching metadata:', error);
-        if (error.message.includes('Authentication')) {
-          showToast('Authentication failed. Please log in again.', 'error', 5000);
-        }
         throw error;
       }
     }
 
-    // Fetch smart metadata based on selection using authenticated requests
+    // Fetch smart metadata based on selection
     async function fetchSmartMetadata(params) {
       try {
         const queryString = new URLSearchParams(params).toString();
         const url = `${API_BASE}/api/metadata?${queryString}`;
-        console.log('🧠 Fetching smart metadata with authentication');
+        console.log('🧠 Fetching smart metadata from:', url);
         
-        const response = await authenticatedFetch(url);
+        const response = await fetch(url);
         
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -773,33 +719,19 @@
       document.getElementById('errorState').classList.remove('hidden');
     }
 
-    // Initialize page with authentication check
+    // Initialize page
     document.addEventListener('DOMContentLoaded', async function() {
       try {
         initElements();
-        
-        // Check authentication first
-        const isAuthenticated = await checkAuthentication();
-        if (!isAuthenticated) {
-          return; // Stop initialization if not authenticated
-        }
-        
         metadata = await fetchMetadata();
         showCard();
         setupEventListeners();
-        console.log('✅ Authenticated volunteer portal initialized successfully');
+        console.log('✅ Smart volunteer landing page initialized successfully');
       } catch (error) {
         console.error('💥 Critical error initializing page:', error);
         showCriticalError();
       }
     });
-  </script>
-
-  <!-- Service Worker Registration -->
-  <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('../sw.js').catch(console.error);
-    }
   </script>
 
 </body>
