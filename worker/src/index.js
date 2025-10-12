@@ -33,23 +33,120 @@ export default {
     // � Volunteer & Call Logging API
 
     if (url.pathname === '/api/voters') {
-      // Return small voter sample for volunteers
+      // Advanced voter filtering with district-city refinement
       try {
         const db = env.d1;
-        const result = await db.prepare(`
-          SELECT voter_id, political_party, county, senate, house
-          FROM voters
-          LIMIT 25;
-        `).all();
-
+        
+        // Parse query parameters
+        const county = url.searchParams.get('county');
+        const city = url.searchParams.get('city');
+        const houseDistrict = url.searchParams.get('house_district');
+        const senateDistrict = url.searchParams.get('senate_district');
+        
+        console.log("Filters applied:", { county, city, houseDistrict, senateDistrict });
+        
+        let sql = '';
+        let bindings = [];
+        let filtersApplied = {
+          county: county || null,
+          city: city || null,
+          house_district: houseDistrict || null,
+          senate_district: senateDistrict || null,
+          city_mode: null
+        };
+        
+        // District-based filtering (priority)
+        if (houseDistrict || senateDistrict) {
+          const districtField = houseDistrict ? 'house' : 'senate';
+          const districtValue = houseDistrict || senateDistrict;
+          
+          // Check city filter
+          if (city && city.toLowerCase() === '(all)') {
+            console.warn("City override: returning full district set");
+            // Return all voters in district
+            sql = `
+              SELECT voter_id, political_party, county, house, senate
+              FROM voters 
+              WHERE ${districtField} = ?1
+              LIMIT 25
+            `;
+            bindings = [districtValue];
+            filtersApplied.city_mode = 'all';
+          } else {
+            // Return voters in district (city filtering not available in current schema)
+            sql = `
+              SELECT voter_id, political_party, county, house, senate
+              FROM voters 
+              WHERE ${districtField} = ?1
+              LIMIT 25
+            `;
+            bindings = [districtValue];
+            filtersApplied.city_mode = 'district_sample';
+          }
+        } else {
+          // County fallback filtering
+          let whereConditions = [];
+          bindings = [];
+          
+          if (county) {
+            whereConditions.push('county = ?');
+            bindings.push(county);
+          }
+          
+          const whereClause = whereConditions.length > 0 
+            ? `WHERE ${whereConditions.join(' AND ')}` 
+            : '';
+          
+          sql = `
+            SELECT voter_id, political_party, county, house, senate
+            FROM voters 
+            ${whereClause}
+            LIMIT 25
+          `;
+          
+          if (county) {
+            filtersApplied.city_mode = 'county_sample';
+          }
+        }
+        
+        // Execute query
+        const votersResult = await db.prepare(sql).bind(...bindings).all();
+        
+        // Cities array (placeholder - not available in current schema)
+        const cities = city && city.toLowerCase() === '(all)' ? ['(ALL)'] : [];
+        
         return new Response(
-          JSON.stringify({ ok: true, voters: result.results || [] }),
-          { headers }
+          JSON.stringify({
+            ok: true,
+            filters_applied: filtersApplied,
+            cities: cities,
+            total: votersResult.results?.length || 0,
+            voters: votersResult.results || []
+          }),
+          { 
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*",
+              "Access-Control-Allow-Methods": "GET, OPTIONS",
+              "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            }
+          }
         );
       } catch (error) {
+        console.error('Voters query error:', error);
         return new Response(
-          JSON.stringify({ ok: false, error: error.message }),
-          { status: 500, headers }
+          JSON.stringify({ 
+            ok: false, 
+            error: "query_failed", 
+            message: error.message 
+          }),
+          { 
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*"
+            },
+            status: 500 
+          }
         );
       }
     }
