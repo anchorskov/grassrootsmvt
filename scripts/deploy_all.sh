@@ -46,15 +46,10 @@ else
     echo "⚠️  API endpoint returned status: $API_STATUS"
 fi
 
-# Get the latest Pages deployment URL
-echo "Getting Pages deployment URL..."
-PAGES_URL=$(npx wrangler pages project list | grep "grassrootsmvt-production" | awk '{print $3}')
-if [[ -n "$PAGES_URL" ]]; then
-    echo "✅ Pages URL: https://$PAGES_URL"
-else
-    echo "⚠️  Could not determine Pages URL, using default"
-    PAGES_URL="grassrootsmvt-production.pages.dev"
-fi
+# Get the latest Pages deployment URL from the output
+echo "Using default Pages URL..."
+PAGES_URL="grassrootsmvt-production.pages.dev"
+echo "✅ Pages URL: https://$PAGES_URL"
 
 echo ""
 echo "✅ Deployment Complete!"
