@@ -26,9 +26,11 @@ migrations_dir = "db/migrations"
 # 🌐 Production Environment
 [env.production]
 preview_urls = true
-# 🌐 Route to production API
+# 🌐 Route to production API - Limited to /api/* paths only
 routes = [
-  { pattern = "api.grassrootsmvt.org/*", zone_name = "grassrootsmvt.org" }
+  { pattern = "volunteers.grassrootsmvt.org/api/*", zone_name = "grassrootsmvt.org" },
+  { pattern = "api.grassrootsmvt.org/*", zone_name = "grassrootsmvt.org" },
+  { pattern = "grassrootsmvt.org/api/*", zone_name = "grassrootsmvt.org" }
 ]
 
 # ✅ Explicitly define vars for production (not inherited automatically)
