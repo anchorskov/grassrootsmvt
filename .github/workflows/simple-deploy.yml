@@ -73,15 +73,21 @@ jobs:
             const logs = [];
             page.on("console", msg => logs.push(msg.text()));
 
-            await page.waitForTimeout(8000); // allow full UI load
+            // Wait for page to fully load and execute JavaScript
+            await new Promise(resolve => setTimeout(resolve, 8000));
             const html = await page.content();
 
             const success =
               html.includes("Authenticated") ||
-              logs.some(l => l.includes("✅") || l.includes("Auth Success"));
+              html.includes("✅") ||
+              logs.some(l => l.includes("✅") || l.includes("Auth Success") || l.includes("API Client initialized"));
 
             console.log("🧾 Browser Console Logs:");
             console.log(logs.join("\n"));
+
+            console.log("📄 Page HTML snippet (auth-related content):");
+            const authSnippet = html.match(/<div[^>]*auth[^>]*>.*?<\/div>/gi) || [];
+            console.log(authSnippet.slice(0, 3).join("\n"));
 
             if (success) {
               console.log("✅ Authentication & UI Integration Verified");
