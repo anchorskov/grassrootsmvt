@@ -53,31 +53,45 @@ jobs:
           const UI_URL = process.env.UI_URL;
           console.log(`🔍 Launching headless browser for ${UI_URL}/auth-test.html...`);
 
-          const browser = await puppeteer.launch({ headless: "new" });
+          const browser = await puppeteer.launch({
+            headless: true,
+            args: [
+              '--no-sandbox',
+              '--disable-setuid-sandbox',
+              '--disable-dev-shm-usage',
+              '--disable-gpu',
+              '--no-zygote',
+            ],
+          });
+
           const page = await browser.newPage();
           page.setDefaultNavigationTimeout(60000);
 
           try {
             await page.goto(`${UI_URL}/auth-test.html`, { waitUntil: "networkidle2" });
 
-            const consoleLogs = [];
-            page.on("console", msg => consoleLogs.push(msg.text()));
+            const logs = [];
+            page.on("console", msg => logs.push(msg.text()));
 
-            await page.waitForSelector("#auth-status, #toast-container", { timeout: 15000 });
+            await page.waitForTimeout(8000); // allow full UI load
+            const html = await page.content();
 
-            const content = await page.content();
-            const success = content.includes("Authenticated") || consoleLogs.some(l => l.includes("✅"));
+            const success =
+              html.includes("Authenticated") ||
+              logs.some(l => l.includes("✅") || l.includes("Auth Success"));
+
+            console.log("🧾 Browser Console Logs:");
+            console.log(logs.join("\n"));
 
             if (success) {
               console.log("✅ Authentication & UI Integration Verified");
               process.exit(0);
             } else {
-              console.error("❌ Verification failed: no authentication indicator found");
-              console.log(consoleLogs);
+              console.error("❌ Verification failed — authentication indicators not found");
               process.exit(1);
             }
           } catch (err) {
-            console.error("❌ Error during verification:", err);
+            console.error("❌ Puppeteer verification error:", err);
             process.exit(1);
           } finally {
             await browser.close();
