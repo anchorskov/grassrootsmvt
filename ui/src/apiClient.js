@@ -1,589 +1,345 @@
 // ui/src/apiClient.js
-// Unified API client with JWT authentication, offline resilience and production-ready error handling
+// Production-ready API client with Cloudflare Access JWT authentication
 
-import { savePending, initDB, isIndexedDBSupported } from './idb.js';
-
-const LOCAL_API = "http://localhost:8787";
-const PROD_API = "https://api.grassrootsmvt.org";
-const API_BASE =
-  window.location.hostname === "localhost" ? LOCAL_API : PROD_API;
-
-// Authentication and online state tracking
-let isOnline = navigator.onLine;
-let isDBInitialized = false;
-let authRetryCount = 0;
-const MAX_AUTH_RETRIES = 3;
-
-/**
- * Extract JWT token from Cloudflare Access cookie
- * @returns {string|null} JWT token or null if not found
- */
-function getJWTToken() {
-  try {
-    const cookies = document.cookie.split(';');
-    const cfAuth = cookies.find(cookie => 
-      cookie.trim().startsWith('CF_Authorization=')
-    );
-    
-    if (cfAuth) {
-      const token = decodeURIComponent(cfAuth.split('=')[1]);
-      console.log('🔑 JWT token found');
-      return token;
-    }
-    
-    console.warn('⚠️ No CF_Authorization cookie found');
-    return null;
-  } catch (error) {
-    console.error('❌ Error extracting JWT token:', error);
-    return null;
-  }
-}
-
-/**
- * Check if we're in a local development environment
- * @returns {boolean}
- */
-function isLocalDevelopment() {
-  return window.location.hostname === 'localhost' || 
-         window.location.hostname === '127.0.0.1' ||
-         window.location.port;
-}
-
-/**
- * Redirect to Cloudflare Access login
- */
-function redirectToLogin() {
-  if (isLocalDevelopment()) {
-    console.warn('🔧 Local development - skipping authentication redirect');
-    return;
-  }
+(function initializeAuth() {
+  'use strict';
   
-  console.log('🔐 Redirecting to Cloudflare Access login...');
-  window.location.href = '/cdn-cgi/access/login';
-}
-
-/**
- * Authenticated fetch wrapper with JWT handling
- * @param {string} url - Request URL
- * @param {Object} options - Fetch options
- * @returns {Promise<Response>}
- */
-export async function authenticatedFetch(url, options = {}) {
-  // In local development, use the existing token-based auth
-  if (isLocalDevelopment()) {
-    const token = localStorage.getItem("access_token");
-    const headers = {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers || {}),
-    };
-    
+  const LOCAL_API = "http://localhost:8787";
+  const PROD_API = "https://api.grassrootsmvt.org";
+  const API_BASE = window.location.hostname === "localhost" ? LOCAL_API : PROD_API;
+  
+  /**
+   * Extract JWT token from Cloudflare Access cookie
+   * @returns {string|null} JWT token or null if not found
+   */
+  function extractJWT() {
     try {
-      const response = await fetch(url, { ...options, headers });
-      return response;
+      const cookies = document.cookie.split(';').map(c => c.trim());
+      const cf = cookies.find(c => c.startsWith('CF_Authorization='));
+      return cf ? decodeURIComponent(cf.split('=')[1]) : null;
     } catch (error) {
-      console.error('❌ Local development fetch failed:', error);
-      throw error;
+      console.error('❌ Error extracting JWT token:', error);
+      return null;
     }
   }
 
-  // Production: Use Cloudflare Access JWT
-  const jwtToken = getJWTToken();
-  
-  if (!jwtToken && authRetryCount < MAX_AUTH_RETRIES) {
-    authRetryCount++;
-    console.log(`🔄 JWT token missing, retry ${authRetryCount}/${MAX_AUTH_RETRIES}`);
-    
-    // Brief delay before retry
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    if (authRetryCount >= MAX_AUTH_RETRIES) {
-      redirectToLogin();
-      throw new Error('Authentication failed - redirecting to login');
-    }
-    
-    return authenticatedFetch(url, options);
-  }
-  
-  if (!jwtToken) {
-    redirectToLogin();
-    throw new Error('No authentication token available');
+  /**
+   * Check if we're in local development environment
+   * @returns {boolean}
+   */
+  function isLocalDevelopment() {
+    return window.location.hostname === 'localhost' || 
+           window.location.hostname === '127.0.0.1' ||
+           window.location.port;
   }
 
-  const headers = {
-    'Content-Type': 'application/json',
-    'Cf-Access-Jwt-Assertion': jwtToken,
-    ...(options.headers || {}),
-  };
-
-  try {
-    const response = await fetch(url, { ...options, headers });
-    
-    // Reset auth retry count on successful request
-    if (response.ok) {
-      authRetryCount = 0;
-    }
-    
-    // Handle authentication errors
-    if (response.status === 401 || response.status === 403) {
-      console.warn('🚫 Authentication failed, redirecting to login');
-      redirectToLogin();
-      throw new Error('Authentication failed');
-    }
-    
-    return response;
-  } catch (error) {
-    console.error('❌ Authenticated fetch failed:', error);
-    throw error;
-  }
-}
-
-/**
- * Retryable API call with exponential backoff
- * @param {string} url - Request URL
- * @param {Object} options - Fetch options
- * @param {number} maxRetries - Maximum retry attempts
- * @returns {Promise<Response>}
- */
-export async function retryableAPICall(url, options = {}, maxRetries = 3) {
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
-    try {
-      const response = await authenticatedFetch(url, options);
-      
-      if (response.ok) {
-        return response;
-      }
-      
-      // Don't retry on authentication errors
-      if (response.status === 401 || response.status === 403) {
-        throw new Error('Authentication failed');
-      }
-      
-      // Don't retry on client errors (4xx)
-      if (response.status >= 400 && response.status < 500) {
-        throw new Error(`Client error: ${response.status}`);
-      }
-      
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    } catch (error) {
-      const isLastAttempt = attempt === maxRetries - 1;
-      
-      if (isLastAttempt) {
-        console.error('❌ All retry attempts failed:', error);
-        throw error;
-      }
-      
-      // Exponential backoff: 1s, 2s, 4s
-      const delayMs = 1000 * Math.pow(2, attempt);
-      console.log(`⏳ Retry ${attempt + 1}/${maxRetries} in ${delayMs}ms...`);
-      await new Promise(resolve => setTimeout(resolve, delayMs));
-    }
-  }
-}
-
-/**
- * Show toast notification to user
- * @param {string} message - Message to display
- * @param {string} type - Type: 'success', 'error', 'warning', 'info'
- * @param {number} duration - Duration in milliseconds
- */
-export function showToast(message, type = 'info', duration = 3000) {
-  // Remove existing toast
-  const existingToast = document.getElementById('api-toast');
-  if (existingToast) {
-    existingToast.remove();
-  }
-  
-  // Create toast element
-  const toast = document.createElement('div');
-  toast.id = 'api-toast';
-  toast.className = `fixed top-4 right-4 px-4 py-3 rounded-lg shadow-lg z-50 transition-all duration-300 ${getToastClasses(type)}`;
-  
-  // Add icon based on type
-  const icon = getToastIcon(type);
-  toast.innerHTML = `<div class="flex items-center space-x-2"><span>${icon}</span><span>${message}</span></div>`;
-  
-  document.body.appendChild(toast);
-  
-  // Auto-remove after duration
-  setTimeout(() => {
-    if (toast && toast.parentNode) {
-      toast.style.opacity = '0';
-      toast.style.transform = 'translateX(100%)';
-      setTimeout(() => toast.remove(), 300);
-    }
-  }, duration);
-}
-
-function getToastClasses(type) {
-  switch (type) {
-    case 'success': return 'bg-green-500 text-white';
-    case 'error': return 'bg-red-500 text-white';
-    case 'warning': return 'bg-yellow-500 text-white';
-    case 'info': return 'bg-blue-500 text-white';
-    default: return 'bg-gray-500 text-white';
-  }
-}
-
-function getToastIcon(type) {
-  switch (type) {
-    case 'success': return '✅';
-    case 'error': return '❌';
-    case 'warning': return '⚠️';
-    case 'info': return 'ℹ️';
-    default: return '📢';
-  }
-}
-
-// Initialize offline capabilities
-document.addEventListener('DOMContentLoaded', async () => {
-  isDBInitialized = await initDB();
-  updateOnlineStatus();
-  
-  // Listen for online/offline events
-  window.addEventListener('online', handleOnline);
-  window.addEventListener('offline', handleOffline);
-  
-  // Listen for service worker messages
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
-  }
-  
-  // Show authentication status
-  displayAuthStatus();
-});
-
-/**
- * Display authentication status in UI
- */
-function displayAuthStatus() {
-  if (isLocalDevelopment()) {
-    console.log('🔧 Local development mode - using token auth');
-    return;
-  }
-  
-  const token = getJWTToken();
+  // Initialize authentication on page load
+  const token = extractJWT();
   if (token) {
-    console.log('✅ Authenticated with Cloudflare Access');
-    showToast('Authenticated successfully', 'success', 2000);
-  } else {
-    console.warn('⚠️ No authentication token found');
+    localStorage.setItem('access_token', token);
+    console.log('🔐 JWT stored from Cloudflare Access');
+  } else if (!isLocalDevelopment()) {
+    console.warn('⚠️ No CF_Authorization cookie found');
   }
-}
 
-/**
- * Handle online event
- */
-function handleOnline() {
-  console.log('🌐 Connection restored');
-  isOnline = true;
-  updateOnlineStatus();
-  showToast('Connection restored - syncing data...', 'success');
-  
-  // Trigger background sync if service worker is available
-  if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-    navigator.serviceWorker.controller.postMessage({ type: 'FORCE_SYNC' });
-  }
-  
-  // Dispatch custom event for UI updates
-  window.dispatchEvent(new CustomEvent('connection-restored'));
-}
-
-/**
- * Handle offline event
- */
-function handleOffline() {
-  console.log('🔌 Connection lost');
-  isOnline = false;
-  updateOnlineStatus();
-  showToast('You are offline - submissions will be queued', 'warning', 5000);
-  
-  // Dispatch custom event for UI updates
-  window.dispatchEvent(new CustomEvent('connection-lost'));
-}
-
-/**
- * Update online status indicators
- */
-function updateOnlineStatus() {
-  const indicators = document.querySelectorAll('.online-indicator');
-  indicators.forEach(indicator => {
-    indicator.textContent = isOnline ? '🌐 Online' : '🔌 Offline';
-    indicator.className = `online-indicator ${isOnline ? 'text-green-600' : 'text-red-600'}`;
-  });
-  
-  // Update body class for offline styling
-  if (isOnline) {
-    document.body.classList.remove('offline-mode');
-  } else {
-    document.body.classList.add('offline-mode');
-  }
-}
-
-/**
- * Handle messages from service worker
- */
-function handleServiceWorkerMessage(event) {
-  const { type, data } = event.data;
-  
-  switch (type) {
-    case 'SUBMISSION_QUEUED':
-      console.log('📋 Submission queued:', data.type);
-      showToast(`${data.type} submission saved for sync`, 'warning');
-      break;
-    case 'SYNC_COMPLETE':
-      console.log('🔄 Sync complete:', data);
-      if (data.success > 0) {
-        showToast(`${data.success} submissions synced successfully`, 'success');
-      }
-      updateQueueStatus();
-      break;
-  }
-}
-
-/**
- * Update queue status display
- */
-async function updateQueueStatus() {
-  if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-    const messageChannel = new MessageChannel();
+  /**
+   * Global authenticated fetch function
+   * @param {string} endpoint - API endpoint (e.g., '/api/ping' or '/ping')
+   * @param {Object} options - Fetch options
+   * @returns {Promise<Object>} JSON response
+   */
+  window.apiFetch = async function(endpoint, options = {}) {
+    // Normalize endpoint to include /api prefix
+    let path = endpoint;
+    if (!path.startsWith('/api/')) {
+      path = path.startsWith('/') ? `/api${path}` : `/api/${path}`;
+    }
     
-    messageChannel.port1.onmessage = (event) => {
-      const status = event.data;
-      const queueIndicators = document.querySelectorAll('.queue-indicator');
-      
-      queueIndicators.forEach(indicator => {
-        if (status.hasPending) {
-          indicator.textContent = `📋 ${status.counts.total} pending`;
-          indicator.className = 'queue-indicator text-yellow-600';
-          indicator.style.display = 'block';
-        } else {
-          indicator.style.display = 'none';
-        }
-      });
+    const fullUrl = `${API_BASE}${path}`;
+    console.log('🔐 Authenticated fetch:', fullUrl);
+
+    // Prepare headers
+    const headers = { 
+      'Content-Type': 'application/json',
+      ...(options.headers || {}) 
     };
-    
-    navigator.serviceWorker.controller.postMessage(
-      { type: 'GET_QUEUE_STATUS' },
-      [messageChannel.port2]
-    );
-  }
-}
 
-/**
- * Enhanced API fetch wrapper with offline support
- */
-export async function apiFetch(path, options = {}) {
-  // prevent accidental double "/api/api/"
-  const cleanPath = path.startsWith("/api/") ? path : `/api${path}`;
-  const fullUrl = `${API_BASE}${cleanPath}`;
-
-  try {
-    const response = await retryableAPICall(fullUrl, options);
-    
-    // Handle successful response
-    if (response.status === 202 && response.headers.get('content-type')?.includes('application/json')) {
-      const data = await response.json();
-      if (data.queued) {
-        // Request was queued by service worker
-        showToast('Request saved for sync when online', 'warning');
-        updateQueueStatus();
-        return data;
+    // Add authentication
+    const jwt = localStorage.getItem('access_token');
+    if (jwt) {
+      if (isLocalDevelopment()) {
+        headers['Authorization'] = `Bearer ${jwt}`;
+      } else {
+        headers['Cf-Access-Jwt-Assertion'] = jwt;
       }
     }
-    
-    const text = await response.text();
 
-    try {
-      const jsonData = JSON.parse(text || "{}");
-      
-      // Show success toast for successful operations
-      if (jsonData.ok && options.method === 'POST') {
-        showToast('Data saved successfully', 'success');
-      }
-      
-      return jsonData;
-    } catch {
-      return { ok: false, error: "invalid_json", body: text };
-    }
-  } catch (err) {
-    console.error("❌ API fetch failed:", err.message);
-    
-    // If it's a POST request and we're offline, try to queue it
-    if (options.method === 'POST' && !isOnline && isDBInitialized) {
+    // Retry logic with exponential backoff
+    for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        const requestData = {
-          endpoint: cleanPath,
-          method: options.method,
-          body: options.body ? JSON.parse(options.body) : null,
-          headers: options.headers || {},
-          type: getRequestType(cleanPath),
-          url: fullUrl
-        };
+        const response = await fetch(fullUrl, { 
+          ...options, 
+          headers 
+        });
+
+        // Handle authentication failures
+        if (response.status === 401 || response.status === 403) {
+          console.error('❌ Auth failed — redirecting to login.');
+          if (!isLocalDevelopment()) {
+            window.location.href = '/cdn-cgi/access/login';
+          } else {
+            throw new Error('Authentication failed in local development');
+          }
+          return;
+        }
+
+        // Handle other HTTP errors
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        // Parse and return JSON response
+        const data = await response.json();
         
-        if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
-          navigator.serviceWorker.controller.postMessage({
-            type: 'QUEUE_SUBMISSION',
-            data: requestData
-          });
-        } else {
-          // Fallback: save directly to IndexedDB
-          await savePending(requestData);
-          showToast('Request saved for sync when online', 'warning');
+        // Show success toast for write operations
+        if (options.method === 'POST' && data.ok) {
+          showToast('✅ Operation completed successfully!', 'success');
         }
         
-        return { 
-          ok: false, 
-          queued: true, 
-          offline: true,
-          message: 'Request queued for sync when online' 
-        };
-      } catch (queueError) {
-        console.error('❌ Failed to queue request:', queueError);
-        showToast('Failed to save request for later sync', 'error');
+        return data;
+
+      } catch (error) {
+        // If this is the last attempt, throw the error
+        if (attempt === 3) {
+          console.error(`❌ All ${attempt} attempts failed:`, error);
+          
+          // Handle offline scenarios
+          if (!navigator.onLine) {
+            console.log('📱 Offline detected - attempting to queue request');
+            if (options.method === 'POST') {
+              await queueOfflineRequest(fullUrl, options);
+              showToast('⚠️ Offline mode — queued for sync', 'warning');
+              return { ok: false, queued: true, offline: true };
+            }
+          }
+          
+          showToast('❌ Request failed - please try again', 'error');
+          throw error;
+        }
+
+        // Calculate delay for exponential backoff (1s, 2s, 4s)
+        const delay = Math.pow(2, attempt - 1) * 1000;
+        console.warn(`⚠️ Attempt ${attempt} failed; retrying in ${delay / 1000}s`);
+        await new Promise(r => setTimeout(r, delay));
       }
     }
-    
-    // Show error toast for network failures
-    showToast(
-      isOnline ? 'Network error - please try again' : 'Offline - request queued for sync',
-      'error'
-    );
-    
-    return { ok: false, error: err.message, offline: !isOnline };
+  };
+
+  /**
+   * Queue request for offline sync
+   * @param {string} url - Request URL
+   * @param {Object} options - Request options
+   */
+  async function queueOfflineRequest(url, options) {
+    try {
+      if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+        // Use service worker for background sync
+        navigator.serviceWorker.controller.postMessage({
+          type: 'QUEUE_SUBMISSION',
+          data: {
+            url: url,
+            method: options.method || 'GET',
+            headers: options.headers || {},
+            body: options.body || null,
+            timestamp: Date.now()
+          }
+        });
+        console.log('📋 Request queued via service worker');
+      } else {
+        // Fallback: store in localStorage
+        const queue = JSON.parse(localStorage.getItem('offline_queue') || '[]');
+        queue.push({
+          url: url,
+          method: options.method || 'GET',
+          headers: options.headers || {},
+          body: options.body || null,
+          timestamp: Date.now()
+        });
+        localStorage.setItem('offline_queue', JSON.stringify(queue));
+        console.log('📋 Request queued in localStorage');
+      }
+    } catch (error) {
+      console.error('❌ Failed to queue offline request:', error);
+    }
   }
-}
 
-/**
- * Determine request type from endpoint
- */
-function getRequestType(endpoint) {
-  if (endpoint.includes('/call')) return 'call';
-  if (endpoint.includes('/canvass')) return 'canvass';
-  if (endpoint.includes('/pulse')) return 'pulse';
-  return 'unknown';
-}
+  /**
+   * Show toast notification
+   * @param {string} msg - Message to display
+   * @param {string} type - Type: 'success', 'error', 'warning', 'info'
+   */
+  window.showToast = function(msg, type = 'info') {
+    // Remove existing toast
+    const existing = document.getElementById('app-toast');
+    if (existing) existing.remove();
 
-/**
- * Voter retrieval with authentication and error handling
- */
-export async function fetchVoters(params = {}) {
-  const queryString = new URLSearchParams(params).toString();
-  const path = queryString ? `/voters?${queryString}` : '/voters';
-  return apiFetch(path);
-}
-
-/**
- * Log a volunteer call with offline support and authentication
- */
-export async function logCall(voter_id, call_result, notes = "", pulse_opt_in = false, pitch_used = "") {
-  const payload = { 
-    voter_id, 
-    call_result, 
-    notes,
-    ...(pulse_opt_in && { pulse_opt_in: true }),
-    ...(pitch_used && { pitch_used })
+    // Create toast element
+    const toast = document.createElement('div');
+    toast.id = 'app-toast';
+    toast.className = `fixed top-4 right-4 px-4 py-3 rounded-lg shadow-lg z-50 transition-all duration-300 ${getToastStyles(type)}`;
+    toast.textContent = msg;
+    
+    document.body.appendChild(toast);
+    
+    // Auto-remove after 4 seconds
+    setTimeout(() => {
+      if (toast.parentNode) {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateX(100%)';
+        setTimeout(() => toast.remove(), 300);
+      }
+    }, 4000);
   };
-  
-  return apiFetch("/call", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
 
-/**
- * Log canvassing activity with offline support and authentication
- */
-export async function logCanvass(voter_id, result, notes = "", pulse_opt_in = false, pitch_used = "", location = null, door_status = "Knocked") {
-  const payload = { 
-    voter_id, 
-    result, 
-    notes,
-    door_status,
-    ...(pulse_opt_in && { pulse_opt_in: true }),
-    ...(pitch_used && { pitch_used }),
-    ...(location && { 
-      location_lat: location.lat, 
-      location_lng: location.lng 
-    })
+  /**
+   * Get toast styles based on type
+   * @param {string} type - Toast type
+   * @returns {string} CSS classes
+   */
+  function getToastStyles(type) {
+    switch (type) {
+      case 'success': return 'bg-green-500 text-white';
+      case 'error': return 'bg-red-500 text-white';
+      case 'warning': return 'bg-yellow-500 text-black';
+      case 'info': return 'bg-blue-500 text-white';
+      default: return 'bg-gray-500 text-white';
+    }
+  }
+
+  /**
+   * Get current authentication status
+   * @returns {Object} Authentication status information
+   */
+  window.getAuthStatus = function() {
+    const token = localStorage.getItem('access_token');
+    return {
+      isAuthenticated: !!token,
+      isLocalDev: isLocalDevelopment(),
+      tokenPresent: !!token,
+      authType: isLocalDevelopment() ? 'Bearer Token' : 'Cloudflare Access JWT'
+    };
   };
-  
-  return apiFetch("/canvass", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
 
-/**
- * Log pulse opt-in with offline support and authentication
- */
-export async function logPulseOptIn(voter_id, contact_method = "sms", consent_source = "canvass") {
-  return apiFetch("/pulse", {
-    method: "POST",
-    body: JSON.stringify({ voter_id, contact_method, consent_source }),
-  });
-}
-
-/**
- * Fetch message templates with authentication
- */
-export async function fetchTemplates(category = null) {
-  const path = category ? `/templates?category=${category}` : '/templates';
-  return apiFetch(path);
-}
-
-/**
- * Retrieve volunteer call history with authentication
- */
-export async function fetchActivity() {
-  return apiFetch("/activity");
-}
-
-/**
- * Check who is logged in with authentication
- */
-export async function whoAmI() {
-  return apiFetch("/whoami");
-}
-
-/**
- * Health check with authentication
- */
-export async function ping() {
-  return apiFetch("/ping");
-}
-
-/**
- * Get current online status
- */
-export function getOnlineStatus() {
-  return isOnline;
-}
-
-/**
- * Force queue status update
- */
-export function updateOfflineQueue() {
-  updateQueueStatus();
-}
-
-/**
- * Get authentication status
- */
-export function getAuthStatus() {
-  return {
-    isLocalDev: isLocalDevelopment(),
-    hasToken: isLocalDevelopment() ? 
-      !!localStorage.getItem("access_token") : 
-      !!getJWTToken(),
-    authType: isLocalDevelopment() ? 'Bearer Token' : 'Cloudflare Access'
+  /**
+   * Check authentication and show status
+   */
+  window.checkAuth = async function() {
+    const status = window.getAuthStatus();
+    console.log("🔐 Auth Status:", status);
+    
+    if (status.isAuthenticated) {
+      try {
+        const result = await window.apiFetch('/whoami');
+        console.log("✅ Authenticated as:", result.email || result.user || 'Unknown user');
+        return true;
+      } catch (err) {
+        console.error("❌ Authentication check failed:", err);
+        return false;
+      }
+    } else {
+      console.warn("⚠️ No authentication token found");
+      return false;
+    }
   };
-}
 
-export function showApiConfig() {
-  const authStatus = getAuthStatus();
-  console.info("🌐 API_BASE =", API_BASE);
-  console.info("🔌 Online =", isOnline);
-  console.info("💾 IndexedDB =", isDBInitialized);
-  console.info("🔐 Auth Status =", authStatus);
-}
+  // Initialize authentication status display on DOM ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initializeAuthStatus);
+  } else {
+    initializeAuthStatus();
+  }
+
+  function initializeAuthStatus() {
+    const token = localStorage.getItem('access_token');
+    console.log("🔐 Access token present:", !!token);
+    
+    if (token) {
+      showToast('🔄 Authenticating...', 'info');
+      
+      // Verify authentication
+      window.apiFetch('/ping')
+        .then(result => {
+          if (result.ok) {
+            showToast('✅ Authenticated successfully!', 'success');
+          }
+        })
+        .catch(err => {
+          console.error("❌ Authentication verification failed:", err);
+          showToast('⚠️ Authentication verification failed', 'warning');
+        });
+    } else if (!isLocalDevelopment()) {
+      showToast('⚠️ No authentication token found', 'warning');
+    }
+  }
+
+  // Listen for online/offline events
+  window.addEventListener('online', () => {
+    console.log('🌐 Connection restored');
+    showToast('🔄 Reconnecting...', 'info');
+    
+    // Process offline queue if any
+    processOfflineQueue();
+  });
+
+  window.addEventListener('offline', () => {
+    console.log('📱 Connection lost');
+    showToast('📱 Offline mode - submissions will be queued', 'warning');
+  });
+
+  /**
+   * Process queued offline requests when coming back online
+   */
+  async function processOfflineQueue() {
+    try {
+      const queue = JSON.parse(localStorage.getItem('offline_queue') || '[]');
+      if (queue.length === 0) return;
+
+      console.log(`🔄 Processing ${queue.length} queued requests...`);
+      
+      let processed = 0;
+      for (const request of queue) {
+        try {
+          await fetch(request.url, {
+            method: request.method,
+            headers: request.headers,
+            body: request.body
+          });
+          processed++;
+        } catch (error) {
+          console.error('❌ Failed to process queued request:', error);
+        }
+      }
+
+      // Clear the queue
+      localStorage.removeItem('offline_queue');
+      
+      if (processed > 0) {
+        showToast(`✅ ${processed} queued submissions synced!`, 'success');
+      }
+    } catch (error) {
+      console.error('❌ Error processing offline queue:', error);
+    }
+  }
+
+  // Expose utility functions globally
+  window.apiConfig = {
+    baseUrl: API_BASE,
+    isLocal: isLocalDevelopment(),
+    version: '2.0.0'
+  };
+
+  console.log('🔐 API Client initialized successfully');
+  console.log('🌐 Base URL:', API_BASE);
+  console.log('🔧 Local Development:', isLocalDevelopment());
+
+})();

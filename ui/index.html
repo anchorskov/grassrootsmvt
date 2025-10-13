@@ -1,21 +1,13 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>GrassrootsMVT Volunteer Hub</title>
-  </head>
-  <body>
-    <h1>GrassrootsMVT Volunteer Hub</h1>
-    <p>This site hosts Pages Functions under <code>ui/functions/</code>.</p>
-  </body>
-</html>
-<!doctype html>
+<head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Volunteer Hub</title>
+<title>GrassrootsMVT Volunteer Hub</title>
+<script src="/src/apiClient.js"></script>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 880px; }
+  body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 880px; position: relative; }
+  .auth-status { position: fixed; top: 8px; right: 8px; z-index: 100; font-size: 0.875rem; padding: 0.5rem 0.75rem; border-radius: 8px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
   .card { border:1px solid #e5e7eb; border-radius: 12px; padding: 1rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
   .row { display:flex; gap:1rem; flex-wrap: wrap; }
   .row > * { flex:1 1 220px; }
@@ -28,8 +20,14 @@
   button.secondary { background:#e2e8f0; color:#0f172a; }
   button[disabled] { opacity:.5; cursor:not-allowed; }
   .chips { display:flex; gap:.5rem; flex-wrap: wrap; }
-  .chip { display:inline-flex; align-items:center; gap:.4rem; border:1px solid #cbd5e1; border-radius:999px; padding:.35rem .6rem; }
 </style>
+</head>
+
+<body>
+<!-- Authentication status indicator -->
+<div id="auth-status" class="auth-status">
+  <span class="online-indicator">🔄 Checking connection...</span>
+</div>
 
 <h1>Volunteer Hub</h1>
 <p class="muted">Pick your target set, then start calling or canvassing.</p>
@@ -255,4 +253,42 @@
     hint.textContent = 'Failed to load county/city metadata.';
   });
 })();
+
+// Initialize authentication and add verification
+document.addEventListener('DOMContentLoaded', async () => {
+  console.log('🔐 Initializing authentication verification...');
+  
+  // Test the global apiFetch function
+  try {
+    const pingResult = await window.apiFetch('/ping');
+    console.log('✅ API connection verified:', pingResult);
+    
+    // Try to get user info
+    const userInfo = await window.apiFetch('/whoami');
+    console.log('👤 User info:', userInfo);
+    
+    // Update auth status display
+    const authStatus = window.getAuthStatus();
+    const indicator = document.querySelector('.online-indicator');
+    if (indicator) {
+      if (authStatus.isAuthenticated) {
+        indicator.textContent = '✅ Authenticated';
+        indicator.parentElement.style.background = '#dcfce7';
+        indicator.parentElement.style.color = '#166534';
+      } else {
+        indicator.textContent = '⚠️ Not authenticated';
+        indicator.parentElement.style.background = '#fef3c7';
+        indicator.parentElement.style.color = '#92400e';
+      }
+    }
+  } catch (error) {
+    console.error('❌ Authentication verification failed:', error);
+    const indicator = document.querySelector('.online-indicator');
+    if (indicator) {
+      indicator.textContent = '❌ Connection failed';
+      indicator.parentElement.style.background = '#fee2e2';
+      indicator.parentElement.style.color = '#991b1b';
+    }
+  }
+});
 </script>

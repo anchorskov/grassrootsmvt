@@ -1,50 +1,106 @@
----
-name: 🚀 Deploy to Cloudflare
+name: 🌾 GrassrootsMVT — Deploy & Verify Production
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-env:
-  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+permissions:
+  contents: write
+  issues: write
 
 jobs:
-  deploy:
-    name: Deploy Worker + Pages
+  deploy-and-verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      PAGES_PROJECT_NAME: grassrootsmvt-production
+      API_URL: https://api.grassrootsmvt.org
+      UI_URL: https://grassrootsmvt-production.pages.dev
 
     steps:
-      - name: 📥 Checkout
+      - name: 🧱 Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🔧 Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
+      - name: 🧩 Install dependencies
+        run: |
+          npm install -g wrangler@4
+          npm install puppeteer@22
 
-      - name: 📦 Install Wrangler
-        run: npm install -g wrangler@latest
-
-      - name: 🔧 Deploy Worker API
+      # --- Deploy Worker API ---
+      - name: 🚀 Deploy Worker API
         working-directory: worker
-        run: |
-          npm install --no-fund --no-audit
-          npx wrangler deploy --env production
+        run: npx wrangler deploy --env production
 
-      - name: 🎨 Deploy Pages UI
+      # --- Deploy UI (Cloudflare Pages) ---
+      - name: 🌐 Deploy UI
         working-directory: ui
-        run: |
-          if [ -f package.json ]; then
-            npm install --no-fund --no-audit
-          fi
-          npx wrangler pages deploy . --project-name=grassrootsmvt --commit-dirty=true
+        run: npx wrangler pages deploy . --project-name "${PAGES_PROJECT_NAME}"
 
-      - name: ✅ Verify Deployment
+      # --- Verify API Endpoints ---
+      - name: 🔍 Verify API Health
         run: |
-          sleep 10
-          curl -f "https://api.grassrootsmvt.org/api/ping" || echo "API check failed"
-          curl -f "https://grassrootsmvt.org/" || echo "Pages check failed"
-          echo "🎉 Deployment completed!"
+          curl -fsSL "${API_URL}/api/ping" | tee api_ping.log
+          curl -fsSL "${API_URL}/api/metadata" | head -20 | tee api_metadata.log
+
+      # --- Automated Browser Verification ---
+      - name: 🧪 JWT & PWA Verification
+        run: |
+          cat > verify_auth_integration.mjs <<'EOF'
+          import puppeteer from "puppeteer";
+
+          const UI_URL = process.env.UI_URL;
+          console.log(`🔍 Launching headless browser for ${UI_URL}/auth-test.html...`);
+
+          const browser = await puppeteer.launch({ headless: "new" });
+          const page = await browser.newPage();
+          page.setDefaultNavigationTimeout(60000);
+
+          try {
+            await page.goto(`${UI_URL}/auth-test.html`, { waitUntil: "networkidle2" });
+
+            const consoleLogs = [];
+            page.on("console", msg => consoleLogs.push(msg.text()));
+
+            await page.waitForSelector("#auth-status, #toast-container", { timeout: 15000 });
+
+            const content = await page.content();
+            const success = content.includes("Authenticated") || consoleLogs.some(l => l.includes("✅"));
+
+            if (success) {
+              console.log("✅ Authentication & UI Integration Verified");
+              process.exit(0);
+            } else {
+              console.error("❌ Verification failed: no authentication indicator found");
+              console.log(consoleLogs);
+              process.exit(1);
+            }
+          } catch (err) {
+            console.error("❌ Error during verification:", err);
+            process.exit(1);
+          } finally {
+            await browser.close();
+          }
+          EOF
+          node verify_auth_integration.mjs
+
+      # --- Post Results to GitHub Issue ---
+      - name: 🗒️ Post Verification Summary to GitHub Issues
+        if: always()
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: "🌾 GrassrootsMVT Production Verification — $(date +'%Y-%m-%d %H:%M')"
+          content-filepath: ./api_ping.log
+          labels: |
+            verification
+            production
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: ✅ Success Message
+        if: success()
+        run: echo "🎉 Deployment & Verification completed successfully!"
+
+      - name: ⚠️ Failure Notification
+        if: failure()
+        run: echo "❌ Deployment or Verification failed — check logs!"
