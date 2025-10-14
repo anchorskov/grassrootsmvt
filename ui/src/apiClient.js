@@ -1,8 +1,10 @@
-function goConnect(returnTo) {
-  const uiOrigin = "https://volunteers.grassrootsmvt.org";
-  const target = returnTo || window.location.href;
-  const connecting = `${uiOrigin}/connecting.html?to=${encodeURIComponent(target)}`;
-  window.location.replace(connecting);
+export function ensureAccessSession() {
+  if (!sessionStorage.getItem("accessReady:v1")) {
+    const to = location.href;
+    location.assign(`/connecting.html?to=${encodeURIComponent(to)}`);
+    return false;
+  }
+  return true;
 }
 
 export async function apiFetch(input, init = {}) {
@@ -14,7 +16,8 @@ export async function apiFetch(input, init = {}) {
   }).catch(e => ({ ok:false, status:0, error:e }));
 
   if (res.type === 'opaqueredirect' || res.status === 401 || res.status === 403) {
-    goConnect();
+    const to = location.href;
+    location.assign(`/connecting.html?to=${encodeURIComponent(to)}`);
     throw new Error('Redirecting to Access via connecting page');
   }
   return res;
@@ -26,12 +29,13 @@ export async function initializeAuthStatus() {
     // Instead of calling /cdn-cgi/access/* via XHR, simply try a small protected ping:
     const res = await fetch("https://api.grassrootsmvt.org/api/ping", { credentials: "include" });
     if (res.status === 200) {
-      // authenticated
+      // authenticated - set session marker
+      sessionStorage.setItem("accessReady:v1", "true");
       return;
     }
     // unauthenticated → bounce
-    goConnect();
+    ensureAccessSession();
   } catch {
-    goConnect();
+    ensureAccessSession();
   }
 }
