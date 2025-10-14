@@ -1,10 +1,93 @@
 // src/index.js — Cloudflare Zero Trust module Worker
 import { verifyAccessJWT } from "../functions/_utils/verifyAccessJWT.js";
 
+// --- CORS helpers ------------------------------------------------------------
+function parseAllowedOrigins(env) {
+  return (env.ALLOW_ORIGIN || "")
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean);
+}
+
+// Return the request's Origin only if it's allowed; otherwise null
+function pickAllowedOrigin(request, env) {
+  const reqOrigin = request.headers.get("Origin");
+  if (!reqOrigin) return null;
+  const allowed = parseAllowedOrigins(env);
+  return allowed.includes(reqOrigin) ? reqOrigin : null;
+}
+
+function withCorsHeaders(headers, origin) {
+  const h = new Headers(headers || {});
+  h.set("Access-Control-Allow-Origin", origin);
+  h.set("Access-Control-Allow-Credentials", "true");
+  const vary = h.get("Vary");
+  if (!vary) h.set("Vary", "Origin");
+  else if (!/\bOrigin\b/i.test(vary)) h.set("Vary", vary + ", Origin");
+  return h;
+}
+
+function preflightResponse(origin) {
+  return new Response(null, {
+    status: 204,
+    headers: withCorsHeaders({
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization, Cf-Access-Jwt-Assertion",
+      "Access-Control-Max-Age": "86400",
+      "Access-Control-Allow-Credentials": "true"
+    }, origin)
+  });
+}
+// ---------------------------------------------------------------------------
+
+function getCookie(req, name) {
+  const raw = req.headers.get("Cookie") || "";
+  for (const part of raw.split(";")) {
+    const [k, ...rest] = part.trim().split("=");
+    if (k === name) return rest.join("=");
+  }
+  return null;
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const headers = { "Content-Type": "application/json" };
+    const origin = env.ALLOW_ORIGIN || "https://volunteers.grassrootsmvt.org";
+    
+    // Extract JWT from header or cookie
+    const headerToken = request.headers.get("Cf-Access-Jwt-Assertion");
+    const cookieToken = getCookie(request, "CF_Authorization");
+    const accessJWT = headerToken || cookieToken;
+
+    // CORS Preflight handler for OPTIONS requests
+    if (request.method === "OPTIONS") {
+      return preflightResponse(origin);
+    }
+
+    // Auth finish route - returns user to UI after Access login
+    if (url.pathname === "/auth/finish") {
+      const to = url.searchParams.get("to") || "https://volunteers.grassrootsmvt.org/";
+      const html = `<!doctype html><meta charset="utf-8">
+      <title>Returning…</title>
+      <p>Returning to app…</p>
+      <script>location.replace(${JSON.stringify(to)});</script>`;
+      return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+
+    // Auth config route - public endpoint returning TEAM_DOMAIN and POLICY_AUD
+    if (url.pathname === "/auth/config") {
+      return new Response(JSON.stringify({
+        teamDomain: env.TEAM_DOMAIN,
+        policyAud: env.POLICY_AUD
+      }), {
+        headers: {
+          "Content-Type": "application/json",
+          // public endpoint, no credentials used → wildcard CORS is fine
+          "Access-Control-Allow-Origin": "*",
+          "Vary": "Origin"
+        }
+      });
+    }
 
     if (url.pathname === "/api/ping") {
       return new Response(JSON.stringify({
@@ -12,7 +95,10 @@ export default {
         worker: "grassrootsmvt",
         environment: env.ENVIRONMENT || "unknown",
         timestamp: Date.now()
-      }), { headers });
+      }), { 
+        status: 200,
+        headers: withCorsHeaders({ "Content-Type": "application/json" }, origin)
+      });
     }
 
     if (url.pathname === "/api/whoami") {
@@ -23,10 +109,15 @@ export default {
           email: payload.email,
           environment: env.ENVIRONMENT || "production",
           source: "Cloudflare Zero Trust"
-        }), { headers });
+        }), { 
+          status: 200,
+          headers: withCorsHeaders({ "Content-Type": "application/json" }, origin)
+        });
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, error: err.message }),
-          { status: 401, headers });
+        return new Response(JSON.stringify({ ok: false, error: err.message }), {
+          status: 401, 
+          headers: withCorsHeaders({ "Content-Type": "application/json" }, origin)
+        });
       }
     }
 
@@ -150,13 +241,10 @@ export default {
             voters: votersResult.results || []
           }),
           { 
-            headers: {
+            headers: withCorsHeaders({
               "Content-Type": "application/json",
-              "Cache-Control": "max-age=120",
-              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*",
-              "Access-Control-Allow-Methods": "GET, OPTIONS",
-              "Access-Control-Allow-Headers": "Content-Type, Authorization"
-            }
+              "Cache-Control": "max-age=120"
+            }, origin)
           }
         );
       } catch (error) {
@@ -168,10 +256,7 @@ export default {
             message: error.message 
           }),
           { 
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*"
-            },
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, origin),
             status: 500 
           }
         );
@@ -197,12 +282,12 @@ export default {
             message: 'Call logged successfully',
             volunteer: email
           }),
-          { headers }
+          { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, origin) }
         );
       } catch (error) {
         return new Response(
           JSON.stringify({ ok: false, error: error.message }),
-          { status: 401, headers }
+          { status: 401, headers: withCorsHeaders({ "Content-Type": "application/json" }, origin) }
         );
       }
     }
@@ -250,12 +335,7 @@ export default {
             volunteer: email
           }),
           { 
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*",
-              "Access-Control-Allow-Methods": "POST, OPTIONS",
-              "Access-Control-Allow-Headers": "Content-Type, Authorization, Cf-Access-Jwt-Assertion"
-            }
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, origin)
           }
         );
       } catch (error) {
@@ -263,10 +343,7 @@ export default {
           JSON.stringify({ ok: false, error: error.message }),
           { 
             status: error.message.includes('JWT') ? 401 : 500, 
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*"
-            }
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, origin)
           }
         );
       }
@@ -309,12 +386,7 @@ export default {
             method: contact_method
           }),
           { 
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*",
-              "Access-Control-Allow-Methods": "POST, OPTIONS",
-              "Access-Control-Allow-Headers": "Content-Type, Authorization, Cf-Access-Jwt-Assertion"
-            }
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, origin)
           }
         );
       } catch (error) {
@@ -322,10 +394,7 @@ export default {
           JSON.stringify({ ok: false, error: error.message }),
           { 
             status: 500, 
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*"
-            }
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, origin)
           }
         );
       }
@@ -344,12 +413,12 @@ export default {
 
         return new Response(
           JSON.stringify({ ok: true, activity: result.results || [] }),
-          { headers }
+          { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, origin) }
         );
       } catch (error) {
         return new Response(
           JSON.stringify({ ok: false, error: error.message }),
-          { status: 401, headers }
+          { status: 401, headers: withCorsHeaders({ "Content-Type": "application/json" }, origin) }
         );
       }
     }
@@ -392,13 +461,10 @@ export default {
               cities: countiesWithAll  // Using 'cities' for API consistency
             }),
             { 
-              headers: {
+              headers: withCorsHeaders({
                 "Content-Type": "application/json",
-                "Cache-Control": "max-age=86400",
-                "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*",
-                "Access-Control-Allow-Methods": "GET, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization"
-              }
+                "Cache-Control": "max-age=86400"
+              }, origin)
             }
           );
         }
@@ -433,13 +499,10 @@ export default {
               senate_districts: senateDistricts
             }),
             { 
-              headers: {
+              headers: withCorsHeaders({
                 "Content-Type": "application/json",
-                "Cache-Control": "max-age=86400",
-                "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*",
-                "Access-Control-Allow-Methods": "GET, OPTIONS",
-                "Access-Control-Allow-Headers": "Content-Type, Authorization"
-              }
+                "Cache-Control": "max-age=86400"
+              }, origin)
             }
           );
         }
@@ -477,13 +540,10 @@ export default {
             auto_populate: false
           }),
           { 
-            headers: {
+            headers: withCorsHeaders({
               "Content-Type": "application/json",
-              "Cache-Control": "max-age=86400",
-              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*",
-              "Access-Control-Allow-Methods": "GET, OPTIONS",
-              "Access-Control-Allow-Headers": "Content-Type, Authorization"
-            }
+              "Cache-Control": "max-age=86400"
+            }, origin)
           }
         );
       } catch (error) {
@@ -509,10 +569,7 @@ export default {
                               "21", "22", "23", "24", "25", "26", "27", "28", "29", "30"]
           }),
           { 
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*"
-            },
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, origin),
             status: 500
           }
         );
@@ -547,13 +604,10 @@ export default {
             templates: result.results || []
           }),
           { 
-            headers: {
+            headers: withCorsHeaders({
               "Content-Type": "application/json",
-              "Cache-Control": "max-age=300", // 5 minute cache for templates
-              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*",
-              "Access-Control-Allow-Methods": "GET, OPTIONS",
-              "Access-Control-Allow-Headers": "Content-Type, Authorization"
-            }
+              "Cache-Control": "max-age=300"
+            }, origin)
           }
         );
       } catch (error) {
@@ -565,10 +619,7 @@ export default {
             message: error.message 
           }),
           { 
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": env.ALLOW_ORIGIN || "*"
-            },
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, origin),
             status: 500 
           }
         );
@@ -591,7 +642,7 @@ export default {
             tables: result.results || [],
             environment: env.ENVIRONMENT || 'unknown'
           }),
-          { headers }
+          { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, origin) }
         );
       } catch (error) {
         console.error('DB Error:', error);
@@ -601,7 +652,7 @@ export default {
             error: error.message,
             environment: env.ENVIRONMENT || 'unknown'
           }),
-          { status: 500, headers }
+          { status: 500, headers: withCorsHeaders({ "Content-Type": "application/json" }, origin) }
         );
       }
     }
@@ -623,7 +674,7 @@ export default {
             columns: result.results || [],
             environment: env.ENVIRONMENT || 'unknown'
           }),
-          { headers }
+          { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, origin) }
         );
       } catch (error) {
         return new Response(
@@ -632,12 +683,14 @@ export default {
             error: error.message,
             environment: env.ENVIRONMENT || 'unknown'
           }),
-          { status: 500, headers }
+          { status: 500, headers: withCorsHeaders({ "Content-Type": "application/json" }, origin) }
         );
       }
     }
 
-    return new Response(JSON.stringify({ ok: false, error: "Not Found" }),
-      { status: 404, headers });
+    return new Response(JSON.stringify({ ok: false, error: "Not Found" }), {
+      status: 404,
+      headers: withCorsHeaders({ "Content-Type": "application/json" }, origin)
+    });
   }
 };
