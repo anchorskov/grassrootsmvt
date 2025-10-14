@@ -4,26 +4,10 @@
 (function initializeAuth() {
   'use strict';
   
-  const API_BASE = "https://api.grassrootsmvt.org";
-  const UI_URL = window.location.href;
-  const ACCESS_MARK = "accessReady:v1";
+  const LOCAL_API = "http://localhost:8787";
+  const PROD_API = "https://api.grassrootsmvt.org";
+  const API_BASE = window.location.hostname === "localhost" ? LOCAL_API : PROD_API;
   
-  // Start the Access login round trip via top-level navigation
-  function startAccessLoginRoundTrip() {
-    // Lightweight, decoupled: let connecting.html build the Access URL and navigate
-    const here = window.location.href;
-    sessionStorage.setItem("access.to", here);
-    window.location.assign("/connecting.html");
-  }
-
-  // Check if Access session is ready, start login if not
-  function ensureAccessSession() {
-    if (sessionStorage.getItem(ACCESS_MARK) === "1") return true;
-    sessionStorage.setItem(ACCESS_MARK, "1");
-    startAccessLoginRoundTrip();
-    return false;
-  }
-
   /**
    * Extract JWT token from Cloudflare Access cookie
    * @returns {string|null} JWT token or null if not found
@@ -94,8 +78,7 @@
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const response = await fetch(fullUrl, { 
-          ...options,
-          credentials: "include",
+          ...options, 
           headers 
         });
 
@@ -103,7 +86,7 @@
         if (response.status === 401 || response.status === 403) {
           console.error('❌ Auth failed — redirecting to login.');
           if (!isLocalDevelopment()) {
-            window.location.href = '/connecting.html';
+            window.location.href = '/cdn-cgi/access/login';
           } else {
             throw new Error('Authentication failed in local development');
           }
@@ -277,14 +260,6 @@
   }
 
   function initializeAuthStatus() {
-    // Check if Access session is ready
-    const hasAccess = sessionStorage.getItem(ACCESS_MARK) === "1";
-    if (!hasAccess) {
-      window.location.href = "/connecting.html"; // prettier UX; this page triggers the round trip
-      return;
-    }
-    
-    // Safe to start app; Access cookie is set for api.grassrootsmvt.org
     const token = localStorage.getItem('access_token');
     console.log("🔐 Access token present:", !!token);
     
@@ -302,8 +277,8 @@
           console.error("❌ Authentication verification failed:", err);
           showToast('⚠️ Authentication verification failed', 'warning');
         });
-    } else {
-      console.log("🔐 Access session ready, no stored token");
+    } else if (!isLocalDevelopment()) {
+      showToast('⚠️ No authentication token found', 'warning');
     }
   }
 
@@ -337,8 +312,7 @@
           await fetch(request.url, {
             method: request.method,
             headers: request.headers,
-            body: request.body,
-            credentials: "include"
+            body: request.body
           });
           processed++;
         } catch (error) {
@@ -363,10 +337,6 @@
     isLocal: isLocalDevelopment(),
     version: '2.0.0'
   };
-
-  // Expose Access functions for connecting page
-  window.startAccessLoginRoundTrip = startAccessLoginRoundTrip;
-  window.ensureAccessSession = ensureAccessSession;
 
   console.log('🔐 API Client initialized successfully');
   console.log('🌐 Base URL:', API_BASE);

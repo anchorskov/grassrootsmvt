@@ -1,0 +1,12 @@
+{
+  "name": "GrassrootsMVT Volunteer Portal",
+  "short_name": "GrassrootsMVT",
+  "start_url": "/volunteer/index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1d4ed8",
+  "icons": [
+    { "src": "favicon.ico", "sizes": "32x32", "type": "image/x-icon" },
+    { "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

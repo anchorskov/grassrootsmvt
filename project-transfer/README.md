@@ -149,16 +149,3 @@ If you'd like, I can:
 - Inspect the failing GitHub Actions run and extract the wrangler output (I can fetch logs with a GitHub token), or give you the exact curl commands to fetch the logs locally.
 
 Thank you — this README is intentionally concise. Tell me if you want more details in any area (examples, auth flows, D1 schema, or CI wiring).
-
-## Authentication (Cloudflare Access)
-
-- Public: `GET https://api.grassrootsmvt.org/auth/config` → returns `{ teamDomain, policyAud }`
-- UI navigates (top-level) to Access login:
-
-```
-https://<TEAM_DOMAIN>/cdn-cgi/access/login/api.grassrootsmvt.org?kid=<POLICY_AUD>&redirect_url=https%3A%2F%2Fapi.grassrootsmvt.org%2Fauth%2Ffinish%3Fto%3D<ENCODED_UI_URL>
-```
-
-- Worker `/auth/finish` returns you to the UI
-- All API calls: `credentials: "include"`
-- Never XHR `cdn-cgi/access/*` endpoints — always use navigation (see `ui/connecting.html`)

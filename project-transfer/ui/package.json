@@ -1,0 +1,23 @@
+{
+  "name": "grassrootsmvt-pages-functions",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Pages Functions for the GrassrootsMVT volunteer hub",
+  "main": "index.js",
+  "scripts": {
+    "dev": "wrangler pages dev .. --compatibility-date=2025-10-08",
+    "build": "wrangler pages functions build functions --outdir .wrangler/functions-build",
+    "lint": "eslint \"functions/**/*.js\"",
+    "test": "node ../scripts/verify_local_routes.mjs"
+  },
+  "dependencies": {
+    "jose": "^6.1.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.37.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

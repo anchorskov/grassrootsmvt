@@ -10,7 +10,7 @@ workers_dev = false
 # 🧪 Local Environment Variables
 [vars]
 ENVIRONMENT = "local"
-ALLOW_ORIGIN = "http://localhost:5173"
+ALLOW_ORIGIN = "http://localhost:8788"
 DATA_BACKEND = "d1"
 
 # 🗄️ Local D1 Database (Preview)
@@ -30,7 +30,7 @@ routes = [
 # ✅ Production Vars
 [env.production.vars]
 ENVIRONMENT = "production"
-ALLOW_ORIGIN = "https://volunteers.grassrootsmvt.org,https://grassrootsmvt-production.pages.dev"
+ALLOW_ORIGIN = "https://volunteers.grassrootsmvt.org"
 DATA_BACKEND = "d1"
 DEBUG_CORS = "false"
 

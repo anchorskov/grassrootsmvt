@@ -1,13 +1,9 @@
 <!doctype html>
-<html lang="en">
-<head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>GrassrootsMVT Volunteer Hub</title>
-<script src="/src/apiClient.js"></script>
+<title>Volunteer Hub</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 880px; position: relative; }
-  .auth-status { position: fixed; top: 8px; right: 8px; z-index: 100; font-size: 0.875rem; padding: 0.5rem 0.75rem; border-radius: 8px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+  body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 880px; }
   .card { border:1px solid #e5e7eb; border-radius: 12px; padding: 1rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
   .row { display:flex; gap:1rem; flex-wrap: wrap; }
   .row > * { flex:1 1 220px; }
@@ -20,20 +16,8 @@
   button.secondary { background:#e2e8f0; color:#0f172a; }
   button[disabled] { opacity:.5; cursor:not-allowed; }
   .chips { display:flex; gap:.5rem; flex-wrap: wrap; }
+  .chip { display:inline-flex; align-items:center; gap:.4rem; border:1px solid #cbd5e1; border-radius:999px; padding:.35rem .6rem; }
 </style>
-</head>
-
-<body>
-<!-- Sign in to API banner (shown only if ensureApiSession() detects no API session) -->
-<div id="api-session-banner" style="display:none; padding:12px; background:#fff3cd; color:#3d3a00; border:1px solid #ffe69c; border-radius:8px; margin:12px 0;">
-  <strong>Action needed:</strong>
-  Please <a data-api-login href="#" style="text-decoration:underline;">sign in to the API</a> to continue.
-</div>
-
-<!-- Authentication status indicator -->
-<div id="auth-status" class="auth-status">
-  <span class="online-indicator">🔄 Checking connection...</span>
-</div>
 
 <h1>Volunteer Hub</h1>
 <p class="muted">Pick your target set, then start calling or canvassing.</p>
@@ -104,7 +88,7 @@
   const btnCanv   = document.getElementById('startCanvass');
   const hint      = document.getElementById('msg');
 
-  // Load wy.json with a fallback path
+  // robust fetch of wy.json with fallback path
   async function fetchMeta() {
     const tryPaths = ['/admin/wy.json', '/ui/admin/wy.json'];
     let lastErr = null;
@@ -123,7 +107,7 @@
       .split(/\s+/).map(w => w ? w[0].toUpperCase()+w.slice(1) : w).join(' ');
   }
 
-  // Accept camelCase or snake_case shapes
+  // Accept both camelCase (current) and snake_case (early drafts)
   function normalizeWy(json) {
     const counties = json.counties || json.COUNTIES || [];
     const citiesByCounty =
@@ -132,6 +116,7 @@
       json.senateByCounty || (json.districts_by_county && json.districts_by_county.senate) || {};
     const houseByCounty  =
       json.houseByCounty  || (json.districts_by_county && json.districts_by_county.house)  || {};
+
     return { counties, citiesByCounty, senateByCounty, houseByCounty };
   }
 
@@ -148,6 +133,7 @@
       o.textContent = titleCase(v);
       sel.appendChild(o);
     });
+    // try keep previous if still valid
     if ([...sel.options].some(o => o.value === prev)) sel.value = prev;
   }
 
@@ -160,6 +146,7 @@
   }
 
   function canProceed() {
+    // Require county OR district; if district_type is chosen, district must be chosen.
     const county = selCounty.value || '';
     const dtype  = selType.value || '';
     const dist   = selDist.value || '';
@@ -171,10 +158,13 @@
     const ok = canProceed();
     btnCalls.disabled = !ok;
     btnCanv.disabled  = !ok;
-    hint.textContent = ok ? '' : 'Select County/City and (optionally) District to continue.';
+    hint.textContent = ok
+      ? ''
+      : 'Select County/City and (optionally) District to continue.';
   }
 
   function persistFilters() {
+    // Build normalized filter payload for downstream pages
     const county = selCounty.value ? selCounty.value.toUpperCase() : null;
     const city   = selCity.value   ? selCity.value.toUpperCase()   : null;
 
@@ -182,9 +172,10 @@
     let district = selDist.value || null;
     if (district) {
       const n = String(parseInt(district, 10));
-      district = n && !isNaN(n) ? n.padStart(2, '0') : district;
+      district = n && !isNaN(n) ? n.padStart(2,'0') : district;
     }
 
+    // Expand shorthand parties R/D/U to long names for DB
     const mapParty = p => p === 'R' ? 'Republican'
                       : p === 'D' ? 'Democratic'
                       : p === 'U' ? 'Unaffiliated'
@@ -198,8 +189,9 @@
       district,
       parties,
       limit: Math.max(1, Math.min(200, Number(numLimit.value || 50))),
-      require_phone: true // calls default; canvass can ignore
+      require_phone: true // default for calls; canvass can ignore
     };
+    // store the filters object directly (call/canvass expect the raw filters)
     sessionStorage.setItem('vol.filters', JSON.stringify(filters));
     return filters;
   }
@@ -207,6 +199,7 @@
   function go(path) {
     const f = persistFilters();
     const u = new URL(path, location.origin);
+    // Keep lightweight params in URL so refresh/deep-link works
     if (f.county) u.searchParams.set('county', f.county);
     if (f.city)   u.searchParams.set('city', f.city);
     if (f.district_type) u.searchParams.set('district_type', f.district_type);
@@ -216,23 +209,28 @@
     location.href = u.toString();
   }
 
+  // Wire up events
   [selCounty, selCity, selType, selDist, chkR, chkD, chkU, numLimit].forEach(el =>
     el && el.addEventListener('change', updateButtons)
   );
-  document.getElementById('startCall').addEventListener('click', () => go('/call.html'));
-  document.getElementById('startCanvass').addEventListener('click',  () => go('/canvass/'));
+  btnCalls.addEventListener('click', () => go('/call.html'));
+  btnCanv.addEventListener('click',  () => go('/canvass/'));
 
-  fetchMeta().then(raw => {
+  // Init
+  fetchMeta().then((raw) => {
     const wy = normalizeWy(raw);
 
+    // Counties
     fillSelect(selCounty, wy.counties);
 
+    // When county changes, rebuild cities and districts
     selCounty.addEventListener('change', () => {
       const cty = selCounty.value || '';
       const cities = (wy.citiesByCounty[cty] || []).slice().sort();
       fillSelect(selCity, cities, { placeholder: '— any —', anyLabel: '— any —' });
       selCity.disabled = false;
 
+      // when county changes, clear district type + list
       selType.value = '';
       selType.disabled = false;
       fillSelect(selDist, [], { placeholder: '— select —' });
@@ -240,9 +238,10 @@
       updateButtons();
     });
 
+    // When district type changes, rebuild district numbers for selected county
     selType.addEventListener('change', () => {
       const cty = selCounty.value || '';
-      const dtype = selType.value;
+      const dtype = selType.value; // 'house' | 'senate' | ''
       let dists = [];
       if (dtype === 'house')   dists = wy.houseByCounty[cty]  || [];
       if (dtype === 'senate')  dists = wy.senateByCounty[cty] || [];
@@ -251,6 +250,7 @@
       updateButtons();
     });
 
+    // City changes only affect validation message
     selCity.addEventListener('change', updateButtons);
 
     updateButtons();
@@ -259,42 +259,4 @@
     hint.textContent = 'Failed to load county/city metadata.';
   });
 })();
-
-// Initialize authentication and add verification
-document.addEventListener('DOMContentLoaded', async () => {
-  console.log('🔐 Initializing authentication verification...');
-  
-  // Test the global apiFetch function
-  try {
-    const pingResult = await window.apiFetch('/ping');
-    console.log('✅ API connection verified:', pingResult);
-    
-    // Try to get user info
-    const userInfo = await window.apiFetch('/whoami');
-    console.log('👤 User info:', userInfo);
-    
-    // Update auth status display
-    const authStatus = window.getAuthStatus();
-    const indicator = document.querySelector('.online-indicator');
-    if (indicator) {
-      if (authStatus.isAuthenticated) {
-        indicator.textContent = '✅ Authenticated';
-        indicator.parentElement.style.background = '#dcfce7';
-        indicator.parentElement.style.color = '#166534';
-      } else {
-        indicator.textContent = '⚠️ Not authenticated';
-        indicator.parentElement.style.background = '#fef3c7';
-        indicator.parentElement.style.color = '#92400e';
-      }
-    }
-  } catch (error) {
-    console.error('❌ Authentication verification failed:', error);
-    const indicator = document.querySelector('.online-indicator');
-    if (indicator) {
-      indicator.textContent = '❌ Connection failed';
-      indicator.parentElement.style.background = '#fee2e2';
-      indicator.parentElement.style.color = '#991b1b';
-    }
-  }
-});
 </script>

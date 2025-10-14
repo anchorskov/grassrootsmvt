@@ -13,8 +13,7 @@
     "build:functions": "wrangler pages functions build ./ui/functions && ls -R ui/.wrangler/tmp",
     "deploy:pages": "npx wrangler pages deploy ./ui --project-name=grassrootsmvt --commit-dirty=true",
     "verify:functions": "curl -sS -H 'Authorization: Bearer $CF_API_TOKEN' https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1 | jq '.result[0].uses_functions'",
-    "deploy:check": "bash ./scripts/deploy_and_check.sh",
-    "zip:review": "zip -r ./grassroots-review.zip worker/wrangler.toml worker/src/index.js ui/connecting.html ui/index.html ui/src/apiClient.js README.md ACCESS.md DEPLOYING.md"
+    "deploy:check": "bash ./scripts/deploy_and_check.sh"
   },
   "name": "grassrootsmvt",
   "version": "1.0.0",

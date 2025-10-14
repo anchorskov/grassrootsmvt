@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Authentication Test</title>
+  <script src="/src/apiClient.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; }
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 1.5rem; margin: 1rem 0; }
+    .success { background: #dcfce7; border-color: #16a34a; }
+    .error { background: #fee2e2; border-color: #dc2626; }
+    .warning { background: #fef3c7; border-color: #f59e0b; }
+    button { padding: 0.75rem 1rem; margin: 0.5rem; border: none; border-radius: 8px; background: #2563eb; color: white; cursor: pointer; }
+    button:hover { background: #1d4ed8; }
+    pre { background: #f8fafc; padding: 1rem; border-radius: 8px; overflow-x: auto; }
+    .status { margin: 0.5rem 0; padding: 0.5rem; border-radius: 6px; }
+  </style>
+</head>
+
+<body>
+  <h1>🔐 Authentication Test Page</h1>
+  
+  <div class="card">
+    <h2>Environment Info</h2>
+    <div id="env-info">Loading...</div>
+  </div>
+
+  <div class="card">
+    <h2>Authentication Status</h2>
+    <div id="auth-status">Checking...</div>
+  </div>
+
+  <div class="card">
+    <h2>API Tests</h2>
+    <button onclick="testPing()">Test /api/ping</button>
+    <button onclick="testWhoami()">Test /api/whoami</button>
+    <button onclick="testVoters()">Test /api/voters</button>
+    <button onclick="runAllTests()">Run All Tests</button>
+    <div id="test-results"></div>
+  </div>
+
+  <div class="card">
+    <h2>Global Functions Test</h2>
+    <button onclick="testGlobalFunctions()">Test window.apiFetch</button>
+    <button onclick="testAuthHelpers()">Test Auth Helpers</button>
+    <div id="global-results"></div>
+  </div>
+
+  <script>
+    let testResults = [];
+
+    function log(message, type = 'info') {
+      console.log(`[${type.toUpperCase()}] ${message}`);
+      const div = document.createElement('div');
+      div.className = `status ${type}`;
+      div.textContent = `${new Date().toLocaleTimeString()} - ${message}`;
+      return div;
+    }
+
+    function showResult(containerId, element) {
+      const container = document.getElementById(containerId);
+      container.appendChild(element);
+    }
+
+    // Environment info
+    function updateEnvInfo() {
+      const info = {
+        hostname: window.location.hostname,
+        isLocal: window.location.hostname === 'localhost',
+        cookies: document.cookie ? 'Present' : 'None',
+        localStorage: localStorage.getItem('access_token') ? 'Has token' : 'No token',
+        userAgent: navigator.userAgent.substring(0, 50) + '...'
+      };
+      
+      document.getElementById('env-info').innerHTML = `
+        <pre>${JSON.stringify(info, null, 2)}</pre>
+      `;
+    }
+
+    // Auth status
+    async function updateAuthStatus() {
+      try {
+        if (typeof window.getAuthStatus === 'function') {
+          const status = window.getAuthStatus();
+          document.getElementById('auth-status').innerHTML = `
+            <div class="status success">
+              <h3>✅ Authentication Status</h3>
+              <pre>${JSON.stringify(status, null, 2)}</pre>
+            </div>
+          `;
+        } else {
+          document.getElementById('auth-status').innerHTML = `
+            <div class="status error">❌ window.getAuthStatus not available</div>
+          `;
+        }
+      } catch (error) {
+        document.getElementById('auth-status').innerHTML = `
+          <div class="status error">❌ Error: ${error.message}</div>
+        `;
+      }
+    }
+
+    // Test functions
+    async function testPing() {
+      try {
+        const result = await window.apiFetch('/ping');
+        showResult('test-results', log(`✅ /ping: ${JSON.stringify(result)}`, 'success'));
+        return true;
+      } catch (error) {
+        showResult('test-results', log(`❌ /ping failed: ${error.message}`, 'error'));
+        return false;
+      }
+    }
+
+    async function testWhoami() {
+      try {
+        const result = await window.apiFetch('/whoami');
+        showResult('test-results', log(`✅ /whoami: ${JSON.stringify(result)}`, 'success'));
+        return true;
+      } catch (error) {
+        showResult('test-results', log(`❌ /whoami failed: ${error.message}`, 'error'));
+        return false;
+      }
+    }
+
+    async function testVoters() {
+      try {
+        const result = await window.apiFetch('/voters?limit=1');
+        showResult('test-results', log(`✅ /voters: ${result.length || 0} voters`, 'success'));
+        return true;
+      } catch (error) {
+        showResult('test-results', log(`❌ /voters failed: ${error.message}`, 'error'));
+        return false;
+      }
+    }
+
+    async function runAllTests() {
+      document.getElementById('test-results').innerHTML = '';
+      showResult('test-results', log('🔄 Running all API tests...', 'info'));
+      
+      const tests = [testPing, testWhoami, testVoters];
+      let passed = 0;
+      
+      for (const test of tests) {
+        const success = await test();
+        if (success) passed++;
+        await new Promise(r => setTimeout(r, 500)); // Brief delay
+      }
+      
+      showResult('test-results', log(`📊 Tests completed: ${passed}/${tests.length} passed`, passed === tests.length ? 'success' : 'warning'));
+    }
+
+    function testGlobalFunctions() {
+      const container = document.getElementById('global-results');
+      container.innerHTML = '';
+      
+      const tests = [
+        { name: 'window.apiFetch', check: () => typeof window.apiFetch === 'function' },
+        { name: 'window.showToast', check: () => typeof window.showToast === 'function' },
+        { name: 'window.getAuthStatus', check: () => typeof window.getAuthStatus === 'function' },
+        { name: 'window.checkAuth', check: () => typeof window.checkAuth === 'function' },
+        { name: 'window.apiConfig', check: () => typeof window.apiConfig === 'object' }
+      ];
+      
+      tests.forEach(test => {
+        const status = test.check() ? 'success' : 'error';
+        const icon = test.check() ? '✅' : '❌';
+        showResult('global-results', log(`${icon} ${test.name}: ${test.check() ? 'Available' : 'Missing'}`, status));
+      });
+    }
+
+    async function testAuthHelpers() {
+      const container = document.getElementById('global-results');
+      
+      try {
+        // Test checkAuth function
+        if (typeof window.checkAuth === 'function') {
+          showResult('global-results', log('🔄 Testing authentication...', 'info'));
+          const authResult = await window.checkAuth();
+          showResult('global-results', log(`✅ checkAuth result: ${authResult}`, 'success'));
+        }
+        
+        // Test showToast function
+        if (typeof window.showToast === 'function') {
+          window.showToast('🧪 Test toast notification!', 'info');
+          showResult('global-results', log('✅ showToast triggered', 'success'));
+        }
+        
+        // Show API config
+        if (window.apiConfig) {
+          showResult('global-results', log(`✅ API Config: ${JSON.stringify(window.apiConfig)}`, 'success'));
+        }
+        
+      } catch (error) {
+        showResult('global-results', log(`❌ Auth helpers test failed: ${error.message}`, 'error'));
+      }
+    }
+
+    // Initialize when page loads
+    document.addEventListener('DOMContentLoaded', () => {
+      updateEnvInfo();
+      updateAuthStatus();
+      
+      // Show a test toast
+      setTimeout(() => {
+        if (typeof window.showToast === 'function') {
+          window.showToast('🧪 Authentication test page loaded!', 'info');
+        }
+      }, 1000);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Volunteer Call</title>
+<script src="/src/apiClient.js"></script>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 720px; }
+  .card { border: 1px solid #ddd; border-radius: 12px; padding: 1rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  label { display:block; margin:.5rem 0 .25rem; }
+  input[type=text], select, textarea { width: 100%; padding:.6rem; border:1px solid #ccc; border-radius:8px; }
+  button { padding:.6rem 1rem; border-radius:8px; border:0; background:#0ea5e9; color:white; font-weight:600; cursor:pointer; }
+  button.secondary { background:#e2e8f0; color:#0f172a; }
+  .row { display:flex; gap:.75rem; flex-wrap: wrap; }
+  .row > * { flex:1 1 200px; }
+  .muted { color:#64748b; }
+  .error { color:#b91c1c; }
+  .toolbar { display:flex; gap:.5rem; align-items:center; }
+  #voterCard[hidden], #empty[hidden] { display:none; }
+  h1 { display:flex; justify-content:space-between; align-items:center; margin:.25rem 0 1rem; }
+</style>
+
+<h1>
+  <span>Volunteer Call</span>
+  <span class="toolbar">
+    <button id="getNextBtn" style="padding:8px 12px;border-radius:6px;background:#6aa9ff;color:#fff;border:none;">Get Next</button>
+  </span>
+</h1>
+
+<div class="card" id="whoami">Checking login…</div>
+<div class="card muted" id="filtersBadge" style="display:none;"></div>
+
+<div class="card" id="voterCard" hidden>
+  <div id="voterInfo" class="muted"></div>
+
+  <h3>Call outcome</h3>
+
+  <label for="outcome">Outcome</label>
+  <select id="outcome">
+    <option value="">— choose —</option>
+    <option>connected</option><option>vm</option><option>no_answer</option>
+    <option>wrong_number</option><option>refused</option><option>follow_up</option>
+  </select>
+
+  <div class="row">
+    <label><input type="checkbox" id="ok_callback"> OK to call back</label>
+    <label><input type="checkbox" id="requested_info"> Requested info</label>
+    <label><input type="checkbox" id="dnc"> Do not call</label>
+  </div>
+
+  <div class="row">
+    <div>
+      <label for="best_day">Best day</label>
+      <select id="best_day">
+        <option value="">—</option>
+        <option>Mon</option><option>Tue</option><option>Wed</option>
+        <option>Thu</option><option>Fri</option><option>Sat</option><option>Sun</option>
+      </select>
+    </div>
+    <div>
+      <label for="best_time_window">Best time</label>
+      <select id="best_time_window">
+        <option value="">—</option>
+        <option>Morning</option><option>Afternoon</option><option>Evening</option>
+        <option>6–8pm</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="row">
+    <label><input type="checkbox" id="optin_sms"> Opt-in SMS</label>
+    <label><input type="checkbox" id="optin_email"> Opt-in Email</label>
+  </div>
+
+  <label for="email">Email address (if provided)</label>
+  <input type="text" id="email" placeholder="name@example.com"/>
+
+  <div class="row">
+    <label><input type="checkbox" id="wants_volunteer"> Wants to volunteer</label>
+    <label><input type="checkbox" id="share_insights_ok"> OK to share insights</label>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="for_term_limits"> For term limits</label>
+    <label><input type="checkbox" id="issue_public_lands"> Interested: public land sales</label>
+  </div>
+
+  <label for="comments">Comments</label>
+  <textarea id="comments" rows="3"></textarea>
+
+  <div class="row" style="margin-top:.75rem;">
+    <button id="saveBtn">Save & Next</button>
+    <button class="secondary" id="skipBtn" type="button">Skip</button>
+  </div>
+  <div id="msg" class="muted" style="margin-top:.5rem;"></div>
+</div>
+
+<div class="card" id="empty" hidden>No eligible voters (or not logged in).</div>
+
+<script>
+  // Load the API shim which exposes window.apiFetch and API()
+  (function(){
+    // Load the API shim as an ES module so imports inside it work correctly.
+    const s = document.createElement('script');
+    s.type = 'module';
+    s.src = '/src/api-shim.js';
+    document.head.appendChild(s);
+  })();
+
+  // Debug snippet: logs token presence and tests /api/ping connectivity
+  (function(){
+    const dbg = document.createElement('script');
+    dbg.textContent = `
+      (async () => {
+        const token = localStorage.getItem("access_token");
+        console.log("🔐 Access token present:", !!token);
+        if (!token) console.warn("No access_token in localStorage — /api/whoami will return 401");
+        try {
+          const j = await window.apiFetch('/ping');
+          console.log('🌎 /api/ping result:', j);
+        } catch (err) {
+          console.error('Failed to reach /api/ping:', err);
+        }
+      })();
+    `;
+    document.head.appendChild(dbg);
+  })();
+
+  const API = (p) => '/api' + p;
+
+  const who = document.getElementById("whoami");
+  const voterCard = document.getElementById("voterCard");
+  const voterInfo = document.getElementById("voterInfo");
+  const empty = document.getElementById("empty");
+  const msg = document.getElementById("msg");
+  const getNextBtn = document.getElementById('getNextBtn');
+  const saveBtn = document.getElementById('saveBtn');
+  const skipBtn = document.getElementById('skipBtn');
+  const filtersBadge = document.getElementById('filtersBadge');
+
+  function setMsg(text, kind="muted") {
+    msg.className = kind;
+    msg.textContent = text || "";
+  }
+
+  function getUrlFilters() {
+    const u = new URL(location.href);
+    const parties = u.searchParams.getAll('parties');
+    const f = {
+      county: (u.searchParams.get('county')||'').toUpperCase() || null,
+      city:   (u.searchParams.get('city')||'').toUpperCase() || null,
+      district_type: u.searchParams.get('district_type') || null,
+      district: u.searchParams.get('district') || null,
+      parties: parties.length ? parties : [],
+      limit: Number(u.searchParams.get('limit')||50),
+      require_phone: true
+    };
+    return f;
+  }
+
+  function getFilters() {
+    const fromUrl = getUrlFilters();
+    if (fromUrl.county || fromUrl.district_type || fromUrl.parties.length) return fromUrl;
+    try { return { ...JSON.parse(sessionStorage.getItem('vol.filters')||'{}'), require_phone:true }; }
+    catch { return { require_phone:true }; }
+  }
+
+  function showFiltersBadge(filters) {
+    filtersBadge.style.display = 'block';
+    filtersBadge.textContent = 'Filters: ' + JSON.stringify(filters);
+  }
+
+  async function jsonFetch(url, init = {}) {
+    // For API endpoints under /api use apiFetch to ensure Authorization is attached
+    if (url.startsWith('/api') && window.apiFetch) {
+      return window.apiFetch(url.replace('/api',''), init);
+    }
+    const r = await fetch(url, {
+      credentials: "include",
+      ...init,
+      headers: { "content-type": "application/json", ...(init.headers || {}) },
+    });
+    if (r.status === 401) throw new Error("Unauthorized");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const ct = r.headers.get("content-type") || "";
+    return ct.includes("application/json") ? r.json() : r.text();
+  }
+
+  async function loadWho() {
+    try {
+      const j = await jsonFetch(API("/whoami"));
+      who.textContent = j && j.email ? ("Signed in as: " + j.email) : "Not signed in";
+    } catch (e) {
+      who.innerHTML = `<span class="error">Unable to reach API: ${e.message}</span>`;
+    }
+  }
+
+  const SEEN_KEY = 'vol.seen_ids';
+  function getSeen() {
+    try { return JSON.parse(sessionStorage.getItem(SEEN_KEY) || '[]'); } catch { return []; }
+  }
+  function pushSeen(id) {
+    if (!id) return;
+    const seen = getSeen().filter(x => x !== id);
+    seen.unshift(id);
+    sessionStorage.setItem(SEEN_KEY, JSON.stringify(seen.slice(0, 12)));
+  }
+
+  let inFlightNext = false;
+
+  async function nextVoter() {
+    if (inFlightNext) return;
+    inFlightNext = true;
+    getNextBtn.disabled = true;
+    saveBtn.disabled = true;
+    setMsg("Loading next voter…");
+
+    try {
+      const filters = getFilters();
+      const exclude_ids = getSeen();              // NEW: send a short history
+  const v = await jsonFetch(API('/next'), {
+        method: 'POST',
+        cache: 'no-store',
+        headers: { 'pragma': 'no-cache' },
+        body: JSON.stringify({ filters, exclude_ids })
+      });
+
+      if (!v || v.empty || !v.voter_id) {
+        voterCard.hidden = true; empty.hidden = false; setMsg("");
+        return;
+      }
+
+      // show
+      empty.hidden = true; voterCard.hidden = false;
+      voterCard.dataset.voter = v.voter_id;
+      const name = [v.first_name, v.last_name].filter(Boolean).join(" ");
+      const party = v.party ? (' • Party: ' + v.party) : '';
+      const phone = v.phone_e164 ? ('Phone: ' + v.phone_e164) : 'Phone: —';
+      voterInfo.innerHTML =
+        `<strong>${name || "—"}</strong><br/>${(v.ra_city||'')} ${(v.ra_zip||'')}${party}<br/>${phone}`;
+
+      // remember to avoid immediate repeats
+      pushSeen(v.voter_id);                       // NEW
+      setMsg("");
+    } catch (e) {
+      voterCard.hidden = true; empty.hidden = false;
+      setMsg(`Error: ${e.message}`, "error");
+    } finally {
+      inFlightNext = false;
+      getNextBtn.disabled = false;
+      saveBtn.disabled = false;
+    }
+  }
+
+  getNextBtn.addEventListener("click", nextVoter);
+  saveBtn.addEventListener("click", saveAndNext);
+
+  async function saveAndNext() {
+    const payload = {
+      voter_id: voterCard.dataset.voter || "",
+      outcome: document.getElementById("outcome").value,
+      ok_callback: +document.getElementById("ok_callback").checked,
+      requested_info: +document.getElementById("requested_info").checked,
+      dnc: +document.getElementById("dnc").checked,
+      best_day: document.getElementById("best_day").value || null,
+      best_time_window: document.getElementById("best_time_window").value || null,
+      optin_sms: +document.getElementById("optin_sms").checked,
+      optin_email: +document.getElementById("optin_email").checked,
+      email: document.getElementById("email").value || null,
+      wants_volunteer: +document.getElementById("wants_volunteer").checked,
+      share_insights_ok: +document.getElementById("share_insights_ok").checked,
+      for_term_limits: +document.getElementById("for_term_limits").checked,
+      issue_public_lands: +document.getElementById("issue_public_lands").checked,
+      comments: document.getElementById("comments").value || null
+    };
+    if (!payload.voter_id) { alert("No voter selected."); return; }
+    if (!payload.outcome) { alert("Choose an outcome."); return; }
+
+    try {
+      setMsg("Saving...");
+  await jsonFetch(API("/complete"), { method: "POST", body: JSON.stringify(payload) });
+      // reset a few fields
+      document.getElementById("outcome").value = "";
+      document.getElementById("best_day").value = "";
+      document.getElementById("best_time_window").value = "";
+      document.getElementById("email").value = "";
+      document.getElementById("comments").value = "";
+      ["ok_callback","requested_info","dnc","optin_sms","optin_email",
+       "wants_volunteer","share_insights_ok","for_term_limits","issue_public_lands"]
+       .forEach(id => document.getElementById(id).checked = false);
+      setMsg("Saved.");
+      // remember and fetch next
+      const vid = voterCard.dataset.voter;
+      if (vid) pushSeen(vid);
+      nextVoter();
+    } catch (e) {
+      setMsg(`Save failed: ${e.message}`, "error");
+    }
+  }
+  // make Skip also record the current id so we don’t bounce back to it
+  document.getElementById("skipBtn").addEventListener("click", () => {
+    const vid = voterCard.dataset.voter;
+    if (vid) pushSeen(vid);
+    nextVoter();
+  });
+
+  // Keyboard shortcut: N = Get Next
+  window.addEventListener("keydown", (e) => {
+    if (e.key.toLowerCase() === "n" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault(); nextVoter();
+    }
+  });
+
+  const filters = getFilters();
+  showFiltersBadge(filters);
+  (async () => {
+    await loadWho();     // don’t block if this fails; loadWho() already swallows errors
+    await nextVoter();   // show a voter immediately
+  })();
+</script>
