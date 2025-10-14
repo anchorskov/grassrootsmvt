@@ -1,44 +1,8 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Connecting…</title>
-  <style>
-    html,body {height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;}
-    .wrap{height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:.5rem}
-    .spinner{width:36px;height:36px;border:3px solid #ddd;border-top-color:#555;border-radius:50%;animation:spin 1s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .err{color:#c53030;margin-top:1rem;padding:0.5rem;background:#fed7d7;border-radius:4px;display:none}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <div class="spinner"></div>
-    <div>Connecting to API…</div>
-    <div id="err" class="err"></div>
-  </div>
-  <script type="module">
-import { buildAccessLoginUrl } from "./src/utils/accessUrl.js";
-
-(async () => {
-  const returnTo = new URL(location.href).searchParams.get("to")
-                 || "https://volunteers.grassrootsmvt.org/";
-  const apiHost = "api.grassrootsmvt.org";
-
-  // public config (Bypass policy)
-  const conf = await fetch("https://api.grassrootsmvt.org/auth/config", { credentials: "omit" }).then(r => r.json());
-  const teamDomain = conf.teamDomain?.replace(/\/$/, "");
-  const finishUrl  = "https://api.grassrootsmvt.org/auth/finish?to=" + encodeURIComponent(returnTo);
-
-  const loginUrl = buildAccessLoginUrl({ teamDomain, apiHost, finishUrl });
-  // Top-level navigation only (sets proper cookies)
-  location.replace(loginUrl);
-})().catch(err => {
-  console.error("Access connect failed:", err);
-  document.getElementById("err").textContent = String(err?.message || err);
-  document.getElementById("err").style.display = "block";
-});
-  </script>
-</body>
-</html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Redirecting...</title>
+<script>
+// This page is deprecated - redirect to main page
+location.replace('/');
+</script>

@@ -87,8 +87,8 @@ export default {
     if (url.pathname === "/auth/config") {
       const allowedOrigin = pickAllowedOrigin(request, env) || "https://volunteers.grassrootsmvt.org";
       return new Response(JSON.stringify({
-        teamDomain: env.TEAM_DOMAIN,
-        policyAud: env.POLICY_AUD
+        teamDomain: "https://skovgard.cloudflareaccess.com",
+        policyAud: "76fea0745afec089a3eddeba8d982b10aab6d6f871e43661cb4977765b78f3f0"
       }), {
         headers: withCorsHeaders({
           "Content-Type": "application/json"
@@ -96,16 +96,80 @@ export default {
       });
     }
 
+    // Tiny fast-path for the connecting probe (already has Access cookies)
     if (url.pathname === "/api/ping") {
-      return new Response(JSON.stringify({
-        ok: true,
-        worker: "grassrootsmvt",
-        environment: env.ENVIRONMENT || "unknown",
-        timestamp: Date.now()
-      }), { 
-        status: 200,
-        headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
-      });
+      // If Access is already present, return quick OK/204 so browser returns immediately.
+      const hasCfAuth = request.headers.get("Cookie")?.includes("CF_Authorization=");
+      const finishUrl = url.searchParams.get("finish");
+      
+      if (hasCfAuth && finishUrl) {
+        // Already authenticated, redirect to finish URL
+        return Response.redirect(finishUrl, 302);
+      } else if (hasCfAuth) {
+        // Already authenticated, normal ping response
+        return new Response(JSON.stringify({
+          ok: true,
+          worker: "grassrootsmvt",
+          environment: env.ENVIRONMENT || "unknown",
+          timestamp: Date.now()
+        }), { 
+          status: 200,
+          headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+        });
+      }
+      // else: fall through; Access will intercept and 302 to team domain.
+    }
+
+    // Error logging endpoint - public endpoint for debugging Access URL issues
+    if (url.pathname === "/api/error-log" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const timestamp = new Date().toISOString();
+        
+        // Log to Cloudflare Worker console for immediate debugging
+        console.log(`[ERROR-LOG ${timestamp}]`, JSON.stringify({
+          sessionId: body.sessionId,
+          logCount: body.logs?.length || 0,
+          userAgent: body.meta?.userAgent,
+          location: body.meta?.location,
+          logs: body.logs || []
+        }, null, 2));
+
+        // Check for critical AUD-in-path patterns
+        const audInPathLogs = (body.logs || []).filter(log => log.patterns?.isAudInPath);
+        const status404Logs = (body.logs || []).filter(log => log.status === 404);
+        
+        if (audInPathLogs.length > 0) {
+          console.error(`🚨 CRITICAL: ${audInPathLogs.length} AUD-in-path URLs detected:`, audInPathLogs);
+        }
+        
+        if (status404Logs.length > 0) {
+          console.error(`🚨 Access 404 errors detected:`, status404Logs);
+        }
+
+        return new Response(JSON.stringify({
+          ok: true,
+          received: body.logs?.length || 0,
+          timestamp: timestamp,
+          audInPathDetected: audInPathLogs.length,
+          status404Detected: status404Logs.length
+        }), {
+          headers: withCorsHeaders({
+            "Content-Type": "application/json"
+          }, allowedOrigin)
+        });
+      } catch (error) {
+        console.error('Error logging endpoint failed:', error);
+        return new Response(JSON.stringify({
+          ok: false,
+          error: 'Failed to process error logs'
+        }), {
+          status: 500,
+          headers: withCorsHeaders({
+            "Content-Type": "application/json"
+          }, allowedOrigin)
+        });
+      }
     }
 
     if (url.pathname === "/api/whoami") {

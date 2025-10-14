@@ -5,27 +5,25 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>GrassrootsMVT Volunteer Hub</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 1rem; max-width: 880px; position: relative; }
-  .auth-status { position: fixed; top: 8px; right: 8px; z-index: 100; font-size: .875rem; padding: .5rem .75rem; border-radius: 8px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+  body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 880px; pos  console.log('🚀 GrassrootsMVT initializing...');tion: relative; }
+  .auth-status { position: fixed; top: 8px; right: 8px; z-index: 100; font-size: 0.875rem; padding: 0.5rem 0.75rem; border-radius: 8px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
   .card { border:1px solid #e5e7eb; border-radius: 12px; padding: 1rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
   .row { display:flex; gap:1rem; flex-wrap: wrap; }
   .row > * { flex:1 1 220px; }
   label { display:block; margin:.4rem 0 .25rem; font-weight:600; }
   select, input[type=number] { width:100%; padding:.6rem; border:1px solid #cbd5e1; border-radius:8px; }
   .muted { color:#64748b; }
-  .btns { display:flex; gap:.75rem; flex-wrap: wrap; margin-top:.75rem; align-items:center; }
+  .btns { display:flex; gap:.75rem; flex-wrap: wrap; margin-top:.75rem; }
   button { padding:.7rem 1.1rem; border-radius:10px; border:0; font-weight:700; cursor:pointer; }
   button.primary { background:#0ea5e9; color:white; }
   button.secondary { background:#e2e8f0; color:#0f172a; }
   button[disabled] { opacity:.5; cursor:not-allowed; }
   .chips { display:flex; gap:.5rem; flex-wrap: wrap; }
-  a { color: #0ea5e9; }
 </style>
 </head>
 
 <body>
-<!-- Sign in to API banner (shown only if initializeAuthStatus says we’re not ready) -->
+<!-- Sign in to API banner (shown only if ensureApiSession() detects no API session) -->
 <div id="api-session-banner" style="display:none; padding:12px; background:#fff3cd; color:#3d3a00; border:1px solid #ffe69c; border-radius:8px; margin:12px 0;">
   <strong>Action needed:</strong>
   Please <a data-api-login href="#" style="text-decoration:underline;">sign in to the API</a> to continue.
@@ -263,104 +261,34 @@
 </script>
 
 <script type="module">
-// Inline direct API kick implementation to bypass caching issues
-const API_BASE = 'https://api.grassrootsmvt.org';
-
-// Ensure we're authenticated *before* making any API fetches.
-export function ensureAccessSession() {
-  const ready = sessionStorage.getItem('accessReady:v1') === 'true';
-  if (!ready) {
-    // Direct kick to protected endpoint - no interstitial needed
-    const returnTo = encodeURIComponent(location.href);
-    window.location.replace(`https://api.grassrootsmvt.org/api/ping?finish=${encodeURIComponent(`https://api.grassrootsmvt.org/auth/finish?to=${returnTo}`)}`);
-    // Return a pending promise so callers don't proceed
-    return new Promise(() => {});
-  }
-  return Promise.resolve();
-}
-
-// Call this once when your UI loads (e.g., in main.js or on DOMContentLoaded)
-export async function initializeAuthStatus() {
-  try {
-    // a lightweight, credentialed call — if we're not allowed,
-    // the browser would hit CORS/redirect, so we proactively kick instead.
-    const res = await fetch(`${API_BASE}/auth/config`, { credentials: 'include' });
-    if (res.ok) {
-      sessionStorage.setItem('accessReady:v1', 'true');
-      return true;
-    }
-  } catch (_) { /* fall through */ }
-  sessionStorage.removeItem('accessReady:v1');
-  // if not authenticated → top-level nav to a protected endpoint
-  // Cloudflare Access will 302 to team domain and back to /auth/finish
-  const returnTo = encodeURIComponent(location.href);
-  location.replace(`https://api.grassrootsmvt.org/api/ping?finish=${encodeURIComponent(`https://api.grassrootsmvt.org/auth/finish?to=${returnTo}`)}`);
-  return false;
-}
-
-// Centralized API fetch with credentials
-export async function apiFetch(path, options = {}) {
-  await ensureAccessSession(); // make sure we kicked, if needed
-  const res = await fetch(`${API_BASE}${path}`, {
-    credentials: 'include',
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-  });
-  // If something still goes sideways (e.g., Access cookie expired), re-kick.
-  if (res.status === 401 || res.status === 403) {
-    sessionStorage.removeItem('accessReady:v1');
-    // Direct kick to protected endpoint - no interstitial needed
-    const returnTo = encodeURIComponent(location.href);
-    window.location.replace(`https://api.grassrootsmvt.org/api/ping?finish=${encodeURIComponent(`https://api.grassrootsmvt.org/auth/finish?to=${returnTo}`)}`);
-    return new Promise(() => {});
-  }
-  return res;
-}
-
-function showBanner() {
-  const banner = document.getElementById('api-session-banner');
-  banner.style.display = '';
-  const link = banner.querySelector('[data-api-login]');
-  link.addEventListener('click', (e) => {
-    e.preventDefault();
-    // Direct kick to protected API endpoint
-    const returnTo = encodeURIComponent(location.href);
-    location.href = `https://api.grassrootsmvt.org/api/ping?finish=${encodeURIComponent(`https://api.grassrootsmvt.org/auth/finish?to=${returnTo}`)}`;
-  });
-}
+import { initializeAuthStatus, apiFetch } from './src/apiClient.js';
 
 // Initialize authentication on page load
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log('🚀 GrassrootsMVT initializing...');
-
-  // initializeAuthStatus should:
-  //  - check API with credentials
-  //  - if not ready, navigate directly to protected API endpoint
-  const isAuthenticated = await initializeAuthStatus().catch(() => false);
-
-  const indicator = document.querySelector('.online-indicator');
+  console.log('� GrassrootsMVT initializing...');
+  
+  // This will check auth status and redirect to /connecting if needed
+  const isAuthenticated = await initializeAuthStatus();
+  
   if (isAuthenticated) {
+    console.log('✅ Authentication verified, app ready');
+    
+    // Update auth status display
+    const indicator = document.querySelector('.online-indicator');
     if (indicator) {
       indicator.textContent = '✅ Authenticated';
       indicator.parentElement.style.background = '#dcfce7';
       indicator.parentElement.style.color = '#166534';
     }
-    // Optional: test API access
+    
+    // Test API access
     try {
-      const res = await apiFetch('/api/whoami');
-      const data = await res.json();
+      const response = await apiFetch('/api/whoami');
+      const data = await response.json();
       console.log('👤 User info:', data);
-    } catch (err) {
-      console.warn('⚠️ API test failed:', err);
+    } catch (error) {
+      console.warn('⚠️ API test failed:', error);
     }
-  } else {
-    if (indicator) {
-      indicator.textContent = '⚠️ Not signed in';
-      indicator.parentElement.style.background = '#fee2e2';
-      indicator.parentElement.style.color = '#991b1b';
-    }
-    // If initializeAuthStatus didn’t already redirect, show banner as a fallback.
-    showBanner();
   }
 });
 </script>

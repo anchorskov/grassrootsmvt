@@ -33,6 +33,9 @@ ENVIRONMENT = "production"
 ALLOW_ORIGIN = "https://volunteers.grassrootsmvt.org,https://grassrootsmvt-production.pages.dev"
 DATA_BACKEND = "d1"
 DEBUG_CORS = "false"
+TEAM_DOMAIN = "https://skovgard.cloudflareaccess.com"
+POLICY_AUD  = "76fea0745afec089a3eddeba8d982b10aab6d6f871e43661cb4977765b78f3f0"
+
 
 # ✅ Production D1 Database
 [[env.production.d1_databases]]

@@ -4,7 +4,7 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "miniflare": "^4.20251004.0",
-    "wrangler": "^4.42.1"
+    "wrangler": "^4.43.0"
   },
   "dependencies": {
     "jose": "^6.1.0"
@@ -14,7 +14,7 @@
     "deploy:pages": "npx wrangler pages deploy ./ui --project-name=grassrootsmvt --commit-dirty=true",
     "verify:functions": "curl -sS -H 'Authorization: Bearer $CF_API_TOKEN' https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1 | jq '.result[0].uses_functions'",
     "deploy:check": "bash ./scripts/deploy_and_check.sh",
-    "zip:review": "zip -r ./grassroots-review.zip worker/wrangler.toml worker/src/index.js ui/connecting.html ui/index.html ui/src/apiClient.js README.md ACCESS.md DEPLOYING.md"
+    "zip:review": "zip -r ./grassroots-review.zip worker/wrangler.toml worker/src/index.js ui/index.html ui/src/apiClient.js README.md ACCESS.md DEPLOYING.md"
   },
   "name": "grassrootsmvt",
   "version": "1.0.0",

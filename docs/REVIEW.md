@@ -3,13 +3,13 @@
 ## What Changed
 
 ### 1. Fixed Access Login URL Format
-- **Before**: `/cdn-cgi/access/login/<HOSTNAME>?kid=<AUD>` (causing 400 Bad Request)
-- **After**: `/cdn-cgi/access/login/<AUD>?redirect_url=<URL>` (correct format)
+- **Before**: `/cdn-cgi/access/login/<AUD>?redirect_url=<URL>` (causing 404 Not Found)
+- **After**: `/cdn-cgi/access/login/<HOSTNAME>?redirect_url=<URL>` (correct format)
 
 ### 2. Updated Interstitial Auth Flow
-- **ui/connecting.html**: Now uses AUD directly in path instead of kid parameter
+- **ui/connecting.html**: Now uses hostname-in-path format instead of AUD-in-path
 - **ui/src/apiClient.js**: Updated to use `returnTo` sessionStorage key consistently
-- Removed deprecated `kid` parameter approach that was causing 400 errors
+- Removed AUD-in-path approach that was causing 404 errors
 
 ### 3. Ensured Credentials Include
 - All API calls maintain `credentials: "include"` for proper cookie handling
@@ -65,7 +65,7 @@ Expected: Access SSO flow, then return to UI (no 400 error)
 
 ## Key Technical Details
 
-- **Access URL Format**: `https://skovgard.cloudflareaccess.com/cdn-cgi/access/login/<POLICY_AUD>`
+- **Access URL Format**: `https://skovgard.cloudflareaccess.com/cdn-cgi/access/login/<HOSTNAME>`
 - **Session Keys**: Using `returnTo` for consistent navigation flow
 - **CORS Headers**: Maintained proper `Access-Control-Allow-Credentials: true`
 - **Public Endpoint**: `/auth/config` bypasses Access and returns config data
