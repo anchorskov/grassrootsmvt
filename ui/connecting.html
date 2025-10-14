@@ -36,7 +36,10 @@
     const { teamDomain, policyAud } = await res.json();
 
     // team-domain Access login URL (matches current Access config)
-    const loginUrl = `${teamDomain.replace(/\/$/, '')}/cdn-cgi/access/login/${policyAud}?redirect_url=${encodeURIComponent(finishUrl)}`;
+    // Cloudflare is configured to use the host-in-path login format:
+    //   /cdn-cgi/access/login/<hostname>?redirect_url=...
+    const apiHost = new URL(apiOrigin).host; // e.g. "api.grassrootsmvt.org"
+    const loginUrl = `${teamDomain.replace(/\/$/, '')}/cdn-cgi/access/login/${apiHost}?redirect_url=${encodeURIComponent(finishUrl)}`;
     location.replace(loginUrl);
   })().catch(() => { /* best-effort fallback */ location.href = 'https://volunteers.grassrootsmvt.org/'; });
   </script>
