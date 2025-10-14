@@ -1,46 +1,42 @@
 <!doctype html>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Connecting…</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { margin:0; display:grid; place-items:center; min-height:100dvh; font:16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
-  .box { text-align:center; padding:2rem; }
-  .spin { width:44px; height:44px; border:4px solid transparent; border-top-color: currentColor; border-radius:50%; animation: r .8s linear infinite; margin:0 auto 1rem; }
-  @keyframes r { to { transform: rotate(360deg) } }
-</style>
-<div class="box">
-  <div class="spin"></div>
-  <h1>Connecting to API…</h1>
-  <p>This can take a moment while we verify your Access login.</p>
-</div>
-<script>
-(async () => {
-  // 1) Public config (no creds)
-  const cfg = await fetch("https://api.grassrootsmvt.org/auth/config", { credentials: "omit" })
-    .then(r => r.json());
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Connecting…</title>
+    <style>
+      html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system,
+        Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
+      .wrap { height: 100%; display: grid; place-items: center; color: #111827; }
+      .card { text-align: center; padding: 2rem 2.5rem; border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06); }
+      .spinner { width: 36px; height: 36px; border-radius: 50%;
+        border: 3px solid #e5e7eb; border-top-color: #111827; animation: spin 1s linear infinite; margin: 0 auto 12px; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .muted { color: #6b7280; font-size: .925rem; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        <div class="spinner" aria-hidden="true"></div>
+        <h1>Connecting to API…</h1>
+        <p class="muted">We’re securely verifying your session.</p>
+        <noscript>
+          <p class="muted">JavaScript is required to continue.</p>
+        </noscript>
+      </div>
+    </div>
 
-  // Expected fields from worker: teamDomain (full origin or bare), policyAud
-  // Normalize teamDomain to origin
-  const team = cfg.teamDomain.replace(/\/+$/, ""); // trim trailing slash
-  const policyAud = cfg.policyAud;
-
-  // 2) Where to send the user *back* after Access grants a session:
-  //    Access will redirect to worker: /auth/finish?to=<encoded-ui-url>
-  const uiTarget = sessionStorage.getItem("access.to") || window.location.origin + "/";
-  const finishOnWorker = "https://api.grassrootsmvt.org/auth/finish?to=" + encodeURIComponent(uiTarget);
-
-  // 3) Build Access login URL in the same pattern CF uses in its own 302s:
-  //    /cdn-cgi/access/login/<HOSTNAME>?kid=<AUD>&redirect_url=<...>
-  const apiHostname = "api.grassrootsmvt.org";
-  const loginUrl = `${team}/cdn-cgi/access/login/${apiHostname}` +
-                   `?kid=${encodeURIComponent(policyAud)}` +
-                   `&redirect_url=${encodeURIComponent(finishOnWorker)}`;
-
-  // Optional: remember where we were before navigating
-  sessionStorage.setItem("access.to", uiTarget);
-
-  // Go (top-level navigation avoids CORS and Storage issues)
-  window.location.replace(loginUrl);
-})();
-</script>
+    <script>
+      (function () {
+        var API_BASE = "https://api.grassrootsmvt.org";
+        var to = new URLSearchParams(location.search).get("to")
+              || "https://volunteers.grassrootsmvt.org/";
+        var finish = API_BASE + "/auth/finish?to=" + encodeURIComponent(to);
+        var login  = API_BASE + "/cdn-cgi/access/login?redirect_url=" + encodeURIComponent(finish);
+        location.replace(login);
+      })();
+    </script>
+  </body>
+</html>
