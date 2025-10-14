@@ -2,57 +2,34 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta http-equiv="cache-control" content="no-store" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Connecting…</title>
   <style>
-    html,body{height:100%;margin:0}
-    body{display:flex;align-items:center;justify-content:center;font:16px system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,sans-serif;color:#111;background:#fff}
-    .box{display:flex;gap:.75rem;align-items:center}
-    .spinner{width:18px;height:18px;border:2px solid rgba(0,0,0,.15);border-top-color:rgba(0,0,0,.7);border-radius:50%;animation:spin .9s linear infinite}
+    html,body {height:100%;margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,"Helvetica Neue",Arial;}
+    .wrap{height:100%;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:.5rem}
+    .spinner{width:36px;height:36px;border:3px solid #ddd;border-top-color:#555;border-radius:50%;animation:spin 1s linear infinite}
     @keyframes spin{to{transform:rotate(360deg)}}
-    .muted{color:#666;font-size:.9rem}
   </style>
 </head>
 <body>
-  <div class="box">
-    <div class="spinner" aria-hidden="true"></div>
-    <div>
-      <div><strong>Connecting to API…</strong></div>
-      <div class="muted" id="status">Starting sign-in…</div>
-    </div>
+  <div class="wrap">
+    <div class="spinner"></div>
+    <div>Connecting to API…</div>
   </div>
   <script>
-    (async () => {
-      const status = (t)=>{document.getElementById('status').textContent=t};
-      const urlParams = new URLSearchParams(location.search);
-      const returnTo = urlParams.get('to') || (document.referrer || 'https://volunteers.grassrootsmvt.org/');
-      const apiOrigin = 'https://api.grassrootsmvt.org';
-      const finishUrl = `${apiOrigin}/auth/finish?to=${encodeURIComponent(returnTo)}`;
+    (function () {
+      const API_ORIGIN = "https://api.grassrootsmvt.org";
 
-      // Strategy A (preferred): Let Cloudflare issue the correct 302.
-      // Top-level navigation to a protected endpoint (NO XHR).
-      try {
-        status('Redirecting via protected endpoint…');
-        location.replace(`${apiOrigin}/api/ping?__login=1&to=${encodeURIComponent(returnTo)}`);
-        return; // browser navigates away
-      } catch (e) {
-        // If the browser somehow blocks, fall through.
-      }
+      // Where we want to land in the UI after auth
+      const url = new URL(window.location.href);
+      const to = url.searchParams.get("to") || "https://volunteers.grassrootsmvt.org/";
 
-      // Strategy B (fallback): Use team-domain login with the HOSTNAME path variant,
-      // which matches what Cloudflare returns in its own 302 Location.
-      try {
-        status('Falling back to team login…');
-        // Pull team domain dynamically (public)
-        const cfg = await fetch(`${apiOrigin}/auth/config`, { credentials: 'omit' }).then(r => r.json());
-        const team = (cfg.teamDomain || '').replace(/\/+$/,''); // e.g. https://skovgard.cloudflareaccess.com
-        const loginUrl = `${team}/cdn-cgi/access/login/api.grassrootsmvt.org?redirect_url=${encodeURIComponent(finishUrl)}`;
-        location.replace(loginUrl);
-      } catch (e) {
-        status('Unable to start sign-in. Please reload.');
-        console.error('Access connect error:', e);
-      }
+      // IMPORTANT: navigate to a PROTECTED API URL and let Cloudflare do the 302
+      // Never construct /cdn-cgi/access/login ourselves.
+      const finishUrl = `${API_ORIGIN}/auth/finish?to=${encodeURIComponent(to)}`;
+
+      // Top-level navigation = no CORS/XHR; browser follows Cloudflare redirects
+      window.location.replace(finishUrl);
     })();
   </script>
 </body>
