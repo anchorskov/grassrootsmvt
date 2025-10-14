@@ -36,8 +36,10 @@
     const { teamDomain } = await res.json();
 
     // Use the bulletproof hostname format that matches Access configuration
-    const apiHost = new URL(apiOrigin).host; // e.g. "api.grassrootsmvt.org"
-    const loginUrl = `${teamDomain.replace(/\/$/, '')}/cdn-cgi/access/login/${apiHost}?redirect_url=${encodeURIComponent(finishUrl)}`;
+    const apiHost  = new URL(apiOrigin).host;
+    let loginUrl   = `${teamDomain}/cdn-cgi/access/login/${apiHost}?redirect_url=${encodeURIComponent(finishUrl)}`;
+    loginUrl = loginUrl.replace(/(\/cdn-cgi\/access\/login)\/[a-f0-9]{32,}/i, `$1/${apiHost}`);
+    console.info("🔐 Access login URL (host-in-path):", loginUrl);
     
     location.replace(loginUrl);
   })().catch(() => { /* best-effort fallback */ location.href = 'https://volunteers.grassrootsmvt.org/'; });

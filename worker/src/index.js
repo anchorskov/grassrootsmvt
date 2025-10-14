@@ -96,6 +96,21 @@ export default {
       });
     }
 
+    // Public helper to emit canonical login URL (host-in-path)
+    if (url.pathname === '/auth/login-url' && request.method === 'GET') {
+      const ui = url.searchParams.get('to') || env.UI_ORIGIN || "https://volunteers.grassrootsmvt.org";
+      const apiBase = new URL(request.url).origin; // https://api.grassrootsmvt.org
+      const apiHost = new URL(apiBase).host;   // api.grassrootsmvt.org
+      const finish  = `${apiBase}/auth/finish?to=${encodeURIComponent(ui)}`;
+      const loginUrl = `${env.TEAM_DOMAIN}/cdn-cgi/access/login/${apiHost}?redirect_url=${encodeURIComponent(finish)}`;
+      const allowedOrigin = pickAllowedOrigin(request, env) || "https://volunteers.grassrootsmvt.org";
+      return new Response(JSON.stringify({ loginUrl }), {
+        headers: withCorsHeaders({
+          'Content-Type': 'application/json'
+        }, allowedOrigin)
+      });
+    }
+
     if (url.pathname === "/api/ping") {
       return new Response(JSON.stringify({
         ok: true,
