@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"/>
+  <meta http-equiv="Pragma" content="no-cache"/>
+  <meta http-equiv="Expires" content="0"/>
+  <title>Connecting…</title>
+  <style>
+    html,body{height:100%;margin:0}
+    body{display:grid;place-items:center;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Arial,sans-serif;background:#0b0f19;color:#e6e6e6}
+    .card{padding:24px 28px;border-radius:16px;background:#151b2b;box-shadow:0 6px 20px rgba(0,0,0,.35);text-align:center;max-width:520px}
+    .spinner{width:24px;height:24px;border-radius:50%;border:3px solid #3b82f6;border-top-color:transparent;margin:10px auto;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .sub{opacity:.8;font-size:14px;margin-top:6px}
+    code{background:#0f1422;border:1px solid #1e293b;padding:.1rem .35rem;border-radius:6px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div>Connecting to API…</div>
+    <div class="spinner"></div>
+    <div class="sub">Securing your session via Cloudflare Access</div>
+  </div>
+  <script>
+    (async function(){
+      // Helper: small sleep
+      const wait = (ms)=>new Promise(r=>setTimeout(r,ms));
+      const RETRIES = 4;
+
+      // Normalize a team domain string into https://<team>.cloudflareaccess.com
+      function normalizeTeamDomain(input){
+        if(!input) return null;
+        let s = String(input).trim();
+        // Accept values like "skovgard.cloudflareaccess.com" or "https://skovgard.cloudflareaccess.com"
+        if(!/^https?:\/\//i.test(s)) s = "https://" + s;
+        // Strip trailing slash
+        s = s.replace(/\/+$/,"");
+        return s;
+      }
+
+      // Build the Access login URL
+      function buildLoginURL(teamDomain, policyAud, returnTo){
+        const base = normalizeTeamDomain(teamDomain);
+        if(!base) throw new Error("Missing teamDomain");
+        if(!policyAud) throw new Error("Missing policyAud");
+        const authFinish = "https://api.grassrootsmvt.org/auth/finish?to=" + encodeURIComponent(returnTo);
+        // Use the newer path form: /cdn-cgi/access/login/<AUD>
+        return `${base}/cdn-cgi/access/login/${policyAud}?redirect_url=${encodeURIComponent(authFinish)}`;
+      }
+
+      // Fetch public auth config from the Worker
+      async function fetchConfig(){
+        const res = await fetch("https://api.grassrootsmvt.org/auth/config", {
+          credentials: "omit",
+          cache: "no-store",
+          referrerPolicy: "no-referrer"
+        });
+        if(!res.ok){
+          throw new Error("config " + res.status);
+        }
+        return res.json();
+      }
+
+      // Main: try to get config with a couple of retries (in case Access just updated)
+      let config;
+      for(let i=0;i<RETRIES;i++){
+        try {
+          config = await fetchConfig();
+          break;
+        } catch(err){
+          if(i === RETRIES-1) throw err;
+          await wait(250 * (i+1));
+        }
+      }
+
+      const returnUrl = sessionStorage.getItem("access:returnTo") || (location.origin + "/");
+      const loginUrl = buildLoginURL(config.teamDomain, config.policyAud, returnUrl);
+
+      // Hand off to Cloudflare Access (top-level navigation = sets cookies correctly)
+      location.replace(loginUrl);
+    })().catch(err=>{
+      console.error("Connecting error", err);
+      document.querySelector(".sub").innerHTML = "Could not reach authentication service. <br/>Please refresh or try again.";
+    });
+  </script>
+</body>
+</html>
