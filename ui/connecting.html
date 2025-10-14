@@ -5,39 +5,40 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Connecting…</title>
   <style>
-    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-           display:grid; place-items:center; min-height:100dvh; background:#0b1220; color:#e6edf3; }
-    .card { width:min(560px, 92vw); background:#0e1628; border:1px solid #21304a; border-radius:16px; padding:28px 22px;
-            box-shadow: 0 12px 28px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04); text-align:center; }
-    .spinner { width:36px; height:36px; border-radius:50%; border:4px solid rgba(255,255,255,.15); 
-               border-top-color:#7aa2ff; animation:spin 1s linear infinite; margin:0 auto 14px; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .sub { color:#9fb1d1; font-size:14px; margin-top:4px; }
+    html,body{height:100%;margin:0}
+    body{display:grid;place-items:center;font:16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;color:#111;background:#fff}
+    .card{display:flex;gap:.75rem;align-items:center;padding:1rem 1.25rem;border:1px solid #e5e7eb;border-radius:12px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+    .spinner{width:16px;height:16px;border:2px solid #e5e7eb;border-top-color:#111;border-radius:50%;animation:spin .8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .sub{color:#6b7280;font-size:.9rem}
   </style>
 </head>
 <body>
   <div class="card">
-    <div class="spinner"></div>
-    <h1 style="font-size:18px; margin:8px 0 4px;">Connecting to API…</h1>
-    <div class="sub">We'll take you back in a moment.</div>
+    <div class="spinner" aria-hidden="true"></div>
+    <div>
+      <div><strong>Connecting to API…</strong></div>
+      <div class="sub">Verifying Cloudflare Access</div>
+    </div>
   </div>
-
   <script>
-    (async () => {
-      // Where to return after Access finishes
-      const uiOrigin = 'https://volunteers.grassrootsmvt.org';
-      const apiOrigin = 'https://api.grassrootsmvt.org';
+  (async () => {
+    const uiOrigin  = 'https://volunteers.grassrootsmvt.org';
+    const apiOrigin = 'https://api.grassrootsmvt.org';
 
-      // Return to whatever page brought us here (default: UI root)
-      const from = new URLSearchParams(location.search).get('to') || uiOrigin + '/';
-      const finishUrl = apiOrigin + '/auth/finish?to=' + encodeURIComponent(from);
+    // where to send the user back on success
+    const to = new URLSearchParams(location.search).get('to') || (uiOrigin + '/');
+    const finishUrl = apiOrigin + '/auth/finish?to=' + encodeURIComponent(to);
 
-      // ✅ Correct endpoint: login on the API host (no <AUD> segment)
-      const loginUrl = apiOrigin + '/cdn-cgi/access/login?redirect_url=' + encodeURIComponent(finishUrl);
+    // fetch public config (no credentials)
+    const res = await fetch(apiOrigin + '/auth/config', { credentials: 'omit' });
+    if (!res.ok) { location.href = to; return; }
+    const { teamDomain, policyAud } = await res.json();
 
-      // Navigate top-level (no XHR to /cdn-cgi)
-      location.replace(loginUrl);
-    })();
+    // team-domain Access login URL (matches current Access config)
+    const loginUrl = `${teamDomain.replace(/\/$/, '')}/cdn-cgi/access/login/${policyAud}?redirect_url=${encodeURIComponent(finishUrl)}`;
+    location.replace(loginUrl);
+  })().catch(() => { /* best-effort fallback */ location.href = 'https://volunteers.grassrootsmvt.org/'; });
   </script>
 </body>
 </html>
