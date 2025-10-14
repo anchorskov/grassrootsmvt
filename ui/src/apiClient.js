@@ -10,9 +10,10 @@
   
   // Start the Access login round trip via top-level navigation
   function startAccessLoginRoundTrip() {
-  try { sessionStorage.setItem("access:returnTo", window.location.href); } catch(_) {}
-  window.location.href = '/connecting.html';
-}
+    const here = window.location.href;
+    sessionStorage.setItem("access.returnTo", here);
+    window.location.assign(`/connecting.html?to=${encodeURIComponent(here)}`);
+  }
 
   // Check if Access session is ready, start login if not
   function ensureAccessSession() {
