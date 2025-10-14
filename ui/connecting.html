@@ -27,7 +27,9 @@
   const returnTarget = new URL(to, "https://volunteers.grassrootsmvt.org").toString();
   const finishURL = "https://api.grassrootsmvt.org/auth/finish?to=" + encodeURIComponent(returnTarget);
 
-  const primaryLogin = `https://${cleanTeam}/cdn-cgi/access/login/${policyAud}?redirect_url=${encodeURIComponent(finishURL)}`;
+  // Fixed: Use the correct Access URL pattern with hostname and kid parameter
+  const hostname = "api.grassrootsmvt.org"; // The hostname being protected by Access
+  const primaryLogin = `https://${cleanTeam}/cdn-cgi/access/login/${hostname}?kid=${encodeURIComponent(policyAud)}&redirect_url=${encodeURIComponent(finishURL)}`;
   const fallbackLogin = `https://${cleanTeam}/cdn-cgi/access/login?aud=${encodeURIComponent(policyAud)}&redirect_url=${encodeURIComponent(finishURL)}`;
 
   sessionStorage.setItem("access.returnTo", returnTarget);
