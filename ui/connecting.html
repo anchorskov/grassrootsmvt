@@ -2,27 +2,111 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
+  <meta
+    http-equiv="Cache-Control"
+    content="no-store, no-cache, must-revalidate, max-age=0"
+  />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate, max-age=0"/>
-  <meta http-equiv="Pragma" content="no-cache"/>
-  <meta http-equiv="Expires" content="0"/>
   <title>Connecting…</title>
   <style>
-    html,body{height:100%;margin:0}
-    body{display:grid;place-items:center;font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,Arial,sans-serif;background:#0b0f19;color:#e6e6e6}
-    .card{padding:24px 28px;border-radius:16px;background:#151b2b;box-shadow:0 6px 20px rgba(0,0,0,.35);text-align:center;max-width:520px}
-    .spinner{width:24px;height:24px;border-radius:50%;border:3px solid #3b82f6;border-top-color:transparent;margin:10px auto;animation:spin 1s linear infinite}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .sub{opacity:.8;font-size:14px;margin-top:6px}
-    code{background:#0f1422;border:1px solid #1e293b;padding:.1rem .35rem;border-radius:6px}
+    :root {
+      --bg: #0b1020;
+      --fg: #e8eefc;
+      --muted: #9fb0d7;
+      --ring: #7aa2ff;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f7f9ff;
+        --fg: #0c1634;
+        --muted: #5f7096;
+        --ring: #2956ff;
+      }
+    }
+    * { box-sizing: border-box }
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: radial-gradient(1200px 700px at 50% -10%, rgba(122,162,255,.08), transparent),
+                  var(--bg);
+      color: var(--fg);
+      font: 16px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Inter, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
+    }
+    .wrap {
+      min-height: 100%;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .card {
+      width: min(520px, 92vw);
+      background: color-mix(in hsl, var(--bg) 90%, #fff 10%);
+      border: 1px solid color-mix(in hsl, var(--fg) 10%, transparent);
+      border-radius: 18px;
+      padding: 28px 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,.18);
+      text-align: center;
+    }
+    .brand {
+      font-weight: 650;
+      letter-spacing: .2px;
+      margin: 0 0 8px;
+    }
+    .muted { color: var(--muted); margin: 6px 0 0 }
+    .spinner {
+      width: 44px; height: 44px;
+      margin: 6px auto 16px;
+      border-radius: 50%;
+      border: 4px solid color-mix(in hsl, var(--ring) 35%, transparent);
+      border-top-color: var(--ring);
+      animation: spin 900ms linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(1turn) } }
+    @media (prefers-reduced-motion: reduce) {
+      .spinner { animation: none; border-top-color: color-mix(in hsl, var(--ring) 60%, transparent) }
+    }
+    .progress {
+      display: inline-grid; grid-auto-flow: column; gap: 6px;
+      margin: 8px 0 0;
+    }
+    .dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--muted); opacity: .5;
+      animation: pulse 1.4s ease-in-out infinite;
+    }
+    .dot:nth-child(2){ animation-delay: .15s }
+    .dot:nth-child(3){ animation-delay: .3s }
+    @keyframes pulse {
+      50% { opacity: 1; transform: translateY(-2px) }
+    }
+    .help {
+      margin-top: 14px; font-size: .9rem;
+    }
+    .link {
+      color: var(--fg); text-decoration: underline dotted;
+      text-underline-offset: 3px;
+    }
+    .sr { position: absolute; left: -9999px }
   </style>
 </head>
 <body>
-  <div class="card">
-    <div>Connecting to API…</div>
-    <div class="spinner"></div>
-    <div class="sub">Securing your session via Cloudflare Access</div>
+  <div class="wrap">
+    <main class="card" role="status" aria-live="polite" aria-busy="true">
+      <div class="spinner" aria-hidden="true"></div>
+      <h1 class="brand">Connecting to API…</h1>
+      <p class="muted">Verifying your access securely with Cloudflare.</p>
+      <div class="progress" aria-hidden="true">
+        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+      </div>
+      <p class="help muted" id="fallback" hidden>
+        Taking longer than expected.
+        <a class="link" href="#" id="retry">Try again</a> or
+        <a class="link" href="/" id="back">go back</a>.
+      </p>
+      <span class="sr" id="sr">Connecting. Please wait…</span>
+    </main>
   </div>
+
   <script>
     (async function(){
       // Helper: small sleep
@@ -63,27 +147,77 @@
         return res.json();
       }
 
-      // Main: try to get config with a couple of retries (in case Access just updated)
-      let config;
-      for(let i=0;i<RETRIES;i++){
-        try {
-          config = await fetchConfig();
-          break;
-        } catch(err){
-          if(i === RETRIES-1) throw err;
-          await wait(250 * (i+1));
+      // Expose startAccessLoginRoundTrip for the new script integration
+      window.startAccessLoginRoundTrip = async function() {
+        // Main: try to get config with a couple of retries (in case Access just updated)
+        let config;
+        for(let i=0;i<RETRIES;i++){
+          try {
+            config = await fetchConfig();
+            break;
+          } catch(err){
+            if(i === RETRIES-1) throw err;
+            await wait(250 * (i+1));
+          }
         }
-      }
 
-      const returnUrl = sessionStorage.getItem("access:returnTo") || (location.origin + "/");
-      const loginUrl = buildLoginURL(config.teamDomain, config.policyAud, returnUrl);
+        const returnUrl = sessionStorage.getItem("access:returnTo") || (location.origin + "/");
+        const loginUrl = buildLoginURL(config.teamDomain, config.policyAud, returnUrl);
 
-      // Hand off to Cloudflare Access (top-level navigation = sets cookies correctly)
-      location.replace(loginUrl);
+        // Hand off to Cloudflare Access (top-level navigation = sets cookies correctly)
+        location.replace(loginUrl);
+      };
     })().catch(err=>{
       console.error("Connecting error", err);
-      document.querySelector(".sub").innerHTML = "Could not reach authentication service. <br/>Please refresh or try again.";
+      const fallback = document.getElementById("fallback");
+      if (fallback) {
+        fallback.hidden = false;
+        document.querySelector(".muted").innerHTML = "Could not reach authentication service.";
+      }
     });
+
+    // Kick off the Access roundtrip after a tiny paint to avoid layout jump.
+    const start = () => {
+      try {
+        if (window.startAccessLoginRoundTrip) {
+          window.startAccessLoginRoundTrip(); // your global from apiClient.js
+        } else if (window.Access && typeof window.Access.begin === "function") {
+          window.Access.begin();
+        } else {
+          // Fallback: go back to app which should re-trigger the flow
+          location.replace("/");
+        }
+      } catch (e) {
+        showFallback(e);
+      }
+    };
+
+    // Show a gentle fallback with retry if something goes wrong or it takes too long
+    let shown = false;
+    const showFallback = (e) => {
+      if (shown) return; shown = true;
+      const el = document.getElementById("fallback");
+      el.hidden = false;
+      console.debug("Connecting error:", e);
+    };
+
+    // If the network is slow, reveal the fallback affordances after 7s
+    const slowTimer = setTimeout(() => showFallback(new Error("slow-connection")), 7000);
+
+    // Wire up retry/back
+    document.getElementById("retry")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      shown = false;
+      document.getElementById("fallback").hidden = true;
+      start();
+    });
+    document.getElementById("back")?.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      history.length > 1 ? history.back() : location.replace("/");
+    });
+
+    // Give the browser a frame to render before redirecting.
+    requestAnimationFrame(() => setTimeout(start, 50));
   </script>
 </body>
 </html>
