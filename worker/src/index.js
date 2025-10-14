@@ -61,7 +61,16 @@ export default {
 
     // CORS Preflight handler for OPTIONS requests
     if (request.method === "OPTIONS") {
-      return preflightResponse(allowedOrigin);
+      return new Response(null, {
+        status: 204,
+        headers: {
+          'Access-Control-Allow-Origin': allowedOrigin,
+          'Access-Control-Allow-Credentials': 'true',
+          'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Cf-Access-Jwt-Assertion',
+          'Vary': 'Origin'
+        }
+      });
     }
 
     // Auth finish route - returns user to UI after Access login
