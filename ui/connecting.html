@@ -1,42 +1,43 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Connecting…</title>
-    <style>
-      html, body { height: 100%; margin: 0; font-family: system-ui, -apple-system,
-        Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji"; }
-      .wrap { height: 100%; display: grid; place-items: center; color: #111827; }
-      .card { text-align: center; padding: 2rem 2.5rem; border-radius: 16px;
-        box-shadow: 0 10px 30px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06); }
-      .spinner { width: 36px; height: 36px; border-radius: 50%;
-        border: 3px solid #e5e7eb; border-top-color: #111827; animation: spin 1s linear infinite; margin: 0 auto 12px; }
-      @keyframes spin { to { transform: rotate(360deg); } }
-      .muted { color: #6b7280; font-size: .925rem; }
-    </style>
-  </head>
-  <body>
-    <div class="wrap">
-      <div class="card">
-        <div class="spinner" aria-hidden="true"></div>
-        <h1>Connecting to API…</h1>
-        <p class="muted">We’re securely verifying your session.</p>
-        <noscript>
-          <p class="muted">JavaScript is required to continue.</p>
-        </noscript>
-      </div>
-    </div>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Connecting…</title>
+  <style>
+    body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+           display:grid; place-items:center; min-height:100dvh; background:#0b1220; color:#e6edf3; }
+    .card { width:min(560px, 92vw); background:#0e1628; border:1px solid #21304a; border-radius:16px; padding:28px 22px;
+            box-shadow: 0 12px 28px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.04); text-align:center; }
+    .spinner { width:36px; height:36px; border-radius:50%; border:4px solid rgba(255,255,255,.15); 
+               border-top-color:#7aa2ff; animation:spin 1s linear infinite; margin:0 auto 14px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .sub { color:#9fb1d1; font-size:14px; margin-top:4px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="spinner"></div>
+    <h1 style="font-size:18px; margin:8px 0 4px;">Connecting to API…</h1>
+    <div class="sub">We'll take you back in a moment.</div>
+  </div>
 
-    <script>
-      (function () {
-        var API_BASE = "https://api.grassrootsmvt.org";
-        var to = new URLSearchParams(location.search).get("to")
-              || "https://volunteers.grassrootsmvt.org/";
-        var finish = API_BASE + "/auth/finish?to=" + encodeURIComponent(to);
-        var login  = API_BASE + "/cdn-cgi/access/login?redirect_url=" + encodeURIComponent(finish);
-        location.replace(login);
-      })();
-    </script>
-  </body>
+  <script>
+    (async () => {
+      // Where to return after Access finishes
+      const uiOrigin = 'https://volunteers.grassrootsmvt.org';
+      const apiOrigin = 'https://api.grassrootsmvt.org';
+
+      // Return to whatever page brought us here (default: UI root)
+      const from = new URLSearchParams(location.search).get('to') || uiOrigin + '/';
+      const finishUrl = apiOrigin + '/auth/finish?to=' + encodeURIComponent(from);
+
+      // ✅ Correct endpoint: login on the API host (no <AUD> segment)
+      const loginUrl = apiOrigin + '/cdn-cgi/access/login?redirect_url=' + encodeURIComponent(finishUrl);
+
+      // Navigate top-level (no XHR to /cdn-cgi)
+      location.replace(loginUrl);
+    })();
+  </script>
+</body>
 </html>
