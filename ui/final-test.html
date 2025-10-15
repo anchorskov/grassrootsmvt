@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Final Browser Fix Test</title>
+  <script>
+    // Load environment configuration globally
+    async function loadEnvironmentConfig() {
+      try {
+        const module = await import('./config/environments.js');
+        window.environmentConfig = module.default || module.environmentConfig;
+        console.log('✅ Environment config loaded');
+      } catch (error) {
+        console.error('❌ Environment config error:', error);
+      }
+    }
+    loadEnvironmentConfig();
+  </script>
+  <script src="/src/apiClient.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    .test { margin: 1rem 0; padding: 1rem; border: 2px solid #ccc; border-radius: 8px; }
+    .success { border-color: #16a34a; background: #dcfce7; }
+    .error { border-color: #dc2626; background: #fee2e2; }
+    button { padding: 0.75rem 1rem; margin: 0.5rem; border: none; border-radius: 8px; background: #2563eb; color: white; cursor: pointer; }
+    pre { background: #f8fafc; padding: 1rem; border-radius: 8px; font-size: 0.875rem; }
+  </style>
+</head>
+<body>
+  <h1>🔧 Final Browser Fix Test</h1>
+  
+  <div class="test" id="urlTest">
+    <h3>API URL Generation Test</h3>
+    <button onclick="testUrlGeneration()">Test URL Building</button>
+    <pre id="urlResult"></pre>
+  </div>
+
+  <div class="test" id="corsTest">
+    <h3>CORS Test with Pragma Header</h3>
+    <button onclick="testCors()">Test CORS</button>
+    <pre id="corsResult"></pre>
+  </div>
+
+  <div class="test" id="pingTest">
+    <h3>API Ping Test</h3>
+    <button onclick="testPing()">Test /api/ping</button>
+    <pre id="pingResult"></pre>
+  </div>
+
+  <script>
+    async function testUrlGeneration() {
+      const result = document.getElementById('urlResult');
+      await new Promise(resolve => setTimeout(resolve, 500)); // Wait for env config
+      
+      try {
+        if (window.environmentConfig) {
+          const pingUrl = window.environmentConfig.getApiUrl('ping');
+          const votersUrl = window.environmentConfig.getApiUrl('voters');
+          const unknownUrl = window.environmentConfig.getApiUrl('unknown-endpoint');
+          
+          result.textContent = `✅ URL Generation Working:
+ping: ${pingUrl}
+voters: ${votersUrl}
+unknown-endpoint: ${unknownUrl}`;
+          
+          document.getElementById('urlTest').className = 'test success';
+        } else {
+          result.textContent = '❌ Environment config not loaded';
+          document.getElementById('urlTest').className = 'test error';
+        }
+      } catch (error) {
+        result.textContent = `❌ Error: ${error.message}`;
+        document.getElementById('urlTest').className = 'test error';
+      }
+    }
+
+    async function testCors() {
+      const result = document.getElementById('corsResult');
+      
+      try {
+        // Test CORS by making an actual request
+        const response = await fetch('http://localhost:8787/api/ping', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Pragma': 'no-cache' // This was causing the CORS error
+          },
+          credentials: 'include'
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          result.textContent = `✅ CORS Working with Pragma header:
+Status: ${response.status}
+Response: ${JSON.stringify(data, null, 2)}`;
+          document.getElementById('corsTest').className = 'test success';
+        } else {
+          result.textContent = `❌ Response not OK: ${response.status}`;
+          document.getElementById('corsTest').className = 'test error';
+        }
+      } catch (error) {
+        result.textContent = `❌ CORS Error: ${error.message}`;
+        document.getElementById('corsTest').className = 'test error';
+      }
+    }
+
+    async function testPing() {
+      const result = document.getElementById('pingResult');
+      
+      try {
+        if (typeof window.apiFetch !== 'function') {
+          result.textContent = '❌ window.apiFetch not available';
+          document.getElementById('pingTest').className = 'test error';
+          return;
+        }
+        
+        const response = await window.apiFetch('ping');
+        const data = await response.json();
+        
+        if (data.ok) {
+          result.textContent = `✅ apiFetch Working:
+${JSON.stringify(data, null, 2)}`;
+          document.getElementById('pingTest').className = 'test success';
+        } else {
+          result.textContent = `❌ API Error: ${JSON.stringify(data)}`;
+          document.getElementById('pingTest').className = 'test error';
+        }
+      } catch (error) {
+        result.textContent = `❌ apiFetch Error: ${error.message}`;
+        document.getElementById('pingTest').className = 'test error';
+      }
+    }
+
+    // Auto-run tests after page loads
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        testUrlGeneration();
+        testCors();
+        testPing();
+      }, 1000);
+    });
+  </script>
+</body>
+</html>

@@ -156,10 +156,40 @@ Each result shows:
 
 ### Action Buttons
 Each voter card includes:
-- **Contacted**: Mark as successfully contacted
-- **No Answer**: Mark as no response
-- **Note**: Add notes about interaction
-- **Call**: Initiate phone call (if phone available)
+- **📋 Contact**: Opens enhanced contact modal with rich data collection
+- **🚪 Not Home**: Quick mark as not available
+- **📝 Note**: Add simple notes about interaction
+- **☎️ Call**: Initiate phone call (if phone available)
+
+### Enhanced Contact Modal
+The contact modal provides comprehensive data collection:
+
+#### **Contact Method Selection**
+- 🚪 Door-to-door
+- 📞 Phone call
+
+#### **Contact Outcomes**
+- ✅ Connected - Had conversation
+- 💬 Brief interaction  
+- 📄 Left information
+- ❌ Not interested
+- 🚪 No answer / Not home
+- 🚫 Refused to talk
+- 📍 Wrong address/moved
+- ⛔ Requested Do Not Contact
+
+#### **Progressive Data Collection**
+Based on positive outcomes (Connected, Brief, Info Left):
+- **Quick Captures**: Volunteer interest, update preferences, callback permission
+- **Contact Information**: Email collection with consent checkboxes
+- **Issue Interests**: Term limits, public lands, other topics
+- **Notes**: Free-form additional details
+
+#### **Smart Features**
+- Progressive disclosure (sections appear based on selections)
+- Form validation and error handling
+- Visual feedback on successful submission
+- Backwards compatibility with existing simple actions
 
 ## Code Architecture
 

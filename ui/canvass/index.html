@@ -26,6 +26,7 @@
             'neighborhoods': '/api/neighborhoods',
             'log': '/api/log',
             'call': '/api/call',
+            'contact/status': '/api/contact/status',
             'whoami': '/api/whoami'
           };
           
@@ -258,7 +259,7 @@
 
   function setMsg(t) { document.getElementById('msg').textContent = t || ''; }
 
-  function renderList(rows) {
+  async function renderList(rows) {
     console.log('🎨 renderList called with:', rows);
     const el = document.getElementById('results');
     console.log('🎨 Results element:', el);
@@ -271,8 +272,72 @@
     }
     
     console.log('🎨 Rendering', rows.length, 'rows');
+    
+    // Fetch contact status for all voters
+    let contactStatus = {};
+    try {
+      const voter_ids = rows.map(r => r.voter_id).join(',');
+      console.log('📞 Fetching contact status for voter IDs:', voter_ids);
+      
+      const response = await jsonFetch(`/api/contact/status?voter_ids=${voter_ids}`);
+      if (response.ok) {
+        contactStatus = response.contacts || {};
+        console.log('📞 Contact status loaded:', contactStatus);
+      }
+    } catch (error) {
+      console.warn('⚠️ Failed to load contact status:', error);
+    }
+    
     for (const r of rows) {
       const div = document.createElement('div');
+      div.className = 'voter-card'; // Add a class to identify voter cards
+      
+      // Get contact info for this voter
+      const contact = contactStatus[r.voter_id];
+      let contactInfo = '';
+      
+      if (contact) {
+        const contactDate = new Date(contact.created_at).toLocaleDateString();
+        const volunteer = contact.volunteer_email || 'Unknown';
+        const shortVolunteer = volunteer.split('@')[0]; // Show just the username part
+        
+        // Style based on contact outcome
+        let statusColor = '#6b7280'; // gray
+        let statusIcon = '📋';
+        
+        switch (contact.outcome?.toLowerCase()) {
+          case 'connected':
+          case 'contacted':
+          case 'brief':
+            statusColor = '#059669'; // green
+            statusIcon = '✅';
+            break;
+          case 'no_answer':
+          case 'not home':
+            statusColor = '#d97706'; // orange
+            statusIcon = '🚪';
+            break;
+          case 'refused':
+          case 'dnc':
+          case 'do not contact':
+            statusColor = '#dc2626'; // red
+            statusIcon = '🚫';
+            break;
+          case 'moved':
+          case 'wrong_address':
+            statusColor = '#7c3aed'; // purple
+            statusIcon = '📦';
+            break;
+        }
+        
+        contactInfo = `
+          <div class="contact-status" style="margin-top:4px; padding:4px 8px; background:#f8fafc; border-left:3px solid ${statusColor}; font-size:0.85rem;">
+            ${statusIcon} <strong>${contact.outcome}</strong> by ${shortVolunteer} on ${contactDate}
+            ${contact.method ? ` (${contact.method})` : ''}
+          </div>
+        `;
+      }
+      
       div.innerHTML = `
         <div class="person-name">${r.name || 'Name Unknown'} <span style="font-size:0.8rem;font-weight:400;color:#64748b;">(ID: ${r.voter_id})</span></div>
         <div class="addr">${r.address}</div>
@@ -282,10 +347,11 @@
             ? `<span class="chip">${r.phone_e164}${r.phone_confidence ? ' ('+r.phone_confidence+')' : ''}</span>`
             : `<span class="chip muted-chip">no phone</span>`}
         </div>
+        ${contactInfo}
         <div class="toolbar" style="margin-top:8px;">
-          <button data-id="${r.voter_id}" data-a="contacted">Contacted</button>
-          <button data-id="${r.voter_id}" data-a="no_answer">No answer</button>
-          <button data-id="${r.voter_id}" data-a="note">Note</button>
+          <button data-id="${r.voter_id}" data-a="contacted" style="background: #059669; color: white; font-weight: 500;">📋 Contact</button>
+          <button data-id="${r.voter_id}" data-a="no_answer">🚪 Not Home</button>
+          <button data-id="${r.voter_id}" data-a="note">📝 Note</button>
     <button data-id="${r.voter_id}" data-a="call"
       class="primary"
       ${r.phone_e164 ? '' : 'disabled title="No phone on file" aria-disabled="true"'}
@@ -298,7 +364,7 @@
       btn.addEventListener('click', async () => {
         const voter_id = btn.getAttribute('data-id');
         let outcome = btn.getAttribute('data-a');
-        let comments = null;
+        
         if (outcome === 'call') {
           // Prefill call UI and show toast then navigate there
           try {
@@ -312,12 +378,85 @@
           }
           return;
         }
+        
+        if (outcome === 'contacted') {
+          // Navigate to dedicated contact page with voter data
+          let voterCard = btn.closest('.voter-card'); // Use the specific class
+          console.log('🔍 Debug: voterCard found:', !!voterCard);
+          console.log('🔍 Debug: button element:', btn);
+          console.log('🔍 Debug: button parent:', btn.parentElement);
+          
+          if (!voterCard) {
+            console.error('🚨 Contact button error: Voter card not found');
+            console.log('🔍 Debug: Trying alternative selector...');
+            
+            // Fallback: try to find the voter card by traversing up
+            let testCard = btn.parentElement;
+            while (testCard && !testCard.querySelector('.person-name')) {
+              testCard = testCard.parentElement;
+              if (testCard === document.body) break; // Safety check
+            }
+            
+            if (testCard && testCard.querySelector('.person-name')) {
+              console.log('🔍 Debug: Found voter card via fallback method');
+              voterCard = testCard; // Assign to the voterCard variable
+            } else {
+              alert('Error: Could not find voter card. Please try again.');
+              return;
+            }
+          }
+          
+          const voterNameElement = voterCard.querySelector('.person-name');
+          const voterAddressElement = voterCard.querySelector('.addr');
+          const locationDetailsElement = voterCard.querySelector('.location-details');
+          
+          console.log('🔍 Debug elements found:', {
+            voterName: !!voterNameElement,
+            voterAddress: !!voterAddressElement, 
+            locationDetails: !!locationDetailsElement
+          });
+          
+          if (!voterNameElement || !voterAddressElement || !locationDetailsElement) {
+            console.error('🚨 Contact button error: Required voter elements not found');
+            console.log('🔍 Debug HTML structure:', voterCard?.innerHTML || 'voterCard is null');
+            alert('Error: Could not find voter information. Please try again.');
+            return;
+          }
+          
+          const voterName = voterNameElement.textContent.split(' (ID:')[0];
+          const voterAddress = voterAddressElement.textContent;
+          const locationDetails = locationDetailsElement.textContent;
+          
+          // Parse city, zip, and party from location details
+          const parts = locationDetails.split('•').map(p => p.trim());
+          const cityZip = parts[0] || '';
+          const [city, zip] = cityZip.split(' ').filter(p => p);
+          const party = parts.find(p => !p.includes('phone') && !cityZip.includes(p)) || '';
+          const phone = parts.find(p => p.includes('+1') || p.includes('phone')) || '';
+          
+          const contactUrl = `/contact?${new URLSearchParams({
+            voter_id: voter_id,
+            name: voterName,
+            address: voterAddress,
+            city: city || '',
+            zip: zip || '',
+            party: party.replace(/[^\w\s]/g, '').trim(),
+            phone: phone.replace('no phone', '')
+          }).toString()}`;
+          
+          window.location.href = contactUrl;
+          return;
+        }
+        
         if (outcome === 'note') {
           const t = prompt('Note for this address / voter?');
           if (!t) return;
           outcome = 'note';
           comments = t;
         }
+        
+        // Handle simple outcomes (no_answer, etc.)
+        let comments = null;
         try {
           await jsonFetch(API('/complete'), { method:'POST', body: JSON.stringify({ voter_id, outcome, comments }) });
           btn.closest('div').querySelectorAll('button').forEach(b => b.disabled = true);
@@ -357,7 +496,7 @@
       console.log('🔍 API response:', j);
       console.log('🔍 Response rows:', j.rows);
       
-      renderList(j.rows || []);
+      await renderList(j.rows || []);
       setMsg(`Found ${j.rows?.length||0} nearby addresses.`);
     } catch (e) {
       console.error('🔍 Error in findNearby:', e);

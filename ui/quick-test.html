@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Quick API Test</title>
+  <script>
+    // Load environment configuration globally
+    async function loadEnvironmentConfig() {
+      try {
+        const module = await import('./config/environments.js');
+        window.environmentConfig = module.default || module.environmentConfig;
+        console.log('✅ Environment config loaded:', window.environmentConfig.config);
+      } catch (error) {
+        console.error('❌ Failed to load environment config:', error);
+        // Fallback configuration
+        window.environmentConfig = {
+          shouldBypassAuth: () => location.hostname === 'localhost' || location.hostname === '127.0.0.1',
+          getApiUrl: (endpoint, params = {}) => {
+            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+            
+            const endpointMap = {
+              'ping': '/api/ping',
+              'voters': '/api/voters',
+              'next': '/api/call',
+              'call': '/api/call',
+              'whoami': '/api/whoami'
+            };
+            
+            const endpointPath = endpointMap[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
+            let url = `${baseUrl}${endpointPath}`;
+            
+            if (Object.keys(params).length > 0) {
+              const searchParams = new URLSearchParams(params);
+              url += `?${searchParams.toString()}`;
+            }
+            return url;
+          },
+          debug: (message, data) => {
+            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            if (isLocal) console.log(`[ENV-LOCAL] ${message}`, data || '');
+          },
+          config: {
+            environment: location.hostname === 'localhost' ? 'local' : 'production',
+            isLocal: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+          }
+        };
+        console.log('✅ Fallback environment config created');
+      }
+    }
+    
+    loadEnvironmentConfig();
+  </script>
+  <script src="/src/apiClient.js"></script>
+</head>
+<body>
+  <h1>Quick API Test</h1>
+  <div id="results"></div>
+  
+  <script>
+    const results = document.getElementById('results');
+    
+    function log(message, isError = false) {
+      const div = document.createElement('div');
+      div.style.margin = '10px 0';
+      div.style.padding = '10px';
+      div.style.border = '1px solid #ccc';
+      div.style.borderRadius = '5px';
+      div.style.backgroundColor = isError ? '#fee' : '#efe';
+      div.textContent = message;
+      results.appendChild(div);
+      console.log(message);
+    }
+    
+    async function runTests() {
+      try {
+        // Wait for environment config to load
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Test 1: Check if functions are available
+        if (typeof window.apiFetch === 'function') {
+          log('✅ window.apiFetch is available');
+        } else {
+          log('❌ window.apiFetch is not available', true);
+          return;
+        }
+        
+        // Test 2: Check environment config
+        if (window.environmentConfig) {
+          log('✅ Environment config loaded');
+          const pingUrl = window.environmentConfig.getApiUrl('ping');
+          log(`✅ Ping URL: ${pingUrl}`);
+        } else {
+          log('❌ Environment config not loaded', true);
+        }
+        
+        // Test 3: Test API ping
+        try {
+          const response = await window.apiFetch('ping');
+          const data = await response.json();
+          if (data.ok) {
+            log(`✅ API ping successful: ${JSON.stringify(data)}`);
+          } else {
+            log(`❌ API ping failed: ${JSON.stringify(data)}`, true);
+          }
+        } catch (error) {
+          log(`❌ API ping error: ${error.message}`, true);
+        }
+        
+        // Test 4: Test call endpoint
+        try {
+          const response = await window.apiFetch('call', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ require_phone: true })
+          });
+          const data = await response.json();
+          if (data.ok) {
+            log(`✅ Call endpoint successful: ${JSON.stringify(data).substring(0, 200)}...`);
+          } else {
+            log(`⚠️ Call endpoint returned error (expected in test): ${data.error}`, false);
+          }
+        } catch (error) {
+          log(`⚠️ Call endpoint error (expected in test): ${error.message}`, false);
+        }
+        
+      } catch (error) {
+        log(`❌ Test error: ${error.message}`, true);
+      }
+    }
+    
+    // Run tests when page loads
+    window.addEventListener('load', runTests);
+  </script>
+</body>
+</html>

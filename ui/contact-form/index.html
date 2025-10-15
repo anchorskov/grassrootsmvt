@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Add New Voter Contact - GrassrootsMVT</title>
+  <style>
+    /* Similar styling to existing forms */
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 800px; }
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 1.5rem; margin: 1rem 0; }
+    .step { display: none; }
+    .step.active { display: block; }
+    .step-indicator { display: flex; gap: 1rem; margin-bottom: 2rem; }
+    .step-indicator .step-dot { width: 2rem; height: 2rem; border-radius: 50%; background: #e5e7eb; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+    .step-indicator .step-dot.active { background: #0ea5e9; color: white; }
+    .step-indicator .step-dot.completed { background: #10b981; color: white; }
+    
+    .form-group { margin: 1rem 0; }
+    .form-row { display: flex; gap: 1rem; }
+    .form-row .form-group { flex: 1; }
+    label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
+    input, select, textarea { width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; }
+    button { padding: 0.75rem 1.5rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; }
+    .btn-primary { background: #0ea5e9; color: white; }
+    .btn-secondary { background: #6b7280; color: white; }
+    .btn-success { background: #10b981; color: white; }
+    
+    .existing-voter { background: #fef3c7; border: 1px solid #f59e0b; padding: 1rem; border-radius: 6px; margin: 1rem 0; }
+    .potential-match { background: #fef2f2; border: 1px solid #ef4444; padding: 0.75rem; border-radius: 6px; margin: 0.5rem 0; }
+    .search-results { max-height: 300px; overflow-y: auto; }
+    .match-item { padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; margin: 0.5rem 0; cursor: pointer; }
+    .match-item:hover { background: #f3f4f6; }
+    .match-score { font-size: 0.875rem; color: #6b7280; }
+  </style>
+</head>
+<body>
+  <h1>Add New Voter Contact</h1>
+  
+  <!-- Step Indicator -->
+  <div class="step-indicator">
+    <div class="step-dot active" id="step-dot-1">1</div>
+    <div class="step-dot" id="step-dot-2">2</div>
+    <div class="step-dot" id="step-dot-3">3</div>
+    <div class="step-dot" id="step-dot-4">4</div>
+  </div>
+
+  <!-- Step 1: Location -->
+  <div class="card step active" id="step-1">
+    <h2>Step 1: Location</h2>
+    <p>Start by selecting the location where you met this voter.</p>
+    
+    <div class="form-row">
+      <div class="form-group">
+        <label for="county">County *</label>
+        <select id="county" required>
+          <option value="">Select County</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="city">City *</label>
+        <select id="city" required disabled>
+          <option value="">Select City</option>
+        </select>
+      </div>
+    </div>
+    
+    <button type="button" class="btn-primary" id="next-to-address" disabled>
+      Next: Address →
+    </button>
+  </div>
+
+  <!-- Step 2: Address Check -->
+  <div class="card step" id="step-2">
+    <h2>Step 2: Address</h2>
+    <p>Enter the address to check if this voter is already registered.</p>
+    
+    <div class="form-row">
+      <div class="form-group">
+        <label for="house-number">House Number *</label>
+        <input type="text" id="house-number" placeholder="123" required>
+      </div>
+      <div class="form-group">
+        <label for="street-name">Street Name *</label>
+        <input type="text" id="street-name" placeholder="Main St" required>
+        <div id="street-suggestions" class="search-results"></div>
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label for="unit-number">Unit/Apt Number</label>
+      <input type="text" id="unit-number" placeholder="Apt 2B">
+    </div>
+    
+    <div id="existing-voter-alert" class="existing-voter" style="display: none;">
+      <h3>⚠️ Existing Voter Found</h3>
+      <div id="existing-voter-details"></div>
+      <p><strong>This voter is already in our database.</strong> You can still record your interaction or update their information.</p>
+    </div>
+    
+    <div class="form-row">
+      <button type="button" class="btn-secondary" id="back-to-location">← Back</button>
+      <button type="button" class="btn-primary" id="next-to-personal" disabled>
+        Continue: Personal Info →
+      </button>
+    </div>
+  </div>
+
+  <!-- Step 3: Personal Information -->
+  <div class="card step" id="step-3">
+    <h2>Step 3: Personal Information</h2>
+    
+    <div class="form-row">
+      <div class="form-group">
+        <label for="first-name">First Name *</label>
+        <input type="text" id="first-name" required>
+      </div>
+      <div class="form-group">
+        <label for="last-name">Last Name *</label>
+        <input type="text" id="last-name" required>
+      </div>
+    </div>
+    
+    <div id="name-match-results" class="search-results"></div>
+    
+    <div class="form-row">
+      <div class="form-group">
+        <label for="middle-name">Middle Name</label>
+        <input type="text" id="middle-name">
+      </div>
+      <div class="form-group">
+        <label for="suffix">Suffix</label>
+        <input type="text" id="suffix" placeholder="Jr, Sr, III">
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label for="full-address">Full Address *</label>
+      <input type="text" id="full-address" required>
+    </div>
+    
+    <div class="form-row">
+      <div class="form-group">
+        <label for="zip-code">ZIP Code</label>
+        <input type="text" id="zip-code" pattern="[0-9]{5}">
+      </div>
+      <div class="form-group">
+        <label for="phone-primary">Phone Number</label>
+        <input type="tel" id="phone-primary">
+      </div>
+    </div>
+    
+    <div class="form-row">
+      <button type="button" class="btn-secondary" id="back-to-address">← Back</button>
+      <button type="button" class="btn-primary" id="next-to-interaction">
+        Next: Interaction Details →
+      </button>
+    </div>
+  </div>
+
+  <!-- Step 4: Interaction & Political Info -->
+  <div class="card step" id="step-4">
+    <h2>Step 4: Interaction Details</h2>
+    
+    <div class="form-row">
+      <div class="form-group">
+        <label for="contact-method">How did you meet? *</label>
+        <select id="contact-method" required>
+          <option value="">Select method</option>
+          <option value="door">Door-to-door canvassing</option>
+          <option value="phone">Phone call</option>
+          <option value="event">At an event</option>
+          <option value="referral">Referred by someone</option>
+          <option value="online">Online interaction</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label for="estimated-party">Party Affiliation (your assessment)</label>
+        <select id="estimated-party">
+          <option value="">Unknown</option>
+          <option value="Republican">Republican</option>
+          <option value="Democratic">Democratic</option>
+          <option value="Unaffiliated">Unaffiliated</option>
+          <option value="Other">Other</option>
+        </select>
+      </div>
+    </div>
+    
+    <div class="form-group">
+      <label for="voting-likelihood">Likelihood to vote</label>
+      <select id="voting-likelihood">
+        <option value="unknown">Unknown</option>
+        <option value="high">High - Definitely voting</option>
+        <option value="medium">Medium - Probably voting</option>
+        <option value="low">Low - Unlikely to vote</option>
+      </select>
+    </div>
+    
+    <div class="form-group">
+      <label for="issues-interested">Issues they're interested in</label>
+      <input type="text" id="issues-interested" placeholder="Economy, Healthcare, Education">
+    </div>
+    
+    <div class="form-group">
+      <label for="interaction-notes">Conversation notes</label>
+      <textarea id="interaction-notes" rows="3" placeholder="What did you discuss?"></textarea>
+    </div>
+    
+    <div class="form-group">
+      <label for="volunteer-notes">Your notes</label>
+      <textarea id="volunteer-notes" rows="2" placeholder="Any additional notes for follow-up"></textarea>
+    </div>
+    
+    <div class="form-row">
+      <button type="button" class="btn-secondary" id="back-to-personal">← Back</button>
+      <button type="button" class="btn-success" id="submit-contact">
+        Submit Contact ✓
+      </button>
+    </div>
+  </div>
+
+  <!-- Success Message -->
+  <div class="card" id="success-message" style="display: none;">
+    <h2>✅ Contact Submitted Successfully!</h2>
+    <p>Thank you for adding this voter contact. The information has been saved and will be reviewed.</p>
+    <button type="button" class="btn-primary" onclick="location.reload()">Add Another Contact</button>
+    <button type="button" class="btn-secondary" onclick="location.href='/canvass/'">Return to Canvassing</button>
+  </div>
+
+  <!-- Hidden input for volunteer's email -->
+  <input type="hidden" id="vol-email" value="dev@localhost">
+
+  <button class="btn-primary" onclick="location.href='/ui/contact-form/index.html'">New Contact</button>
+
+  <script type="module">
+    // Progressive form logic with API integration
+    import environmentConfig from '../config/environments.js';
+    
+    let currentStep = 1;
+    let formData = {};
+    let potentialMatches = [];
+    
+    // Initialize form
+    async function init() {
+      await loadCounties();
+      setupEventListeners();
+    }
+    
+    // Load counties from API
+    async function loadCounties() {
+      try {
+        const response = await fetch('/api/contact-form/counties');
+        const counties = await response.json();
+        const select = document.getElementById('county');
+        
+        counties.forEach(county => {
+          const option = document.createElement('option');
+          option.value = county;
+          option.textContent = county;
+          select.appendChild(option);
+        });
+      } catch (error) {
+        console.error('Failed to load counties:', error);
+      }
+    }
+    
+    // Setup all event listeners
+    function setupEventListeners() {
+      // County selection
+      document.getElementById('county').addEventListener('change', async (e) => {
+        const county = e.target.value;
+        formData.county = county;
+        
+        if (county) {
+          await loadCities(county);
+          document.getElementById('city').disabled = false;
+        }
+        updateButtonStates();
+      });
+      
+      // City selection  
+      document.getElementById('city').addEventListener('change', (e) => {
+        formData.city = e.target.value;
+        updateButtonStates();
+      });
+      
+      // Address fields
+      document.getElementById('house-number').addEventListener('input', checkAddress);
+      document.getElementById('street-name').addEventListener('input', debounce(searchStreets, 300));
+      
+      // Name fields
+      document.getElementById('first-name').addEventListener('input', debounce(searchNames, 500));
+      document.getElementById('last-name').addEventListener('input', debounce(searchNames, 500));
+      
+      // Navigation buttons
+      document.getElementById('next-to-address').addEventListener('click', () => goToStep(2));
+      document.getElementById('next-to-personal').addEventListener('click', () => goToStep(3));
+      document.getElementById('next-to-interaction').addEventListener('click', () => goToStep(4));
+      document.getElementById('back-to-location').addEventListener('click', () => goToStep(1));
+      document.getElementById('back-to-address').addEventListener('click', () => goToStep(2));
+      document.getElementById('back-to-personal').addEventListener('click', () => goToStep(3));
+      
+      // Submit
+      document.getElementById('submit-contact').addEventListener('click', submitContact);
+    }
+    
+    // Navigation functions
+    function goToStep(step) {
+      // Hide current step
+      document.querySelector('.step.active').classList.remove('active');
+      document.getElementById(`step-dot-${currentStep}`).classList.remove('active');
+      
+      // Mark completed steps
+      if (step > currentStep) {
+        document.getElementById(`step-dot-${currentStep}`).classList.add('completed');
+      }
+      
+      // Show new step
+      currentStep = step;
+      document.getElementById(`step-${step}`).classList.add('active');
+      document.getElementById(`step-dot-${step}`).classList.add('active');
+    }
+    
+    // API integration functions
+    async function loadCities(county) {
+      try {
+        const response = await fetch(`/api/contact-form/cities?county=${encodeURIComponent(county)}`);
+        const cities = await response.json();
+        const select = document.getElementById('city');
+        
+        select.innerHTML = '<option value="">Select City</option>';
+        cities.forEach(city => {
+          const option = document.createElement('option');
+          option.value = city;
+          option.textContent = city;
+          select.appendChild(option);
+        });
+      } catch (error) {
+        console.error('Failed to load cities:', error);
+      }
+    }
+    
+    async function searchStreets() {
+      const county = formData.county;
+      const city = formData.city;
+      const streetInput = document.getElementById('street-name').value;
+      
+      if (!county || !city || streetInput.length < 3) return;
+      
+      try {
+        const response = await fetch(`/api/contact-form/streets?county=${encodeURIComponent(county)}&city=${encodeURIComponent(city)}`);
+        const streets = await response.json();
+        
+        // Filter and display suggestions
+        const suggestions = streets.filter(s => 
+          s.street_name.toLowerCase().includes(streetInput.toLowerCase())
+        ).slice(0, 5);
+        
+        const container = document.getElementById('street-suggestions');
+        container.innerHTML = '';
+        
+        suggestions.forEach(street => {
+          const div = document.createElement('div');
+          div.className = 'match-item';
+          div.textContent = `${street.street_name} (${street.voter_count} voters)`;
+          div.onclick = () => {
+            document.getElementById('street-name').value = street.street_name;
+            container.innerHTML = '';
+            checkAddress();
+          };
+          container.appendChild(div);
+        });
+      } catch (error) {
+        console.error('Failed to search streets:', error);
+      }
+    }
+    
+    async function checkAddress() {
+      const county = formData.county;
+      const city = formData.city;
+      const street = document.getElementById('street-name').value;
+      const number = document.getElementById('house-number').value;
+      
+      if (!county || !city || !street || !number) {
+        document.getElementById('existing-voter-alert').style.display = 'none';
+        updateButtonStates();
+        return;
+      }
+      
+      try {
+        const response = await fetch(`/api/contact-form/check-address?county=${encodeURIComponent(county)}&city=${encodeURIComponent(city)}&street=${encodeURIComponent(street)}&number=${encodeURIComponent(number)}`);
+        const result = await response.json();
+        
+        if (result.exists && result.matches.length > 0) {
+          // Show existing voter alert
+          const alert = document.getElementById('existing-voter-alert');
+          const details = document.getElementById('existing-voter-details');
+          
+          details.innerHTML = result.matches.map(voter => `
+            <div><strong>${voter.first_name} ${voter.last_name}</strong> - ${voter.political_party}</div>
+            <div>${voter.addr1}, ${voter.city}</div>
+            ${voter.phone_e164 ? `<div>Phone: ${voter.phone_e164}</div>` : ''}
+          `).join('<hr>');
+          
+          alert.style.display = 'block';
+        } else {
+          document.getElementById('existing-voter-alert').style.display = 'none';
+        }
+        
+        updateButtonStates();
+      } catch (error) {
+        console.error('Failed to check address:', error);
+      }
+    }
+    
+    async function searchNames() {
+      const county = formData.county;
+      const city = formData.city;
+      const firstName = document.getElementById('first-name').value;
+      const lastName = document.getElementById('last-name').value;
+      
+      if (!county || !city || firstName.length < 2 || lastName.length < 2) {
+        document.getElementById('name-match-results').innerHTML = '';
+        return;
+      }
+      
+      try {
+        const response = await fetch('/api/contact-form/search-names', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ county, city, firstName, lastName })
+        });
+        const matches = await response.json();
+        
+        const container = document.getElementById('name-match-results');
+        if (matches.length > 0) {
+          container.innerHTML = `
+            <h4>⚠️ Potential matches found:</h4>
+            ${matches.map(match => `
+              <div class="potential-match">
+                <strong>${match.first_name} ${match.last_name}</strong> - ${match.political_party}
+                <br>${match.addr1}, ${match.city}
+                <span class="match-score">Match: ${match.match_score}%</span>
+              </div>
+            `).join('')}
+          `;
+          potentialMatches = matches;
+        } else {
+          container.innerHTML = '';
+        }
+      } catch (error) {
+        console.error('Failed to search names:', error);
+      }
+    }
+    
+    async function submitContact() {
+      // Collect all form data
+      const contactData = {
+        county: formData.county,
+        city: formData.city,
+        streetName: document.getElementById('street-name').value,
+        houseNumber: document.getElementById('house-number').value,
+        firstName: document.getElementById('first-name').value,
+        lastName: document.getElementById('last-name').value,
+        middleName: document.getElementById('middle-name').value,
+        suffix: document.getElementById('suffix').value,
+        fullAddress: document.getElementById('full-address').value,
+        unitNumber: document.getElementById('unit-number').value,
+        zipCode: document.getElementById('zip-code').value,
+        phonePrimary: document.getElementById('phone-primary').value,
+        estimatedParty: document.getElementById('estimated-party').value,
+        votingLikelihood: document.getElementById('voting-likelihood').value,
+        contactMethod: document.getElementById('contact-method').value,
+        interactionNotes: document.getElementById('interaction-notes').value,
+        issuesInterested: document.getElementById('issues-interested').value,
+        volunteerNotes: document.getElementById('volunteer-notes').value,
+        potentialMatches: potentialMatches,
+        volEmail: document.getElementById('vol-email').value // Add volunteer's email
+      };
+      
+      try {
+        const response = await fetch('/api/contact-form/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(contactData)
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+          // Hide form, show success
+          document.querySelector('.step.active').style.display = 'none';
+          document.querySelector('.step-indicator').style.display = 'none';
+          document.getElementById('success-message').style.display = 'block';
+        }
+      } catch (error) {
+        console.error('Failed to submit contact:', error);
+        alert('Failed to submit contact. Please try again.');
+      }
+    }
+    
+    function updateButtonStates() {
+      // Step 1 validation
+      document.getElementById('next-to-address').disabled = 
+        !formData.county || !formData.city;
+      
+      // Step 2 validation  
+      document.getElementById('next-to-personal').disabled = 
+        !document.getElementById('house-number').value || 
+        !document.getElementById('street-name').value;
+    }
+    
+    // Utility functions
+    function debounce(func, wait) {
+      let timeout;
+      return function executedFunction(...args) {
+        const later = () => {
+          clearTimeout(timeout);
+          func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+      };
+    }
+    
+    // Initialize when page loads
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>

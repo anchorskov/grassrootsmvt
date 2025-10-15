@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>URL Generation Debug</title>
+  <script>
+    // Load environment configuration globally
+    async function loadEnvironmentConfig() {
+      try {
+        const module = await import('./config/environments.js');
+        window.environmentConfig = module.default || module.environmentConfig;
+        console.log('✅ Environment config loaded:', window.environmentConfig);
+        console.log('✅ Config object:', window.environmentConfig.config);
+        
+        // Test URL generation
+        console.log('✅ ping URL:', window.environmentConfig.getApiUrl('ping'));
+        console.log('✅ call URL:', window.environmentConfig.getApiUrl('call'));
+        console.log('✅ whoami URL:', window.environmentConfig.getApiUrl('whoami'));
+        
+      } catch (error) {
+        console.error('❌ Environment config error:', error);
+        // Show fallback
+        console.log('Using fallback configuration');
+        window.environmentConfig = {
+          shouldBypassAuth: () => location.hostname === 'localhost' || location.hostname === '127.0.0.1',
+          getApiUrl: (endpoint, params = {}) => {
+            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+            
+            const endpointMap = {
+              'ping': '/api/ping',
+              'voters': '/api/voters',
+              'call': '/api/call',
+              'whoami': '/api/whoami'
+            };
+            
+            const endpointPath = endpointMap[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
+            let url = `${baseUrl}${endpointPath}`;
+            
+            if (Object.keys(params).length > 0) {
+              const searchParams = new URLSearchParams(params);
+              url += `?${searchParams.toString()}`;
+            }
+            return url;
+          },
+          debug: (message, data) => {
+            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            if (isLocal) console.log(`[ENV-LOCAL] ${message}`, data || '');
+          },
+          config: {
+            environment: location.hostname === 'localhost' ? 'local' : 'production',
+            isLocal: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+          }
+        };
+        
+        console.log('✅ Fallback ping URL:', window.environmentConfig.getApiUrl('ping'));
+        console.log('✅ Fallback call URL:', window.environmentConfig.getApiUrl('call'));
+      }
+    }
+    
+    loadEnvironmentConfig();
+  </script>
+  <script src="/src/apiClient.js"></script>
+</head>
+<body>
+  <h1>🔍 URL Generation Debug</h1>
+  
+  <button onclick="testApiFetch()">Test apiFetch</button>
+  <button onclick="testAPI()">Test API function</button>
+  
+  <div id="results" style="margin-top: 1rem; padding: 1rem; background: #f5f5f5; border-radius: 8px;"></div>
+
+  <script>
+    const results = document.getElementById('results');
+    
+    function log(message) {
+      results.innerHTML += '<div>' + message + '</div>';
+      console.log(message);
+    }
+    
+    async function testApiFetch() {
+      results.innerHTML = '<h3>Testing apiFetch:</h3>';
+      
+      try {
+        await new Promise(resolve => setTimeout(resolve, 500)); // Wait for loading
+        
+        if (typeof window.apiFetch !== 'function') {
+          log('❌ window.apiFetch not available');
+          return;
+        }
+        
+        log('✅ window.apiFetch is available');
+        
+        // Test the URL generation without actually calling it
+        log('🔍 Testing environment config in apiFetch context...');
+        
+        if (window.environmentConfig) {
+          log('✅ Environment config available in browser');
+          log('🔗 ping URL: ' + window.environmentConfig.getApiUrl('ping'));
+          log('🔗 call URL: ' + window.environmentConfig.getApiUrl('call'));
+        } else {
+          log('❌ Environment config not available');
+        }
+        
+        // Now test actual apiFetch
+        log('🚀 Calling apiFetch("ping")...');
+        try {
+          const response = await window.apiFetch('ping');
+          log('✅ apiFetch ping response status: ' + response.status);
+          log('✅ apiFetch ping URL used: ' + response.url);
+        } catch (error) {
+          log('❌ apiFetch ping error: ' + error.message);
+        }
+        
+      } catch (error) {
+        log('❌ Test error: ' + error.message);
+      }
+    }
+    
+    function testAPI() {
+      results.innerHTML = '<h3>Testing API function:</h3>';
+      
+      // Simulate the API function from call.html
+      const API = (path) => {
+        if (window.environmentConfig) {
+          const cleanPath = path.replace(/^\/?(api\/)?/, '');
+          return window.environmentConfig.getApiUrl(cleanPath);
+        }
+        const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+        const cleanPath = path.replace(/^\/?(api\/)?/, '');
+        return `${baseUrl}/api/${cleanPath}`;
+      };
+      
+      log('✅ Testing API function:');
+      log('🔗 API("/whoami"): ' + API('/whoami'));
+      log('🔗 API("/call"): ' + API('/call'));
+      log('🔗 API("ping"): ' + API('ping'));
+      log('🔗 API("/api/ping"): ' + API('/api/ping'));
+    }
+  </script>
+</body>
+</html>

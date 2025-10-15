@@ -25,7 +25,7 @@
 </head>
 
 <body>
-<!-- Sign in to API banner (shown only if initializeAuthStatus says we're not ready) -->
+<!-- Sign in to API banner (shown only if initializeAuthStatus says we’re not ready) -->
 <div id="api-session-banner" style="display:none; padding:12px; background:#fff3cd; color:#3d3a00; border:1px solid #ffe69c; border-radius:8px; margin:12px 0;">
   <strong>Action needed:</strong>
   Please <a data-api-login href="#" style="text-decoration:underline;">sign in to the API</a> to continue.
@@ -87,6 +87,7 @@
   <div class="btns">
     <button id="startCall" class="primary" disabled>Start Calls</button>
     <button id="startCanvass" class="secondary" disabled>Start Canvass</button>
+    <button class="btn-primary" style="display: block !important; visibility: visible !important; border: 2px solid red; background-color: yellow;" onclick="location.href='/ui/contact-form/index.html'">New Contact</button>
     <span id="msg" class="muted"></span>
   </div>
 </div>
@@ -263,98 +264,62 @@
 </script>
 
 <script type="module">
-// Import environment configuration
-import environmentConfig from './config/environments.js';
-
-// Environment-aware API client implementation
-function ensureAccessSession() {
-  // Bypass authentication in local development
-  if (environmentConfig.shouldBypassAuth()) {
-    environmentConfig.debug('Bypassing authentication in local development');
-    sessionStorage.setItem('accessReady:v1', 'true');
-    return Promise.resolve();
+// Inline direct API kick implementation to bypass caching issues
+const API_BASE = (() => {
+  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+    console.log('🧪 Local development mode detected');
+    return 'http://localhost:8787';
   }
+  console.log('🌐 Production mode detected');
+  return '${API_BASE}';
+})();
 
+// Ensure we're authenticated *before* making any API fetches.
+export function ensureAccessSession() {
   const ready = sessionStorage.getItem('accessReady:v1') === 'true';
   if (!ready) {
     // Direct kick to protected endpoint - no interstitial needed
     const returnTo = encodeURIComponent(location.href);
-    const apiUrl = environmentConfig.getApiUrl('ping', {
-      finish: environmentConfig.getApiUrl('auth/finish', { to: returnTo })
-    });
-    environmentConfig.debug('Redirecting to authentication:', apiUrl);
-    window.location.replace(apiUrl);
+    window.location.replace(`${API_BASE}/api/ping?finish=${encodeURIComponent(`${API_BASE}/auth/finish?to=${returnTo}`)}`);
     // Return a pending promise so callers don't proceed
     return new Promise(() => {});
   }
   return Promise.resolve();
 }
 
-// Call this once when your UI loads
-async function initializeAuthStatus() {
-  // In local development, skip authentication checks
-  if (environmentConfig.shouldBypassAuth()) {
-    environmentConfig.debug('Skipping authentication check in local development');
-    sessionStorage.setItem('accessReady:v1', 'true');
-    return true;
-  }
-
+// Call this once when your UI loads (e.g., in main.js or on DOMContentLoaded)
+export async function initializeAuthStatus() {
   try {
     // a lightweight, credentialed call — if we're not allowed,
     // the browser would hit CORS/redirect, so we proactively kick instead.
-    const authConfigUrl = environmentConfig.getApiUrl('auth/config');
-    const res = await fetch(authConfigUrl, { credentials: 'include' });
+    const res = await fetch(`${API_BASE}/auth/config`, { credentials: 'include' });
     if (res.ok) {
       sessionStorage.setItem('accessReady:v1', 'true');
-      environmentConfig.debug('Authentication check passed');
       return true;
     }
-  } catch (error) {
-    environmentConfig.debug('Authentication check failed:', error);
-  }
-  
+  } catch (_) { /* fall through */ }
   sessionStorage.removeItem('accessReady:v1');
   // if not authenticated → top-level nav to a protected endpoint
   // Cloudflare Access will 302 to team domain and back to /auth/finish
   const returnTo = encodeURIComponent(location.href);
-  const apiUrl = environmentConfig.getApiUrl('ping', {
-    finish: environmentConfig.getApiUrl('auth/finish', { to: returnTo })
-  });
-  environmentConfig.debug('Redirecting to authentication:', apiUrl);
-  location.replace(apiUrl);
+  location.replace(`${API_BASE}/api/ping?finish=${encodeURIComponent(`${API_BASE}/auth/finish?to=${returnTo}`)}`);
   return false;
 }
 
 // Centralized API fetch with credentials
-async function apiFetch(path, options = {}) {
+export async function apiFetch(path, options = {}) {
   await ensureAccessSession(); // make sure we kicked, if needed
-  
-  const apiUrl = environmentConfig.getApiUrl(path);
-  environmentConfig.debug('API fetch:', apiUrl);
-  
-  const fetchOptions = {
+  const res = await fetch(`${API_BASE}${path}`, {
     credentials: 'include',
     ...options,
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-  };
-
-  const res = await fetch(apiUrl, fetchOptions);
-  
-  // In local development, don't redirect on auth errors
-  if (environmentConfig.shouldBypassAuth()) {
-    return res;
-  }
-  
+  });
   // If something still goes sideways (e.g., Access cookie expired), re-kick.
   if (res.status === 401 || res.status === 403) {
     sessionStorage.removeItem('accessReady:v1');
     // Direct kick to protected endpoint - no interstitial needed
     const returnTo = encodeURIComponent(location.href);
-    const authUrl = environmentConfig.getApiUrl('ping', {
-      finish: environmentConfig.getApiUrl('auth/finish', { to: returnTo })
-    });
-    environmentConfig.debug('Re-authenticating due to 401/403:', authUrl);
-    window.location.replace(authUrl);
+    window.location.replace(`${API_BASE}/api/ping?finish=${encodeURIComponent(`${API_BASE}/auth/finish?to=${returnTo}`)}`);
     return new Promise(() => {});
   }
   return res;
@@ -368,28 +333,23 @@ function showBanner() {
     e.preventDefault();
     // Direct kick to protected API endpoint
     const returnTo = encodeURIComponent(location.href);
-    const authUrl = environmentConfig.getApiUrl('ping', {
-      finish: environmentConfig.getApiUrl('auth/finish', { to: returnTo })
-    });
-    location.href = authUrl;
+    location.href = `${API_BASE}/api/ping?finish=${encodeURIComponent(`${API_BASE}/auth/finish?to=${returnTo}`)}`;
   });
 }
 
 // Initialize authentication on page load
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log(`🚀 GrassrootsMVT initializing in ${environmentConfig.config.environment} environment...`);
-  environmentConfig.debug('Environment configuration:', environmentConfig.config);
+  console.log('🚀 GrassrootsMVT initializing...');
 
   // initializeAuthStatus should:
-  //  - check API with credentials (or bypass in local)
+  //  - check API with credentials
   //  - if not ready, navigate directly to protected API endpoint
   const isAuthenticated = await initializeAuthStatus().catch(() => false);
 
   const indicator = document.querySelector('.online-indicator');
   if (isAuthenticated) {
     if (indicator) {
-      const envLabel = environmentConfig.config.isLocal ? ' (Local)' : '';
-      indicator.textContent = `✅ Authenticated${envLabel}`;
+      indicator.textContent = '✅ Authenticated';
       indicator.parentElement.style.background = '#dcfce7';
       indicator.parentElement.style.color = '#166534';
     }
@@ -407,10 +367,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       indicator.parentElement.style.background = '#fee2e2';
       indicator.parentElement.style.color = '#991b1b';
     }
-    // If initializeAuthStatus didn't already redirect, show banner as a fallback.
-    if (!environmentConfig.shouldBypassAuth()) {
-      showBanner();
-    }
+    // If initializeAuthStatus didn’t already redirect, show banner as a fallback.
+    showBanner();
   }
 });
 </script>

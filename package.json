@@ -1,33 +1,69 @@
 {
+  "name": "grassrootsmvt",
+  "version": "1.0.0",
+  "description": "GrassrootsMVT volunteer management platform with Cloudflare Workers + Pages + D1",
+  "type": "module",
+  "scripts": {
+    "dev": "./scripts/dev_start.sh",
+    "dev:stop": "./scripts/dev_stop.sh",
+    "dev:worker": "cd worker && wrangler dev --env preview --port 8787",
+    "dev:pages": "cd ui && wrangler pages dev . --port 8788 --compatibility-date 2024-01-01",
+    "build": "npm run build:worker && npm run build:pages",
+    "build:worker": "cd worker && wrangler deploy --env production",
+    "build:pages": "cd ui && wrangler pages deploy . --project-name grassrootsmvt-ui",
+    "test": "npm run test:local",
+    "test:local": "./scripts/test_local.sh",
+    "test:production": "./scripts/test_api_endpoints.mjs",
+    "deploy": "./scripts/deploy_all.sh",
+    "deploy:worker": "cd worker && wrangler deploy --env production",
+    "deploy:pages": "cd ui && wrangler pages deploy . --project-name grassrootsmvt-ui",
+    "preflight": "./scripts/preflight_check.sh",
+    "verify": "./scripts/verify_deploy.mjs",
+    "seed": "./scripts/d1_seed_from_sqlite.py",
+    "logs": "cd worker && wrangler tail",
+    "env:check": "./scripts/check_env.sh",
+    "db:migrate": "cd worker && wrangler d1 migrations apply grassrootsmvt-db --env production",
+    "db:seed": "npm run seed",
+    "db:local": "./scripts/seed_local_d1.sh",
+    "build:functions": "wrangler pages functions build ./ui/functions && ls -R ui/.wrangler/tmp",
+    "deploy:pages:legacy": "npx wrangler pages deploy ./ui --project-name=grassrootsmvt --commit-dirty=true",
+    "verify:functions": "curl -sS -H 'Authorization: Bearer $CF_API_TOKEN' https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1 | jq '.result[0].uses_functions'",
+    "deploy:check": "bash ./scripts/deploy_and_check.sh",
+    "zip:review": "zip -r ./grassroots-review.zip worker/wrangler.toml worker/src/index.js ui/index.html ui/src/apiClient.js README.md ACCESS.md DEPLOYING.md"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anchorskov/grassrootsmvt.git"
+  },
+  "keywords": [
+    "cloudflare",
+    "workers",
+    "pages",
+    "d1",
+    "volunteer-management",
+    "political-organizing",
+    "grassroots"
+  ],
+  "author": "GrassrootsMVT Team",
+  "license": "MIT",
   "devDependencies": {
     "better-sqlite3": "^12.4.1",
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "miniflare": "^4.20251004.0",
-    "wrangler": "^4.43.0"
+    "wrangler": "^4.43.0",
+    "@cloudflare/workers-types": "^4.20241106.0"
   },
   "dependencies": {
     "jose": "^6.1.0"
   },
-  "scripts": {
-    "build:functions": "wrangler pages functions build ./ui/functions && ls -R ui/.wrangler/tmp",
-    "deploy:pages": "npx wrangler pages deploy ./ui --project-name=grassrootsmvt --commit-dirty=true",
-    "verify:functions": "curl -sS -H 'Authorization: Bearer $CF_API_TOKEN' https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1 | jq '.result[0].uses_functions'",
-    "deploy:check": "bash ./scripts/deploy_and_check.sh",
-    "zip:review": "zip -r ./grassroots-review.zip worker/wrangler.toml worker/src/index.js ui/index.html ui/src/apiClient.js README.md ACCESS.md DEPLOYING.md"
+  "engines": {
+    "node": ">=18.0.0"
   },
-  "name": "grassrootsmvt",
-  "version": "1.0.0",
-  "description": "1) Updated project tree (reference) . ├── README.md                         # ← overview & quick start (this file) ├── DEBUG_NOTES.txt ├── api/ │   ├── src/index.ts                  # (Workers API, prod path) │   └── wrangler.toml ├── db/ │   ├── migrations/ │   └── schema/ │       ├── eligible_view_stub.sql │       └── volunteer_schema.sql ├── docs/ │   ├── DEVELOPMENT.md                # ← local dev instructions │   ├── ARCHITECTURE.md               # ← layout, data flow, envs │   └── API.md                        # ← endpoint contracts ├── infra/ ├── scripts/ │   └── dev-sqlite-api.mjs            # ← local SQLite sidecar (port 8787) ├── ui/ │   ├── index.html                    # Volunteer Hub (router/landing) │   ├── admin/index.html │   ├── functions/                    # Pages Functions (if used) │   │   ├── _routes.json │   │   └── ... │   └── _worker.js                    # ← Pages _worker with proxy & stubs └── wrangler.toml                     # Pages config (bucket=./ui)",
-  "main": "index.js",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/anchorskov/grassrootsmvt.git"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
+  "workspaces": [
+    "worker",
+    "ui"
+  ],
   "bugs": {
     "url": "https://github.com/anchorskov/grassrootsmvt/issues"
   },

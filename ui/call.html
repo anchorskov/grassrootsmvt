@@ -5,6 +5,51 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex, nofollow" />
 <title>Volunteer Call</title>
+<script>
+  // Load environment configuration globally for non-module context
+  async function loadEnvironmentConfig() {
+    try {
+      const module = await import('./config/environments.js');
+      window.environmentConfig = module.default || module.environmentConfig;
+    } catch (error) {
+      console.error('Failed to load environment config:', error);
+      // Fallback configuration
+      window.environmentConfig = {
+        shouldBypassAuth: () => location.hostname === 'localhost' || location.hostname === '127.0.0.1',
+        getApiUrl: (endpoint, params = {}) => {
+          const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+          const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+          
+            // Handle endpoint mapping like the real environment config
+            const endpointMap = {
+              'ping': '/api/ping',
+              'voters': '/api/voters',
+              'neighborhoods': '/api/neighborhoods',
+              'log': '/api/log',
+              'call': '/api/call',
+              'whoami': '/api/whoami'
+            };          const endpointPath = endpointMap[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
+          let url = `${baseUrl}${endpointPath}`;
+          
+          if (Object.keys(params).length > 0) {
+            const searchParams = new URLSearchParams(params);
+            url += `?${searchParams.toString()}`;
+          }
+          return url;
+        },
+        debug: (message, data) => {
+          const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+          if (isLocal) console.log(`[ENV-LOCAL] ${message}`, data || '');
+        },
+        config: {
+          environment: location.hostname === 'localhost' ? 'local' : 'production',
+          isLocal: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+        }
+      };
+    }
+  }
+  loadEnvironmentConfig();
+</script>
 <script src="/src/apiClient.js"></script>
 <style>
   body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 720px; }
@@ -117,7 +162,12 @@
         console.log("🔐 Access token present:", !!token);
         if (!token) console.warn("No access_token in localStorage — /api/whoami will return 401");
         try {
-          const j = await window.apiFetch('/ping');
+          // Wait for apiFetch to be available
+          await new Promise(resolve => {
+            if (window.apiFetch) resolve();
+            else setTimeout(resolve, 500);
+          });
+          const j = await window.apiFetch('ping'); // Remove leading slash
           console.log('🌎 /api/ping result:', j);
         } catch (err) {
           console.error('Failed to reach /api/ping:', err);
@@ -127,7 +177,19 @@
     document.head.appendChild(dbg);
   })();
 
-  const API = (p) => '/api' + p;
+  // Use environment-aware API URL building instead of hardcoded paths
+  const API = (path) => {
+    if (window.environmentConfig) {
+      // Remove leading slash and /api/ if present, then let getApiUrl handle it
+      const cleanPath = path.replace(/^\/?(api\/)?/, '');
+      return window.environmentConfig.getApiUrl(cleanPath);
+    }
+    // Fallback if environment config not loaded yet
+    const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+    const cleanPath = path.replace(/^\/?(api\/)?/, '');
+    return `${baseUrl}/api/${cleanPath}`;
+  };
 
   const who = document.getElementById("whoami");
   const voterCard = document.getElementById("voterCard");
@@ -172,10 +234,19 @@
   }
 
   async function jsonFetch(url, init = {}) {
-    // For API endpoints under /api use apiFetch to ensure Authorization is attached
-    if (url.startsWith('/api') && window.apiFetch) {
-      return window.apiFetch(url.replace('/api',''), init);
+    // For API endpoints, use the environment-aware apiFetch
+    if (url.includes('/api/') && window.apiFetch) {
+      // Extract the endpoint from the full URL
+      const endpointMatch = url.match(/\/api\/(.+)/);
+      if (endpointMatch) {
+        const endpoint = endpointMatch[1];
+        const response = await window.apiFetch(endpoint, init);
+        const ct = response.headers.get("content-type") || "";
+        return ct.includes("application/json") ? response.json() : response.text();
+      }
     }
+    
+    // Fallback for non-API endpoints or if apiFetch not available
     const r = await fetch(url, {
       credentials: "include",
       ...init,
@@ -219,7 +290,7 @@
     try {
       const filters = getFilters();
       const exclude_ids = getSeen();              // NEW: send a short history
-  const v = await jsonFetch(API('/next'), {
+  const v = await jsonFetch(API('/call'), {
         method: 'POST',
         cache: 'no-store',
         headers: { 'pragma': 'no-cache' },
@@ -235,10 +306,10 @@
       empty.hidden = true; voterCard.hidden = false;
       voterCard.dataset.voter = v.voter_id;
       const name = [v.first_name, v.last_name].filter(Boolean).join(" ");
-      const party = v.party ? (' • Party: ' + v.party) : '';
-      const phone = v.phone_e164 ? ('Phone: ' + v.phone_e164) : 'Phone: —';
+      const party = v.political_party ? (' • Party: ' + v.political_party) : '';
+      const phone = v.phone_1 ? ('Phone: ' + v.phone_1) : 'Phone: —';
       voterInfo.innerHTML =
-        `<strong>${name || "—"}</strong><br/>${(v.ra_city||'')} ${(v.ra_zip||'')}${party}<br/>${phone}`;
+        `<strong>${name || "—"}</strong><br/>${(v.city||'')} ${(v.county||'')}${party}<br/>${phone}`;
 
       // remember to avoid immediate repeats
       pushSeen(v.voter_id);                       // NEW

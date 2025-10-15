@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Browser Compatibility Test</title>
+  <script>
+    // Load environment configuration globally for non-module context
+    async function loadEnvironmentConfig() {
+      try {
+        const module = await import('./config/environments.js');
+        window.environmentConfig = module.default || module.environmentConfig;
+      } catch (error) {
+        console.error('Failed to load environment config:', error);
+        // Fallback configuration
+        window.environmentConfig = {
+          shouldBypassAuth: () => location.hostname === 'localhost' || location.hostname === '127.0.0.1',
+          getApiUrl: (endpoint, params = {}) => {
+            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+            
+            // Handle endpoint mapping like the real environment config
+            const endpointMap = {
+              'ping': '/api/ping',
+              'voters': '/api/voters',
+              'neighborhoods': '/api/neighborhoods',
+              'log': '/api/log'
+            };
+            
+            const endpointPath = endpointMap[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
+            let url = `${baseUrl}${endpointPath}`;
+            
+            if (Object.keys(params).length > 0) {
+              const searchParams = new URLSearchParams(params);
+              url += `?${searchParams.toString()}`;
+            }
+            return url;
+          },
+          debug: (message, data) => {
+            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+            if (isLocal) console.log(`[ENV-LOCAL] ${message}`, data || '');
+          },
+          config: {
+            environment: location.hostname === 'localhost' ? 'local' : 'production',
+            isLocal: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+          }
+        };
+      }
+    }
+    loadEnvironmentConfig();
+  </script>
+  <script src="/src/apiClient.js"></script>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; }
+    .test { margin: 1rem 0; padding: 1rem; border: 1px solid #ccc; border-radius: 8px; }
+    .success { border-color: #16a34a; background: #dcfce7; }
+    .error { border-color: #dc2626; background: #fee2e2; }
+    .pending { border-color: #f59e0b; background: #fef3c7; }
+    button { padding: 0.75rem 1rem; margin: 0.5rem; border: none; border-radius: 8px; background: #2563eb; color: white; cursor: pointer; }
+    pre { background: #f8fafc; padding: 1rem; border-radius: 8px; overflow-x: auto; font-size: 0.875rem; }
+  </style>
+</head>
+<body>
+  <h1>Browser Compatibility Test</h1>
+  
+  <div class="test pending" id="moduleTest">
+    <h3>✋ Module Loading Test</h3>
+    <p>Testing if JavaScript modules load without errors...</p>
+    <div id="moduleResult"></div>
+  </div>
+
+  <div class="test pending" id="envTest">
+    <h3>✋ Environment Detection Test</h3>
+    <p>Testing environment configuration...</p>
+    <div id="envResult"></div>
+  </div>
+
+  <div class="test pending" id="apiTest">
+    <h3>✋ API Client Test</h3>
+    <p>Testing API client functionality...</p>
+    <button onclick="testApiClient()">Test API Functions</button>
+    <div id="apiResult"></div>
+  </div>
+
+  <div class="test pending" id="pingTest">
+    <h3>✋ API Connectivity Test</h3>
+    <p>Testing actual API connectivity...</p>
+    <button onclick="testApiPing()">Test API Ping</button>
+    <div id="pingResult"></div>
+  </div>
+
+  <div class="test pending" id="votersTest">
+    <h3>✋ Voters Endpoint Test</h3>
+    <p>Testing voters data retrieval...</p>
+    <button onclick="testVotersEndpoint()">Test Voters API</button>
+    <div id="votersResult"></div>
+  </div>
+
+  <script>
+    // Test results tracking
+    const tests = {
+      module: false,
+      env: false,
+      api: false,
+      ping: false,
+      voters: false
+    };
+
+    function updateTestStatus(testId, success, message, data = null) {
+      const element = document.getElementById(testId);
+      const resultDiv = document.getElementById(testId.replace('Test', 'Result'));
+      
+      if (success) {
+        element.className = 'test success';
+        element.querySelector('h3').innerHTML = '✅ ' + element.querySelector('h3').innerHTML.slice(2);
+        tests[testId.replace('Test', '')] = true;
+      } else {
+        element.className = 'test error';
+        element.querySelector('h3').innerHTML = '❌ ' + element.querySelector('h3').innerHTML.slice(2);
+      }
+      
+      resultDiv.innerHTML = `<p><strong>${success ? 'SUCCESS' : 'ERROR'}:</strong> ${message}</p>`;
+      if (data) {
+        resultDiv.innerHTML += `<pre>${typeof data === 'string' ? data : JSON.stringify(data, null, 2)}</pre>`;
+      }
+
+      updateOverallStatus();
+    }
+
+    function updateOverallStatus() {
+      const allPassed = Object.values(tests).every(t => t === true);
+      if (allPassed) {
+        document.body.style.background = '#dcfce7';
+        console.log('🎉 All tests passed! Browser compatibility confirmed.');
+      }
+    }
+
+    // Test 1: Module Loading
+    function testModuleLoading() {
+      try {
+        if (typeof window.apiFetch === 'function' && 
+            typeof window.initializeAuthStatus === 'function' && 
+            typeof window.ensureAccessSession === 'function') {
+          updateTestStatus('moduleTest', true, 'All API client functions are available globally');
+        } else {
+          updateTestStatus('moduleTest', false, 'API client functions not found on window object');
+        }
+      } catch (error) {
+        updateTestStatus('moduleTest', false, 'Module loading failed', error.toString());
+      }
+    }
+
+    // Test 2: Environment Detection
+    function testEnvironmentDetection() {
+      try {
+        if (window.environmentConfig) {
+          const config = window.environmentConfig;
+          const isLocal = config.shouldBypassAuth();
+          const apiUrl = config.getApiUrl('ping');
+          
+          updateTestStatus('envTest', true, 'Environment configuration loaded successfully', {
+            environment: config.config?.environment || 'detected',
+            isLocal: isLocal,
+            sampleApiUrl: apiUrl,
+            authBypass: isLocal
+          });
+        } else {
+          updateTestStatus('envTest', false, 'Environment configuration not found');
+        }
+      } catch (error) {
+        updateTestStatus('envTest', false, 'Environment detection failed', error.toString());
+      }
+    }
+
+    // Test 3: API Client Functions
+    function testApiClient() {
+      try {
+        // Test function availability
+        if (typeof apiFetch !== 'function') {
+          updateTestStatus('apiTest', false, 'apiFetch function not available');
+          return;
+        }
+        
+        updateTestStatus('apiTest', true, 'API client functions loaded and accessible');
+      } catch (error) {
+        updateTestStatus('apiTest', false, 'API client test failed', error.toString());
+      }
+    }
+
+    // Test 4: API Ping
+    async function testApiPing() {
+      try {
+        const response = await apiFetch('ping');
+        const data = await response.json();
+        
+        if (data.ok) {
+          updateTestStatus('pingTest', true, 'API ping successful', data);
+        } else {
+          updateTestStatus('pingTest', false, 'API ping returned error', data);
+        }
+      } catch (error) {
+        updateTestStatus('pingTest', false, 'API ping failed', error.toString());
+      }
+    }
+
+    // Test 5: Voters Endpoint
+    async function testVotersEndpoint() {
+      try {
+        const response = await apiFetch('voters', {
+          method: 'GET'
+        });
+        const data = await response.json();
+        
+        if (data.ok && data.voters && Array.isArray(data.voters)) {
+          updateTestStatus('votersTest', true, `Voters endpoint successful (${data.total} voters, ${data.voters.length} returned)`, {
+            total: data.total,
+            sample: data.voters.slice(0, 2),
+            filtersApplied: data.filters_applied
+          });
+        } else {
+          updateTestStatus('votersTest', false, 'Voters endpoint returned unexpected data', data);
+        }
+      } catch (error) {
+        updateTestStatus('votersTest', false, 'Voters endpoint failed', error.toString());
+      }
+    }
+
+    // Run initial tests automatically
+    window.addEventListener('load', async () => {
+      // Wait a bit for modules to load
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      testModuleLoading();
+      testEnvironmentDetection();
+      
+      console.log('🔧 Browser compatibility test page loaded');
+      console.log('📍 Environment:', window.environmentConfig?.config?.environment || 'unknown');
+      console.log('🌐 Auth bypass:', window.environmentConfig?.shouldBypassAuth() || false);
+    });
+  </script>
+</body>
+</html>

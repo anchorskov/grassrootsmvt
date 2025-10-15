@@ -737,6 +737,202 @@ export default {
       }
     }
 
+    if (url.pathname === '/api/contact' && request.method === 'POST') {
+      // Enhanced contact recording with rich data collection
+      try {
+        const user = await authenticateRequest(request, env);
+        const volunteer_email = user.email;
+        const contactData = await request.json();
+        
+        console.log('📋 Received contact data:', contactData);
+        
+        const {
+          voter_id,
+          method = 'door',
+          outcome,
+          wants_volunteer = false,
+          wants_updates = false,
+          ok_callback = false,
+          requested_info = false,
+          email = null,
+          optin_email = false,
+          optin_sms = false,
+          for_term_limits = false,
+          issue_public_lands = false,
+          comments = null
+        } = contactData;
+
+        // Validate required fields
+        if (!voter_id || !outcome) {
+          return new Response(
+            JSON.stringify({ ok: false, error: 'voter_id and outcome are required' }),
+            { status: 400, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+          );
+        }
+
+        const db = env.d1;
+        
+        // Insert into voter_contacts table with rich data
+        await db.prepare(`
+          INSERT INTO voter_contacts (
+            voter_id, volunteer_id, method, outcome,
+            ok_callback, requested_info, dnc, 
+            optin_sms, optin_email, email,
+            wants_volunteer, for_term_limits, issue_public_lands,
+            comments, created_at
+          ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, datetime('now')
+          )
+        `).bind(
+          voter_id,
+          volunteer_email,
+          method,
+          outcome,
+          ok_callback ? 1 : 0,
+          requested_info ? 1 : 0,
+          outcome === 'dnc' ? 1 : 0, // Set DNC flag if outcome is dnc
+          optin_sms ? 1 : 0,
+          optin_email ? 1 : 0,
+          email,
+          wants_volunteer ? 1 : 0,
+          for_term_limits ? 1 : 0,
+          issue_public_lands ? 1 : 0,
+          comments
+        ).run();
+
+        // Also log in canvass_activity for backwards compatibility
+        const resultMap = {
+          'connected': 'Contacted',
+          'brief': 'Contacted',
+          'info_left': 'Contacted',
+          'not_interested': 'Contacted',
+          'no_answer': 'Not Home',
+          'refused': 'Refused',
+          'wrong_address': 'Moved',
+          'dnc': 'Do Not Contact'
+        };
+        
+        const mappedResult = resultMap[outcome] || 'Contacted';
+        
+        await db.prepare(
+          `INSERT INTO canvass_activity 
+           (voter_id, volunteer_email, result, notes, pulse_opt_in, created_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))`
+        ).bind(
+          voter_id, 
+          volunteer_email, 
+          mappedResult, 
+          comments || '', 
+          (optin_email || optin_sms) ? 1 : 0
+        ).run();
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            message: 'Contact recorded successfully',
+            voter_id: voter_id,
+            volunteer: volunteer_email,
+            outcome: outcome,
+            rich_data_captured: true
+          }),
+          { 
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+          }
+        );
+      } catch (error) {
+        console.error('Error recording contact:', error);
+        return new Response(
+          JSON.stringify({ ok: false, error: error.message }),
+          { 
+            status: 500,
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+          }
+        );
+      }
+    }
+
+    if (url.pathname === '/api/contact/status' && request.method === 'GET') {
+      // Get contact status for voters (for canvass page display)
+      try {
+        const user = await authenticateRequest(request, env);
+        const voter_ids = url.searchParams.get('voter_ids')?.split(',') || [];
+        
+        if (!voter_ids.length || voter_ids.length > 50) {
+          return new Response(
+            JSON.stringify({ ok: false, error: 'voter_ids parameter required (max 50 IDs)' }),
+            { status: 400, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+          );
+        }
+
+        const db = env.d1;
+        
+        // Get latest contact for each voter from both tables
+        const placeholders = voter_ids.map(() => '?').join(',');
+        
+        // Query voter_contacts for rich contact data
+        const contactQuery = `
+          SELECT 
+            voter_id,
+            volunteer_id as volunteer_email,
+            method,
+            outcome,
+            created_at,
+            'voter_contacts' as source
+          FROM voter_contacts 
+          WHERE voter_id IN (${placeholders})
+          ORDER BY created_at DESC
+        `;
+        
+        // Query canvass_activity for basic contact data
+        const canvassQuery = `
+          SELECT 
+            voter_id,
+            volunteer_email,
+            'door' as method,
+            result as outcome,
+            created_at,
+            'canvass_activity' as source
+          FROM canvass_activity 
+          WHERE voter_id IN (${placeholders})
+          ORDER BY created_at DESC
+        `;
+        
+        const [contactResults, canvassResults] = await Promise.all([
+          db.prepare(contactQuery).bind(...voter_ids).all(),
+          db.prepare(canvassQuery).bind(...voter_ids).all()
+        ]);
+        
+        // Combine and find latest contact per voter
+        const allContacts = [...contactResults.results, ...canvassResults.results];
+        const latestContacts = {};
+        
+        for (const contact of allContacts) {
+          const voterId = contact.voter_id;
+          if (!latestContacts[voterId] || contact.created_at > latestContacts[voterId].created_at) {
+            latestContacts[voterId] = contact;
+          }
+        }
+        
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            contacts: latestContacts
+          }),
+          { headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+        );
+        
+      } catch (error) {
+        console.error('Error fetching contact status:', error);
+        return new Response(
+          JSON.stringify({ ok: false, error: error.message }),
+          { 
+            status: error.message.includes('JWT') ? 401 : 500,
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+          }
+        );
+      }
+    }
+
     if (url.pathname === '/api/pulse' && request.method === 'POST') {
       // Track pulse opt-ins (text/email consent)
       try {

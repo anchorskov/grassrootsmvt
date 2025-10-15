@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Contact Voter</title>
+<script>
+  // Load environment configuration globally for non-module context
+  async function loadEnvironmentConfig() {
+    try {
+      const module = await import('../config/environments.js');
+      window.environmentConfig = module.default || module.environmentConfig;
+    } catch (error) {
+      console.error('Failed to load environment config:', error);
+      // Fallback configuration
+      window.environmentConfig = {
+        shouldBypassAuth: () => location.hostname === 'localhost' || location.hostname === '127.0.0.1',
+        getApiUrl: (endpoint, params = {}) => {
+          const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+          const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+          
+          const endpointMap = {
+            'ping': '/api/ping',
+            'voters': '/api/voters',
+            'neighborhoods': '/api/neighborhoods',
+            'log': '/api/log',
+            'call': '/api/call',
+            'contact': '/api/contact',
+            'contact/status': '/api/contact/status',
+            'whoami': '/api/whoami'
+          };
+          
+          const endpointPath = endpointMap[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
+          let url = `${baseUrl}${endpointPath}`;
+          
+          if (Object.keys(params).length > 0) {
+            const searchParams = new URLSearchParams(params);
+            url += `?${searchParams.toString()}`;
+          }
+          return url;
+        },
+        debug: (message, data) => {
+          const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+          if (isLocal) console.log(`[ENV-LOCAL] ${message}`, data || '');
+        },
+        config: {
+          environment: location.hostname === 'localhost' ? 'local' : 'production',
+          isLocal: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+        }
+      };
+    }
+  }
+  loadEnvironmentConfig();
+</script>
+<script src="/src/apiClient.js"></script>
+<style>
+  :root { --gap: 10px; }
+  body { font-family: system-ui, sans-serif; margin: 12px; background: #f8fafc; }
+  .auth-status { position: fixed; top: 8px; right: 8px; z-index: 100; font-size: 0.875rem; padding: 0.5rem 0.75rem; border-radius: 8px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+  .card { border:1px solid #e5e7eb; border-radius:12px; padding:20px; margin:12px 0; box-shadow:0 2px 4px rgba(0,0,0,.06); background: white; }
+  h1 { font-size: 1.6rem; margin: 4px 0 16px; color: #1e293b; }
+  h2 { font-size: 1.2rem; margin: 16px 0 12px; color: #374151; }
+  .voter-info { background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px; padding: 16px; margin-bottom: 20px; }
+  .voter-name { font-size: 1.3rem; font-weight: 700; color: #0369a1; margin-bottom: 6px; }
+  .voter-address { color: #64748b; font-size: 1rem; margin-bottom: 4px; }
+  .voter-details { color: #64748b; font-size: 0.9rem; }
+  .form-group { margin-bottom: 16px; }
+  .form-group label { display: block; font-weight: 500; margin-bottom: 6px; color: #374151; }
+  .form-control { width: 100%; padding: 8px 12px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 0.95rem; }
+  .form-control:focus { outline: none; border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1); }
+  .radio-group, .checkbox-group { display: flex; gap: 16px; flex-wrap: wrap; }
+  .radio-group label, .checkbox-group label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: normal; margin-bottom: 0; }
+  .expandable-section { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin-top: 12px; display: none; }
+  .expandable-section.show { display: block; }
+  .button-group { display: flex; gap: 12px; justify-content: flex-end; margin-top: 24px; }
+  .btn { padding: 10px 20px; border-radius: 6px; font-weight: 500; cursor: pointer; text-decoration: none; display: inline-block; text-align: center; }
+  .btn-primary { background: #2563eb; color: white; border: none; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-secondary { background: white; color: #374151; border: 1px solid #d1d5db; }
+  .btn-secondary:hover { background: #f9fafb; }
+  .success-message { background: #d1fae5; border: 1px solid #10b981; color: #065f46; padding: 12px; border-radius: 6px; margin-bottom: 16px; }
+  .error-message { background: #fee2e2; border: 1px solid #ef4444; color: #991b1b; padding: 12px; border-radius: 6px; margin-bottom: 16px; }
+  .loading { opacity: 0.6; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<div class="auth-status">
+  <span class="online-indicator">🔄 Checking connection...</span>
+</div>
+
+<h1>Contact Voter</h1>
+
+<div id="loading" class="card">
+  <p>Loading voter information...</p>
+</div>
+
+<div id="content" style="display: none;">
+  <div class="voter-info">
+    <div class="voter-name" id="voterName">Loading...</div>
+    <div class="voter-address" id="voterAddress">Loading...</div>
+    <div class="voter-details" id="voterDetails">Loading...</div>
+  </div>
+
+  <div class="card">
+    <h2>Contact Details</h2>
+    
+    <form id="contactForm">
+      <div class="form-group">
+        <label>Contact Method</label>
+        <div class="radio-group">
+          <label><input type="radio" name="method" value="door" checked> 🚪 Door-to-door</label>
+          <label><input type="radio" name="method" value="phone"> 📞 Phone call</label>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="outcome">Contact Outcome</label>
+        <select id="outcome" class="form-control" required>
+          <option value="">Select outcome...</option>
+          <option value="connected">✅ Connected - Had conversation</option>
+          <option value="brief">💬 Brief interaction</option>
+          <option value="info_left">📄 Left information</option>
+          <option value="not_interested">❌ Not interested</option>
+          <option value="no_answer">🚪 No answer / Not home</option>
+          <option value="refused">🚫 Refused to talk</option>
+          <option value="wrong_address">📍 Wrong address/moved</option>
+          <option value="dnc">⛔ Requested Do Not Contact</option>
+        </select>
+      </div>
+
+      <div id="positiveContactSection" class="expandable-section">
+        <h3 style="margin-top: 0; color: #059669;">Great! Please capture additional details:</h3>
+        
+        <div class="form-group">
+          <label>Quick Captures</label>
+          <div class="checkbox-group">
+            <label><input type="checkbox" id="wantsVolunteer"> Wants to volunteer</label>
+            <label><input type="checkbox" id="wantsUpdates"> Wants updates</label>
+            <label><input type="checkbox" id="wantsCallback"> OK to call back</label>
+            <label><input type="checkbox" id="requestedInfo"> Requested information</label>
+          </div>
+        </div>
+
+        <div id="contactInfoSection" class="expandable-section">
+          <h4 style="margin-top: 0; color: #0369a1;">Contact Information</h4>
+          <div class="form-group">
+            <label for="email">Email Address</label>
+            <input type="email" id="email" class="form-control" placeholder="voter@example.com">
+          </div>
+          <div class="form-group">
+            <label>Communication Preferences</label>
+            <div class="checkbox-group">
+              <label><input type="checkbox" id="optinEmail"> Email updates</label>
+              <label><input type="checkbox" id="optinSms"> Text updates</label>
+            </div>
+          </div>
+        </div>
+
+        <div id="issuesSection" class="expandable-section">
+          <h4 style="margin-top: 0; color: #7c3aed;">Issue Interests</h4>
+          <div class="checkbox-group">
+            <label><input type="checkbox" id="termLimits"> Term limits</label>
+            <label><input type="checkbox" id="publicLands"> Public lands</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="notes">Notes</label>
+        <textarea id="notes" class="form-control" rows="4" placeholder="Additional notes about the contact..."></textarea>
+      </div>
+
+      <div class="button-group">
+        <a href="javascript:history.back()" class="btn btn-secondary">← Back to Canvass</a>
+        <button type="submit" class="btn btn-primary">Save Contact</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div id="success" style="display: none;" class="card">
+  <div class="success-message">
+    ✅ Contact recorded successfully!
+  </div>
+  <p>The contact information has been saved and the volunteer has been notified.</p>
+  <div class="button-group">
+    <a href="javascript:history.back()" class="btn btn-primary">← Return to Canvass</a>
+  </div>
+</div>
+
+<script>
+  // API helper functions
+  const API = (p) => '/api' + p;
+  
+  async function jsonFetch(url, init={}) {
+    console.log('🔗 jsonFetch called with:', url, 'apiFetch available:', !!window.apiFetch);
+    
+    if (url.startsWith('/api') && window.apiFetch) {
+      console.log('📱 Using apiFetch with path:', url.replace('/api/',''));
+      const response = await window.apiFetch(url.replace('/api/',''), init);
+      if (!response.ok) throw new Error('HTTP '+response.status);
+      const ct = response.headers.get('content-type')||'';
+      return ct.includes('application/json') ? response.json() : response.text();
+    }
+    
+    // Fallback: construct full URL to worker
+    let fullUrl = url;
+    if (url.startsWith('/api')) {
+      fullUrl = 'http://localhost:8787' + url;
+      console.log('🔄 Fallback to worker URL:', fullUrl);
+    }
+    
+    const r = await fetch(fullUrl, {
+      credentials: 'include',
+      ...init,
+      headers: { 'content-type': 'application/json', ...(init.headers||{}) }
+    });
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    const ct = r.headers.get('content-type')||'';
+    return ct.includes('application/json') ? r.json() : r.text();
+  }
+
+  // Get URL parameters
+  function getUrlParams() {
+    const params = new URLSearchParams(window.location.search);
+    return {
+      voter_id: params.get('voter_id'),
+      name: params.get('name'),
+      address: params.get('address'),
+      city: params.get('city'),
+      zip: params.get('zip'),
+      party: params.get('party'),
+      phone: params.get('phone')
+    };
+  }
+
+  // Initialize page
+  async function initPage() {
+    const params = getUrlParams();
+    
+    if (!params.voter_id) {
+      document.getElementById('loading').innerHTML = '<div class="error-message">❌ No voter ID provided. Please return to the canvass page.</div>';
+      return;
+    }
+
+    // Populate voter information
+    document.getElementById('voterName').textContent = params.name || 'Unknown Voter';
+    document.getElementById('voterAddress').textContent = params.address || 'Unknown Address';
+    document.getElementById('voterDetails').textContent = `${params.city || ''} ${params.zip || ''} • ${params.party || 'Unknown Party'}${params.phone ? ' • ' + params.phone : ''}`;
+
+    // Show content
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = 'block';
+  }
+
+  // Handle outcome changes
+  document.getElementById('outcome').addEventListener('change', (e) => {
+    const positiveOutcomes = ['connected', 'brief', 'info_left'];
+    const positiveSection = document.getElementById('positiveContactSection');
+    const issuesSection = document.getElementById('issuesSection');
+    
+    if (positiveOutcomes.includes(e.target.value)) {
+      positiveSection.classList.add('show');
+      if (e.target.value === 'connected') {
+        issuesSection.classList.add('show');
+      } else {
+        issuesSection.classList.remove('show');
+      }
+    } else {
+      positiveSection.classList.remove('show');
+    }
+  });
+
+  // Handle wants updates checkbox
+  document.getElementById('wantsUpdates').addEventListener('change', (e) => {
+    const contactSection = document.getElementById('contactInfoSection');
+    if (e.target.checked) {
+      contactSection.classList.add('show');
+    } else {
+      contactSection.classList.remove('show');
+    }
+  });
+
+  // Handle form submission
+  document.getElementById('contactForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    const params = getUrlParams();
+    const formData = new FormData(e.target);
+    
+    const contactData = {
+      voter_id: params.voter_id,
+      method: formData.get('method'),
+      outcome: document.getElementById('outcome').value,
+      wants_volunteer: document.getElementById('wantsVolunteer').checked,
+      wants_updates: document.getElementById('wantsUpdates').checked,
+      ok_callback: document.getElementById('wantsCallback').checked,
+      requested_info: document.getElementById('requestedInfo').checked,
+      email: document.getElementById('email').value,
+      optin_email: document.getElementById('optinEmail').checked,
+      optin_sms: document.getElementById('optinSms').checked,
+      for_term_limits: document.getElementById('termLimits').checked,
+      issue_public_lands: document.getElementById('publicLands').checked,
+      comments: document.getElementById('notes').value
+    };
+
+    console.log('📋 Submitting contact data:', contactData);
+
+    try {
+      // Disable form during submission
+      document.getElementById('contactForm').classList.add('loading');
+      
+      const response = await jsonFetch(API('/contact'), {
+        method: 'POST',
+        body: JSON.stringify(contactData)
+      });
+
+      console.log('✅ Contact saved:', response);
+
+      // Show success page
+      document.getElementById('content').style.display = 'none';
+      document.getElementById('success').style.display = 'block';
+
+    } catch (error) {
+      console.error('❌ Error saving contact:', error);
+      alert('Error saving contact: ' + error.message);
+      document.getElementById('contactForm').classList.remove('loading');
+    }
+  });
+
+  // Initialize when page loads
+  document.addEventListener('DOMContentLoaded', initPage);
+</script>
+
+</body>
+</html>
