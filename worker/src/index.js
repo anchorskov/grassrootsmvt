@@ -1,12 +1,54 @@
 // src/index.js — Cloudflare Zero Trust module Worker
 import { verifyAccessJWT } from "../functions/_utils/verifyAccessJWT.js";
 
+// --- Environment Detection ---------------------------------------------------
+function isLocalDevelopment(env) {
+  // Check for local development indicators
+  const hasLocalEnvVars = (
+    env.ENVIRONMENT === 'local' ||
+    env.ENVIRONMENT === 'development' ||
+    env.LOCAL_DEVELOPMENT === 'true' ||
+    env.DISABLE_AUTH === 'true'
+  );
+  
+  // Detect wrangler dev environment by checking for production-specific vars
+  // In production, these would be set; in local dev with wrangler dev, they're typically undefined
+  const isWranglerDev = (
+    typeof env.CF_ZONE_ID === 'undefined' && 
+    typeof env.CF_ACCOUNT_ID === 'undefined' &&
+    typeof env.CLOUDFLARE_ACCOUNT_ID === 'undefined'
+  );
+  
+  return hasLocalEnvVars || isWranglerDev;
+}
+
+function getEnvironmentConfig(env) {
+  const isLocal = isLocalDevelopment(env);
+  
+  return {
+    environment: isLocal ? 'local' : 'production',
+    isLocal: isLocal,
+    auth: {
+      enabled: !isLocal,
+      bypassAuthentication: isLocal
+    },
+    allowedOrigins: parseAllowedOrigins(env),
+    debug: isLocal
+  };
+}
+// ---------------------------------------------------------------------------
+
 // --- CORS helpers ------------------------------------------------------------
 function parseAllowedOrigins(env) {
+  const defaultOrigins = isLocalDevelopment(env) 
+    ? ["http://localhost:8788", "http://localhost:8080", "http://127.0.0.1:8788"]
+    : ["https://volunteers.grassrootsmvt.org"];
+    
   return (env.ALLOW_ORIGIN || "")
     .split(",")
     .map(s => s.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .concat(defaultOrigins);
 }
 
 // Return the request's Origin only if it's allowed; otherwise null
@@ -35,7 +77,7 @@ function preflightResponse(origin) {
       "Access-Control-Allow-Headers": "Content-Type, Authorization, Cf-Access-Jwt-Assertion",
       "Access-Control-Max-Age": "86400",
       "Access-Control-Allow-Credentials": "true"
-    }, allowedOrigin)
+    }, origin)
   });
 }
 // ---------------------------------------------------------------------------
@@ -49,11 +91,37 @@ function getCookie(req, name) {
   return null;
 }
 
+// Authentication middleware with local development bypass
+async function authenticateRequest(request, env) {
+  const config = getEnvironmentConfig(env);
+  
+  // Bypass authentication in local development
+  if (config.auth.bypassAuthentication) {
+    if (config.debug) {
+      console.log('[LOCAL] Bypassing authentication - using mock user');
+    }
+    return {
+      email: 'dev@localhost',
+      name: 'Local Developer',
+      isLocal: true
+    };
+  }
+  
+  // Production authentication via Cloudflare Access JWT
+  return await verifyAccessJWT(request, env);
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    const allowedOrigin = pickAllowedOrigin(request, env) || "https://volunteers.grassrootsmvt.org";
+    const config = getEnvironmentConfig(env);
+    const allowedOrigin = pickAllowedOrigin(request, env) || config.allowedOrigins[0];
     
+    // Debug logging for local development
+    if (config.debug) {
+      console.log(`[${config.environment.toUpperCase()}] ${request.method} ${url.pathname}`);
+    }
+
     // Extract JWT from header or cookie
     const headerToken = request.headers.get("Cf-Access-Jwt-Assertion");
     const cookieToken = getCookie(request, "CF_Authorization");
@@ -67,7 +135,7 @@ export default {
           'Access-Control-Allow-Origin': allowedOrigin,
           'Access-Control-Allow-Credentials': 'true',
           'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Cf-Access-Jwt-Assertion',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Cf-Access-Jwt-Assertion, Cache-Control, Pragma, X-Requested-With',
           'Vary': 'Origin'
         }
       });
@@ -75,7 +143,7 @@ export default {
 
     // Auth finish route - returns user to UI after Access login
     if (url.pathname === "/auth/finish") {
-      const to = url.searchParams.get("to") || "https://volunteers.grassrootsmvt.org/";
+      const to = url.searchParams.get("to") || config.allowedOrigins[0] + "/";
       const html = `<!doctype html><meta charset="utf-8">
       <title>Returning…</title>
       <p>Returning to app…</p>
@@ -83,24 +151,49 @@ export default {
       return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
 
-    // Auth config route - public endpoint returning TEAM_DOMAIN and POLICY_AUD
+    // Auth config route - returns environment-specific auth configuration
     if (url.pathname === "/auth/config") {
-      const allowedOrigin = pickAllowedOrigin(request, env) || "https://volunteers.grassrootsmvt.org";
-      return new Response(JSON.stringify({
+      const authConfig = config.isLocal ? {
+        environment: 'local',
+        authRequired: false,
+        message: 'Local development - authentication bypassed'
+      } : {
+        environment: 'production',
+        authRequired: true,
         teamDomain: "https://skovgard.cloudflareaccess.com",
         policyAud: "76fea0745afec089a3eddeba8d982b10aab6d6f871e43661cb4977765b78f3f0"
-      }), {
+      };
+      
+      return new Response(JSON.stringify(authConfig), {
         headers: withCorsHeaders({
           "Content-Type": "application/json"
         }, allowedOrigin)
       });
     }
 
-    // Tiny fast-path for the connecting probe (already has Access cookies)
+    // Tiny fast-path for the connecting probe
     if (url.pathname === "/api/ping") {
-      // If Access is already present, return quick OK/204 so browser returns immediately.
-      const hasCfAuth = request.headers.get("Cookie")?.includes("CF_Authorization=");
       const finishUrl = url.searchParams.get("finish");
+      
+      // In local development, always return success
+      if (config.isLocal) {
+        if (finishUrl) {
+          return Response.redirect(finishUrl, 302);
+        }
+        return new Response(JSON.stringify({
+          ok: true,
+          worker: "grassrootsmvt",
+          environment: config.environment,
+          timestamp: Date.now(),
+          auth: 'bypassed'
+        }), { 
+          status: 200,
+          headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+        });
+      }
+      
+      // Production behavior - check for Access authentication
+      const hasCfAuth = request.headers.get("Cookie")?.includes("CF_Authorization=");
       
       if (hasCfAuth && finishUrl) {
         // Already authenticated, redirect to finish URL
@@ -110,7 +203,7 @@ export default {
         return new Response(JSON.stringify({
           ok: true,
           worker: "grassrootsmvt",
-          environment: env.ENVIRONMENT || "unknown",
+          environment: config.environment,
           timestamp: Date.now()
         }), { 
           status: 200,
@@ -174,12 +267,13 @@ export default {
 
     if (url.pathname === "/api/whoami") {
       try {
-        const payload = await verifyAccessJWT(request, env);
+        const user = await authenticateRequest(request, env);
         return new Response(JSON.stringify({
           ok: true,
-          email: payload.email,
-          environment: env.ENVIRONMENT || "production",
-          source: "Cloudflare Zero Trust"
+          email: user.email,
+          name: user.name || user.email,
+          environment: config.environment,
+          source: user.isLocal ? "Local Development" : "Cloudflare Zero Trust"
         }), { 
           status: 200,
           headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
@@ -335,26 +429,111 @@ export default {
     }
 
     if (url.pathname === '/api/call' && request.method === 'POST') {
-      // Log a call activity from volunteer
       try {
-        const payload = await verifyAccessJWT(request, env);
-        const email = payload.email;
-        const { voter_id, call_result, notes } = await request.json();
+        const user = await authenticateRequest(request, env);
+        const email = user.email;
+        const requestBody = await request.json();
 
         const db = env.d1;
-        await db.prepare(
-          `INSERT INTO call_activity (voter_id, volunteer_email, call_result, notes)
-           VALUES (?1, ?2, ?3, ?4)`
-        ).bind(voter_id, email, call_result, notes).run();
 
-        return new Response(
-          JSON.stringify({
-            ok: true,
-            message: 'Call logged successfully',
-            volunteer: email
-          }),
-          { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
-        );
+        // Check if this is a request to get next voter (has filters) or log a call (has voter_id)
+        if (requestBody.filters !== undefined || requestBody.exclude_ids !== undefined) {
+          // Get next voter request
+          const { filters = {}, exclude_ids = [] } = requestBody;
+          
+          // Build query to get next available voter using proper table joins
+          let query = `SELECT v.voter_id, 
+                              COALESCE(va.fn, '') as first_name, 
+                              COALESCE(va.ln, '') as last_name, 
+                              COALESCE(bp.phone_e164, '') as phone_1,
+                              '' as phone_2,
+                              v.county, 
+                              COALESCE(va.city, '') as city, 
+                              v.political_party
+                       FROM voters v
+                       LEFT JOIN voters_addr_norm va ON v.voter_id = va.voter_id
+                       LEFT JOIN best_phone bp ON v.voter_id = bp.voter_id
+                       WHERE 1=1`;
+          const params = [];
+          let paramIndex = 1;
+
+          // Apply filters
+          if (filters.county) {
+            query += ` AND v.county = ?${paramIndex}`;
+            params.push(filters.county);
+            paramIndex++;
+          }
+          if (filters.city) {
+            query += ` AND va.city = ?${paramIndex}`;
+            params.push(filters.city);
+            paramIndex++;
+          }
+          if (filters.parties && filters.parties.length > 0) {
+            const partyPlaceholders = filters.parties.map(() => `?${paramIndex++}`).join(',');
+            query += ` AND v.political_party IN (${partyPlaceholders})`;
+            params.push(...filters.parties);
+          }
+          if (filters.require_phone) {
+            query += ` AND (bp.phone_e164 IS NOT NULL AND bp.phone_e164 != '')`;
+          }
+
+          // Exclude already seen voters
+          if (exclude_ids.length > 0) {
+            const excludePlaceholders = exclude_ids.map(() => `?${paramIndex++}`).join(',');
+            query += ` AND v.voter_id NOT IN (${excludePlaceholders})`;
+            params.push(...exclude_ids);
+          }
+
+          query += ` ORDER BY RANDOM() LIMIT 1`;
+
+          const result = await db.prepare(query).bind(...params).first();
+
+          if (result) {
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                voter_id: result.voter_id,
+                first_name: result.first_name,
+                last_name: result.last_name,
+                phone_1: result.phone_1,
+                phone_2: result.phone_2,
+                county: result.county,
+                city: result.city,
+                political_party: result.political_party
+              }),
+              { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+            );
+          } else {
+            return new Response(
+              JSON.stringify({
+                ok: true,
+                empty: true,
+                message: 'No eligible voters found'
+              }),
+              { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+            );
+          }
+          
+        } else {
+          // Log call result request
+          const { voter_id, call_result, notes } = requestBody;
+
+          // Map to actual database schema: call_result -> outcome, notes -> payload_json
+          await db.prepare(
+            `INSERT INTO call_activity (ts, voter_id, volunteer_email, outcome, payload_json)
+             VALUES (datetime('now'), ?1, ?2, ?3, ?4)`
+          ).bind(voter_id, email, call_result || 'contacted', JSON.stringify({ notes: notes || '' })).run();
+
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              message: 'Call logged successfully',
+              volunteer: email
+            }),
+            { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+          );
+        }
+
       } catch (error) {
         return new Response(
           JSON.stringify({ ok: false, error: error.message }),
@@ -366,8 +545,8 @@ export default {
     if (url.pathname === '/api/canvass' && request.method === 'POST') {
       // Log canvassing activity from volunteer
       try {
-        const payload = await verifyAccessJWT(request, env);
-        const email = payload.email;
+        const user = await authenticateRequest(request, env);
+        const email = user.email;
         const { 
           voter_id, 
           result, 
@@ -420,6 +599,144 @@ export default {
       }
     }
 
+    if (url.pathname === '/api/canvass/nearby' && request.method === 'POST') {
+      // Find nearby addresses for door-to-door canvassing
+      try {
+        const user = await authenticateRequest(request, env);
+        const { filters = {}, house, street, range = 20, limit = 20 } = await request.json();
+
+        const db = env.d1;
+        
+        // Build query to find voters on the same street within house number range
+        let query = `SELECT v.voter_id, 
+                            COALESCE(va.fn, '') as first_name, 
+                            COALESCE(va.ln, '') as last_name, 
+                            COALESCE(va.addr1, '') as address,
+                            COALESCE(va.city, '') as city, 
+                            COALESCE(va.zip, '') as zip,
+                            v.county, 
+                            v.political_party as party,
+                            COALESCE(bp.phone_e164, '') as phone_e164,
+                            bp.confidence_code as phone_confidence
+                     FROM voters v
+                     LEFT JOIN voters_addr_norm va ON v.voter_id = va.voter_id
+                     LEFT JOIN best_phone bp ON v.voter_id = bp.voter_id
+                     WHERE 1=1`;
+        const params = [];
+        let paramIndex = 1;
+
+        // Apply geographic filters
+        if (street) {
+          query += ` AND UPPER(va.addr1) LIKE '%' || ?${paramIndex} || '%'`;
+          params.push(street.toUpperCase());
+          paramIndex++;
+        }
+
+        // Apply demographic filters from URL parameters
+        if (filters.county) {
+          query += ` AND v.county = ?${paramIndex}`;
+          params.push(filters.county);
+          paramIndex++;
+        }
+        if (filters.parties && filters.parties.length > 0) {
+          const partyPlaceholders = filters.parties.map(() => `?${paramIndex++}`).join(',');
+          query += ` AND v.political_party IN (${partyPlaceholders})`;
+          params.push(...filters.parties);
+        }
+
+        // If house number is provided, try to find nearby house numbers
+        if (house && range) {
+          query += ` AND va.addr1 IS NOT NULL AND va.addr1 != ''`;
+          // This is a simplified approach - in production you'd want more sophisticated address parsing
+        }
+
+        query += ` ORDER BY v.voter_id LIMIT ?${paramIndex}`;
+        params.push(Math.min(limit, 100)); // Cap at 100 for performance
+
+        const result = await db.prepare(query).bind(...params).all();
+        
+        // Format results for canvass UI
+        const rows = (result.results || []).map(row => ({
+          voter_id: row.voter_id,
+          name: [row.first_name, row.last_name].filter(Boolean).join(' ') || 'Unknown',
+          address: row.address || 'Address unknown',
+          city: row.city || '',
+          zip: row.zip || '',
+          party: row.party || '',
+          phone_e164: row.phone_e164 || null,
+          phone_confidence: row.phone_confidence || null
+        }));
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            rows: rows,
+            total: rows.length,
+            filters_applied: filters
+          }),
+          { 
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+          }
+        );
+      } catch (error) {
+        return new Response(
+          JSON.stringify({ ok: false, error: error.message }),
+          { 
+            status: error.message.includes('JWT') ? 401 : 500, 
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+          }
+        );
+      }
+    }
+
+    if (url.pathname === '/api/complete' && request.method === 'POST') {
+      // Alias for /api/canvass - log completion of canvass activity
+      try {
+        const user = await authenticateRequest(request, env);
+        const email = user.email;
+        const { voter_id, outcome, comments } = await request.json();
+
+        // Map frontend outcome values to database result values
+        const resultMap = {
+          'contacted': 'Contacted',
+          'no_answer': 'Not Home', 
+          'moved': 'Moved',
+          'refused': 'Refused',
+          'dnc': 'Do Not Contact',
+          'note': 'Contacted' // Notes count as contact
+        };
+        
+        const mappedResult = resultMap[outcome] || 'Contacted';
+
+        const db = env.d1;
+        await db.prepare(
+          `INSERT INTO canvass_activity 
+           (voter_id, volunteer_email, result, notes, created_at)
+           VALUES (?1, ?2, ?3, ?4, datetime('now'))`
+        ).bind(voter_id, email, mappedResult, comments || '').run();
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            message: 'Activity logged successfully',
+            voter_id: voter_id,
+            volunteer: email
+          }),
+          { 
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+          }
+        );
+      } catch (error) {
+        return new Response(
+          JSON.stringify({ ok: false, error: error.message }),
+          { 
+            status: error.message.includes('JWT') ? 401 : 500, 
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+          }
+        );
+      }
+    }
+
     if (url.pathname === '/api/pulse' && request.method === 'POST') {
       // Track pulse opt-ins (text/email consent)
       try {
@@ -428,11 +745,13 @@ export default {
         // Volunteer email is optional for this endpoint
         let volunteer_email = null;
         try {
-          const payload = await verifyAccessJWT(request, env);
-          volunteer_email = payload.email;
-        } catch (jwtError) {
-          // Continue without volunteer email if JWT fails (for public forms)
-          console.log('No JWT provided for pulse opt-in, continuing without volunteer email');
+          const user = await authenticateRequest(request, env);
+          volunteer_email = user.email;
+        } catch (authError) {
+          // Continue without volunteer email if auth fails (for public forms)
+          if (config.debug) {
+            console.log('No authentication provided for pulse opt-in, continuing without volunteer email');
+          }
         }
 
         const db = env.d1;
@@ -474,12 +793,12 @@ export default {
     if (url.pathname === '/api/activity') {
       // Return recent call activity by authenticated volunteer
       try {
-        const payload = await verifyAccessJWT(request, env);
-        const email = payload.email;
+        const user = await authenticateRequest(request, env);
+        const email = user.email;
 
         const db = env.d1;
         const result = await db.prepare(
-          `SELECT * FROM call_activity WHERE volunteer_email = ?1 ORDER BY created_at DESC LIMIT 10;`
+          `SELECT * FROM call_activity WHERE volunteer_email = ?1 ORDER BY ts DESC LIMIT 10;`
         ).bind(email).all();
 
         return new Response(

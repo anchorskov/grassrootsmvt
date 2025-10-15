@@ -4,6 +4,53 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Canvass</title>
+<script>
+  // Load environment configuration globally for non-module context
+  async function loadEnvironmentConfig() {
+    try {
+      const module = await import('../config/environments.js');
+      window.environmentConfig = module.default || module.environmentConfig;
+    } catch (error) {
+      console.error('Failed to load environment config:', error);
+      // Fallback configuration
+      window.environmentConfig = {
+        shouldBypassAuth: () => location.hostname === 'localhost' || location.hostname === '127.0.0.1',
+        getApiUrl: (endpoint, params = {}) => {
+          const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+          const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+          
+          // Handle endpoint mapping like the real environment config
+          const endpointMap = {
+            'ping': '/api/ping',
+            'voters': '/api/voters',
+            'neighborhoods': '/api/neighborhoods',
+            'log': '/api/log',
+            'call': '/api/call',
+            'whoami': '/api/whoami'
+          };
+          
+          const endpointPath = endpointMap[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
+          let url = `${baseUrl}${endpointPath}`;
+          
+          if (Object.keys(params).length > 0) {
+            const searchParams = new URLSearchParams(params);
+            url += `?${searchParams.toString()}`;
+          }
+          return url;
+        },
+        debug: (message, data) => {
+          const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+          if (isLocal) console.log(`[ENV-LOCAL] ${message}`, data || '');
+        },
+        config: {
+          environment: location.hostname === 'localhost' ? 'local' : 'production',
+          isLocal: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
+        }
+      };
+    }
+  }
+  loadEnvironmentConfig();
+</script>
 <script src="/src/apiClient.js"></script>
 <style>
   :root { --gap: 10px; }
@@ -17,10 +64,42 @@
   input[type=number], input[type=text], select, button {
     width:100%; font-size:1rem; padding:.7rem .75rem; border:1px solid #cbd5e1; border-radius:10px;
   }
+  input:disabled {
+    background-color: #f8fafc;
+    color: #64748b;
+    cursor: not-allowed;
+    border-color: #e2e8f0;
+  }
   button.primary { background:#2563eb; color:white; border:0; font-weight:600; }
   .muted { color:#64748b }
-  .addr { font-weight:600; }
-  .person { font-size:.95rem; margin-top:2px; }
+  .autocomplete-container { position: relative; }
+  .autocomplete-suggestions { 
+    position: absolute; 
+    top: 100%; 
+    left: 0; 
+    right: 0; 
+    background: white; 
+    border: 2px solid #2563eb; 
+    border-top: none; 
+    border-radius: 0 0 10px 10px; 
+    max-height: 200px; 
+    overflow-y: auto; 
+    z-index: 9999; 
+    display: none; 
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+  .autocomplete-suggestion { 
+    padding: 12px 16px; 
+    cursor: pointer; 
+    border-bottom: 1px solid #f1f5f9; 
+    font-weight: 500;
+    background: white;
+  }
+  .autocomplete-suggestion:hover { background: #f8fafc; border-color: #e2e8f0; }
+  .autocomplete-suggestion:last-child { border-bottom: none; }
+  .person-name { font-weight:700; font-size:1.1rem; color:#1e293b; margin-bottom:4px; }
+  .addr { font-weight:500; color:#475569; font-size:.95rem; }
+  .location-details { font-size:.85rem; color:#64748b; margin-top:2px; }
   .chip { display:inline-block; border:1px solid #cbd5e1; border-radius:999px; padding:.15rem .5rem; font-size:.8rem; margin-left:6px; }
   button[disabled] { opacity:.45; cursor:not-allowed; }
   .muted-chip { border:1px solid #e5e7eb; color:#64748b; }
@@ -43,16 +122,33 @@
 </div>
 
 <div class="card">
-  <div class="row">
-    <div>
-      <label for="house">House #</label>
-      <input id="house" type="number" placeholder="e.g. 5201" inputmode="numeric" />
-    </div>
-    <div>
-      <label for="street">Street</label>
-      <input id="street" type="text" placeholder="e.g. RAVEN ST" />
+  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+    <h3 style="margin: 0; color: #1e293b;">Address Lookup</h3>
+    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.9rem; color: #475569;">
+      <input type="checkbox" id="instructionsToggle" style="margin: 0;" checked>
+      Show step-by-step instructions
+    </label>
+  </div>
+  
+  <div id="instructionsPanel" style="background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
+    <div id="instructionText" style="font-weight: 500; color: #0369a1;">
+      👋 Click on the Street field below to start
     </div>
   </div>
+
+  <div class="card">
+    <div class="row">
+      <div class="autocomplete-container">
+        <label for="house">House #</label>
+        <input id="house" type="text" placeholder="Select street first" inputmode="numeric" autocomplete="off" disabled />
+        <div id="houseSuggestions" class="autocomplete-suggestions"></div>
+      </div>
+      <div class="autocomplete-container">
+        <label for="street">Street</label>
+        <input id="street" type="text" placeholder="e.g. RAVEN ST" autocomplete="off" />
+        <div id="streetSuggestions" class="autocomplete-suggestions"></div>
+      </div>
+    </div>
   <div class="row" style="margin-top:8px;">
     <div>
       <label for="range">Number range (±)</label>
@@ -97,7 +193,12 @@
         console.log("🔐 Access token present:", !!token);
         if (!token) console.warn("No access_token in localStorage — /api/whoami will return 401");
         try {
-          const j = await window.apiFetch('/ping');
+          // Wait for apiFetch to be available
+          await new Promise(resolve => {
+            if (window.apiFetch) resolve();
+            else setTimeout(resolve, 500);
+          });
+          const j = await window.apiFetch('ping'); // Remove leading slash
           console.log('🌎 /api/ping result:', j);
         } catch (err) {
           console.error('Failed to reach /api/ping:', err);
@@ -127,10 +228,25 @@
   }
 
   async function jsonFetch(url, init={}) {
+    console.log('🔗 jsonFetch called with:', url, 'apiFetch available:', !!window.apiFetch);
+    
     if (url.startsWith('/api') && window.apiFetch) {
-      return window.apiFetch(url.replace('/api',''), init);
+      console.log('📱 Using apiFetch with path:', url.replace('/api/',''));
+      // apiFetch expects just the path part without /api prefix
+      const response = await window.apiFetch(url.replace('/api/',''), init);
+      if (!response.ok) throw new Error('HTTP '+response.status);
+      const ct = response.headers.get('content-type')||'';
+      return ct.includes('application/json') ? response.json() : response.text();
     }
-    const r = await fetch(url, {
+    
+    // Fallback: construct full URL to worker
+    let fullUrl = url;
+    if (url.startsWith('/api')) {
+      fullUrl = 'http://localhost:8787' + url;
+      console.log('🔄 Fallback to worker URL:', fullUrl);
+    }
+    
+    const r = await fetch(fullUrl, {
       credentials: 'include',
       ...init,
       headers: { 'content-type': 'application/json', ...(init.headers||{}) }
@@ -143,19 +259,29 @@
   function setMsg(t) { document.getElementById('msg').textContent = t || ''; }
 
   function renderList(rows) {
+    console.log('🎨 renderList called with:', rows);
     const el = document.getElementById('results');
+    console.log('🎨 Results element:', el);
+    
     el.innerHTML = '';
-    if (!rows || !rows.length) { el.innerHTML = '<div class="muted">No nearby addresses.</div>'; return; }
+    if (!rows || !rows.length) { 
+      console.log('🎨 No rows to display');
+      el.innerHTML = '<div class="muted">No nearby addresses.</div>'; 
+      return; 
+    }
+    
+    console.log('🎨 Rendering', rows.length, 'rows');
     for (const r of rows) {
       const div = document.createElement('div');
       div.innerHTML = `
-        <div class="addr">${r.address}, ${r.city} ${r.zip}
-          <span class="chip">${r.party||''}</span>
+        <div class="person-name">${r.name || 'Name Unknown'} <span style="font-size:0.8rem;font-weight:400;color:#64748b;">(ID: ${r.voter_id})</span></div>
+        <div class="addr">${r.address}</div>
+        <div class="location-details">${r.city} ${r.zip}
+          <span class="chip">${r.party||'Unknown Party'}</span>
           ${r.phone_e164
             ? `<span class="chip">${r.phone_e164}${r.phone_confidence ? ' ('+r.phone_confidence+')' : ''}</span>`
             : `<span class="chip muted-chip">no phone</span>`}
         </div>
-        <div class="person">${r.name||''}</div>
         <div class="toolbar" style="margin-top:8px;">
           <button data-id="${r.voter_id}" data-a="contacted">Contacted</button>
           <button data-id="${r.voter_id}" data-a="no_answer">No answer</button>
@@ -207,24 +333,354 @@
     const street = (document.getElementById('street').value || '').trim().toUpperCase();
     const range  = Number(document.getElementById('range').value);
     const limit  = Number(document.getElementById('limit').value);
+    
+    console.log('🔍 findNearby called with:', { house, street, range, limit });
+    
     if (!house || !street) {
       setMsg('Enter a house number and street.'); return;
     }
     setMsg('Searching…');
     const filters = fromQS();
+    
+    console.log('🔍 Making API call with filters:', filters);
+    console.log('🔍 API URL will be:', API('/canvass/nearby'));
+    
     try {
+      const requestBody = { filters, house, street, range, limit };
+      console.log('🔍 Request body:', requestBody);
+      
       const j = await jsonFetch(API('/canvass/nearby'), {
         method: 'POST',
-        body: JSON.stringify({ filters, house, street, range, limit })
+        body: JSON.stringify(requestBody)
       });
+      
+      console.log('🔍 API response:', j);
+      console.log('🔍 Response rows:', j.rows);
+      
       renderList(j.rows || []);
       setMsg(`Found ${j.rows?.length||0} nearby addresses.`);
     } catch (e) {
+      console.error('🔍 Error in findNearby:', e);
       setMsg('Error: '+e.message);
     }
   }
 
+  // Street autocomplete functionality
+  let streetCache = null;
+  async function loadStreetNames() {
+    if (streetCache) return streetCache;
+    try {
+      // Get a sample of addresses to build street list
+      const filters = fromQS();
+      console.log('🔍 Loading streets with filters:', filters);
+      console.log('🌐 Current URL:', location.href);
+      
+      const response = await jsonFetch(API('/canvass/nearby'), {
+        method: 'POST', 
+        body: JSON.stringify({ filters, limit: 500 })
+      });
+      
+      console.log('📡 API Response:', response);
+      
+      const streets = [...new Set((response.rows || []).map(r => {
+        // Extract street name from full address (remove house number)
+        return r.address.replace(/^\d+\s+/, '').toUpperCase();
+      }))].sort();
+      streetCache = streets;
+      console.log(`✅ Loaded ${streets.length} street names for autocomplete:`, streets);
+      return streets;
+    } catch (e) {
+      console.error('❌ Failed to load street names:', e);
+      return [];
+    }
+  }
+
+  function setupStreetAutocomplete() {
+    const streetInput = document.getElementById('street');
+    const suggestions = document.getElementById('streetSuggestions');
+    
+    // ON FOCUS: Load and show streets immediately
+    streetInput.addEventListener('focus', async function() {
+      // Show loading indicator
+      suggestions.innerHTML = '<div class="autocomplete-suggestion">Loading streets...</div>';
+      suggestions.style.display = 'block';
+      
+      try {
+        // Get filters directly from URL
+        const filters = fromQS();
+        
+        // Direct API call - bypass any caching issues
+        const response = await fetch('http://localhost:8787/api/canvass/nearby', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filters, limit: 200 })
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.rows && data.rows.length > 0) {
+          // Extract unique street names
+          const streets = [...new Set(data.rows.map(r => {
+            return r.address.replace(/^\d+\s+/, '').toUpperCase();
+          }))].sort();
+          
+          // Populate dropdown immediately
+          suggestions.innerHTML = streets.map(street => 
+            `<div class="autocomplete-suggestion" data-street="${street}">${street}</div>`
+          ).join('');
+          suggestions.style.display = 'block';
+          suggestions.style.backgroundColor = '#f0f9ff'; // Light blue highlight
+        } else {
+          suggestions.innerHTML = '<div class="autocomplete-suggestion">No streets found for this area</div>';
+        }
+      } catch (error) {
+        console.error('Failed to load streets:', error);
+        suggestions.innerHTML = '<div class="autocomplete-suggestion">Error loading streets</div>';
+      }
+    });
+    
+    streetInput.addEventListener('input', async function() {
+      const value = this.value.toUpperCase();
+      
+      // If there are already suggestions, filter them
+      const existingSuggestions = Array.from(suggestions.querySelectorAll('.autocomplete-suggestion'));
+      if (existingSuggestions.length > 0) {
+        const allStreets = existingSuggestions.map(el => el.dataset.street).filter(Boolean);
+        
+        if (value.length === 0) {
+          // Show all streets when input is empty
+          suggestions.innerHTML = allStreets.map(street => 
+            `<div class="autocomplete-suggestion" data-street="${street}">${street}</div>`
+          ).join('');
+          suggestions.style.display = 'block';
+        } else {
+          // Filter streets based on input
+          const matches = allStreets.filter(street => 
+            street && street.includes(value)
+          ).slice(0, 10);
+          
+          if (matches.length > 0) {
+            suggestions.innerHTML = matches.map(street => 
+              `<div class="autocomplete-suggestion" data-street="${street}">${street}</div>`
+            ).join('');
+            suggestions.style.display = 'block';
+          } else {
+            suggestions.style.display = 'none';
+          }
+        }
+      }
+    });
+    
+    // Handle suggestion clicks
+    suggestions.addEventListener('click', function(e) {
+      if (e.target.classList.contains('autocomplete-suggestion')) {
+        if (e.target.dataset.street) {
+          streetInput.value = e.target.dataset.street;
+          suggestions.style.display = 'none';
+          
+          // Enable house number field and populate it
+          enableHouseField();
+          
+          // Update instructions when street is selected
+          updateInstruction('streetSelected');
+          
+          // Load house numbers for this street
+          setTimeout(() => {
+            populateHouseNumbers(e.target.dataset.street);
+          }, 100);
+          
+          // Don't refocus - it causes instruction to revert to streetFocused
+          // streetInput.focus();
+        }
+      }
+    });
+    
+    // Also enable house numbers when user types and pauses on a complete street name
+    let streetTimeout;
+    streetInput.addEventListener('input', function() {
+      const currentValue = this.value.toUpperCase().trim();
+      
+      // Clear previous timeout
+      clearTimeout(streetTimeout);
+      
+      // Disable house field if street is cleared
+      if (currentValue.length === 0) {
+        disableHouseField();
+      }
+      
+      // Set timeout to check for complete street name
+      streetTimeout = setTimeout(() => {
+        if (currentValue.length > 3) {
+          enableHouseField();
+          populateHouseNumbers(currentValue);
+        }
+      }, 500); // Wait 500ms after user stops typing
+    });
+    
+    // Clear house field when street field is focused (starting new selection)
+    streetInput.addEventListener('focus', function() {
+      if (this.value.trim() === '') {
+        disableHouseField();
+      }
+    });
+    
+    // Hide suggestions when clicking outside
+    document.addEventListener('click', function(e) {
+      if (!streetInput.contains(e.target) && !suggestions.contains(e.target)) {
+        suggestions.style.display = 'none';
+      }
+    });
+  }
+
+  // Enable house number field
+  function enableHouseField() {
+    const houseInput = document.getElementById('house');
+    houseInput.disabled = false;
+    houseInput.placeholder = "e.g. 5201";
+    houseInput.style.backgroundColor = "";
+    houseInput.style.cursor = "";
+  }
+
+  // Disable house number field  
+  function disableHouseField() {
+    const houseInput = document.getElementById('house');
+    const houseSuggestions = document.getElementById('houseSuggestions');
+    
+    houseInput.disabled = true;
+    houseInput.value = "";
+    houseInput.placeholder = "Select street first";
+    houseSuggestions.style.display = 'none';
+  }
+
+  // Function to populate house numbers based on selected street
+  async function populateHouseNumbers(streetName) {
+    const houseInput = document.getElementById('house');
+    const houseSuggestions = document.getElementById('houseSuggestions');
+    
+    console.log('🏠 Loading house numbers for street:', streetName);
+    
+    try {
+      const filters = fromQS();
+      
+      // API call to get addresses on this specific street
+      const response = await fetch('http://localhost:8787/api/canvass/nearby', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filters, street: streetName, limit: 100 })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      
+      const data = await response.json();
+      console.log('📡 House numbers API response:', data);
+      
+      if (data.rows && data.rows.length > 0) {
+        // Extract house numbers from addresses
+        const houseNumbers = [...new Set(data.rows.map(r => {
+          const match = r.address.match(/^(\d+)/);
+          return match ? match[1] : null;
+        }).filter(Boolean))].sort((a, b) => parseInt(a) - parseInt(b));
+        
+        console.log('🏠 Available house numbers:', houseNumbers);
+        
+        // Set up house number autocomplete
+        setupHouseAutocomplete(houseNumbers);
+      }
+    } catch (error) {
+      console.error('❌ Failed to load house numbers:', error);
+    }
+  }
+
+  // Function to set up house number autocomplete
+  function setupHouseAutocomplete(houseNumbers) {
+    const houseInput = document.getElementById('house');
+    const houseSuggestions = document.getElementById('houseSuggestions');
+    
+    console.log('🏠 Setting up house autocomplete with numbers:', houseNumbers);
+    
+    // Remove any existing event listeners (prevent duplicates)
+    const newHouseInput = houseInput.cloneNode(true);
+    houseInput.parentNode.replaceChild(newHouseInput, houseInput);
+    
+    // Show house numbers on focus (only if enabled)
+    newHouseInput.addEventListener('focus', function() {
+      if (!this.disabled && houseNumbers && houseNumbers.length > 0) {
+        houseSuggestions.innerHTML = houseNumbers.slice(0, 15).map(num => 
+          `<div class="autocomplete-suggestion" data-house="${num}">${num}</div>`
+        ).join('');
+        houseSuggestions.style.display = 'block';
+        houseSuggestions.style.backgroundColor = '#fef3c7'; // Light yellow highlight
+        console.log('✅ House numbers dropdown shown');
+      }
+    });
+    
+    // Filter house numbers as user types (only if enabled)
+    newHouseInput.addEventListener('input', function() {
+      if (this.disabled) return;
+      
+      const value = this.value;
+      if (houseNumbers && houseNumbers.length > 0) {
+        if (value.length === 0) {
+          // Show all house numbers
+          houseSuggestions.innerHTML = houseNumbers.slice(0, 15).map(num => 
+            `<div class="autocomplete-suggestion" data-house="${num}">${num}</div>`
+          ).join('');
+          houseSuggestions.style.display = 'block';
+        } else {
+          // Filter house numbers
+          const matches = houseNumbers.filter(num => num.startsWith(value)).slice(0, 15);
+          if (matches.length > 0) {
+            houseSuggestions.innerHTML = matches.map(num => 
+              `<div class="autocomplete-suggestion" data-house="${num}">${num}</div>`
+            ).join('');
+            houseSuggestions.style.display = 'block';
+          } else {
+            houseSuggestions.style.display = 'none';
+          }
+        }
+      }
+    });
+    
+    // Handle house number clicks
+    houseSuggestions.addEventListener('click', function(e) {
+      if (e.target.classList.contains('autocomplete-suggestion')) {
+        console.log('🖱️ Clicked house number:', e.target.dataset.house);
+        if (e.target.dataset.house) {
+          newHouseInput.value = e.target.dataset.house;
+          houseSuggestions.style.display = 'none';
+          
+          // Update instructions when house is selected
+          updateInstruction('houseSelected');
+          
+          newHouseInput.focus();
+        }
+      }
+    });
+    
+    // Hide house suggestions when clicking outside
+    document.addEventListener('click', function(e) {
+      if (!newHouseInput.contains(e.target) && !houseSuggestions.contains(e.target)) {
+        houseSuggestions.style.display = 'none';
+      }
+    });
+    
+    // Prevent interaction when disabled
+    newHouseInput.addEventListener('click', function(e) {
+      if (this.disabled) {
+        e.preventDefault();
+        console.log('🚫 House field is disabled - select street first');
+      }
+    });
+  }
+
   document.getElementById('btnFind').addEventListener('click', findNearby);
+  
   // QoL: Enter on street field triggers search
   const streetEl = document.getElementById('street');
   document.getElementById('street').addEventListener('keydown', e => {
@@ -237,6 +693,125 @@
     streetEl.selectionStart = streetEl.selectionEnd = pos;
   });
 
+  // Initialize autocomplete (streets will load on focus)
+  setupStreetAutocomplete();
+  
+  // Instructions system
+  const instructionsToggle = document.getElementById('instructionsToggle');
+  const instructionsPanel = document.getElementById('instructionsPanel');
+  const instructionText = document.getElementById('instructionText');
+  
+  console.log('🎛️ Instructions elements found:', {
+    toggle: !!instructionsToggle,
+    panel: !!instructionsPanel, 
+    text: !!instructionText
+  });
+  
+  // Instructions state management
+  let currentStep = 'street';
+  const instructions = {
+    street: '👋 Click on the Street field below to start',
+    streetFocused: '📝 Type or select a street name from the blue dropdown',
+    streetSelected: '🏠 Great! Now select a house number from the yellow dropdown above',
+    houseSelected: '🔍 Perfect! Click "Find nearby" to search for voters',
+    searching: '⏳ Searching for nearby voters...',
+    results: '✅ Found results! Review the voters below and take action',
+    noResults: '❌ No voters found. Try adjusting the address or range'
+  };
+  
+  function updateInstruction(step) {
+    if (!instructionsToggle.checked) return;
+    currentStep = step;
+    instructionText.textContent = instructions[step] || instructions.street;
+    console.log('📋 Instruction updated to:', step, '→', instructions[step]);
+  }
+  
+  // Toggle instructions panel
+  instructionsToggle.addEventListener('change', () => {
+    console.log('🎛️ Instructions toggle changed to:', instructionsToggle.checked);
+    if (instructionsToggle.checked) {
+      instructionsPanel.style.display = 'block';
+      updateInstruction(currentStep);
+      console.log('✅ Instructions panel shown');
+    } else {
+      instructionsPanel.style.display = 'none';
+      console.log('❌ Instructions panel hidden');
+    }
+  });
+  
+  // Initialize with instructions enabled
+  updateInstruction('street');
+  
+  // Add instruction event listeners to existing elements
+  const streetInput = document.getElementById('street');
+  const houseInput = document.getElementById('house');
+  const btnFind = document.getElementById('btnFind');
+  
+  // Street field events
+  streetInput.addEventListener('focus', () => {
+    // Only update to streetFocused if we're at the initial street step
+    // Don't revert if user has already selected a street
+    if (currentStep === 'street' || (currentStep === 'streetFocused' && !streetInput.value.trim())) {
+      updateInstruction('streetFocused');
+    }
+  });
+  
+  // We'll handle street selection in the dropdown click handler above
+  // Only update instructions for manual typing if it's a reasonable length
+  streetInput.addEventListener('input', () => {
+    const value = streetInput.value.trim();
+    if (value.length > 3) {
+      // Only update if they've typed a substantial street name
+      // This helps differentiate from dropdown selections
+      setTimeout(() => {
+        if (streetInput.value.trim() === value && value.length > 3) {
+          updateInstruction('streetSelected');
+        }
+      }, 500); // Small delay to see if they're still typing
+    }
+  });
+  
+  // House field events  
+  houseInput.addEventListener('focus', () => {
+    if (!houseInput.disabled) {
+      // Don't change instruction on focus, keep current state
+    }
+  });
+  
+  // We'll handle house selection in the dropdown click handler above
+  // Only update for manual typing
+  houseInput.addEventListener('input', () => {
+    const value = houseInput.value.trim();
+    if (value.length > 0) {
+      setTimeout(() => {
+        if (houseInput.value.trim() === value && value.length > 0) {
+          updateInstruction('houseSelected');
+        }
+      }, 300);
+    }
+  });
+  
+  // Find button click
+  btnFind.addEventListener('click', () => {
+    updateInstruction('searching');
+    // Results will be updated by monitoring the results div
+  });
+  
+  // Monitor results div for changes
+  const resultsDiv = document.getElementById('results');
+  const observer = new MutationObserver(() => {
+    if (instructionsToggle.checked) {
+      const hasResults = resultsDiv.children.length > 0 && 
+                        !resultsDiv.textContent.includes('No nearby addresses');
+      if (hasResults) {
+        updateInstruction('results');
+      } else if (resultsDiv.textContent.includes('No nearby addresses')) {
+        updateInstruction('noResults');
+      }
+    }
+  });
+  observer.observe(resultsDiv, { childList: true, subtree: true });
+  
   const f = fromQS();
   showFiltersBadge(f);
 </script>
