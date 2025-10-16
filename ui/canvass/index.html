@@ -4,37 +4,28 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Canvass</title>
-<script src="/config/environments.js"></script>
-<script>
-  // Use centralized environment configuration
-  function loadEnvironmentConfig() {
-    window.environmentConfig = {
-      shouldBypassAuth: () => window.GrassrootsEnv.shouldBypassAuth(),
-      getApiUrl: (endpoint, params = {}) => {
-        const endpointMap = {
-          'ping': '/api/ping',
-          'voters': '/api/voters',
-          'neighborhoods': '/api/neighborhoods',
-          'log': '/api/log',
-          'call': '/api/call',
-          'contact/status': '/api/contact/status',
-          'whoami': '/api/whoami'
-        };
-        
-        const endpointPath = endpointMap[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
-        const url = new URL(window.GrassrootsEnv.getApiUrl(endpointPath));
-        Object.entries(params || {}).forEach(([k,v]) => url.searchParams.set(k, v));
-        return url.toString();
-      },
-      debug: (message, data) => {
-        if (window.GrassrootsEnv.isLocal) console.log(`[ENV-LOCAL] ${message}`, data || '');
-      },
-      config: window.GrassrootsEnv.getEnvironmentInfo()
-    };
-  }
-  loadEnvironmentConfig();
+<!-- Load env as a module and expose a back-compat shim for legacy GrassrootsEnv calls -->
+<script type="module">
+  const mod = await import('/config/environments.js');
+  const environmentConfig = mod.default || mod.environmentConfig || mod;
+  window.environmentConfig = environmentConfig;
+  // Shim: legacy pages sometimes call window.GrassrootsEnv.*
+  const originFrom = () => {
+    try { return new URL(environmentConfig.getApiUrl('ping')).origin; } catch { return location.origin; }
+  };
+  window.GrassrootsEnv = window.GrassrootsEnv || {
+    shouldBypassAuth: () => environmentConfig.shouldBypassAuth(),
+    getApiBaseUrl: () => originFrom(),
+    getApiUrl: (endpointOrPath, params = {}) => {
+      const path = String(endpointOrPath).replace(/^\/?(api\/)?/, '');
+      return environmentConfig.getApiUrl(path, params);
+    },
+    getEnvironmentInfo: () => environmentConfig.config,
+    isLocal: !!environmentConfig?.config?.isLocal
+  };
 </script>
-<script src="/src/apiClient.js"></script>
+<!-- apiClient must be loaded as a module so exports work -->
+<script type="module" src="/src/apiClient.js"></script>
 <script src="../shared/streetAutocomplete.js"></script>
 <style>
   :root { --gap: 10px; }
@@ -179,7 +170,12 @@
     `;
     document.head.appendChild(dbg);
   })();
-  const API = (p) => '/api' + p;
+  // Build API URLs via environmentConfig; falls back to same-origin /api/*
+  const API = (p) => {
+    const clean = String(p).replace(/^\/?(api\/)?/, '');
+    if (window.environmentConfig?.getApiUrl) return window.environmentConfig.getApiUrl(clean);
+    return '/api/' + clean;
+  };
 
   function fromQS() {
     const u = new URL(location.href);
@@ -214,8 +210,13 @@
     // Fallback: construct full URL to worker
     let fullUrl = url;
     if (url.startsWith('/api')) {
-      fullUrl = window.GrassrootsEnv.getApiBaseUrl() + url;
-      console.log('🔄 Fallback to worker URL:', fullUrl);
+      try {
+        const origin = new URL(window.environmentConfig.getApiUrl('ping')).origin;
+        fullUrl = origin + url;
+      } catch {
+        fullUrl = location.origin + url;
+      }
+      console.log('🔄 Fallback to API origin:', fullUrl);
     }
     
     const r = await fetch(fullUrl, {
@@ -653,20 +654,9 @@
     maxSuggestions: 100, // Show more streets for better scrolling
     apiRequest: async (body) => {
       console.log('🔗 StreetAutocomplete calling API with:', body);
-      // Use apiFetch which has proper auth bypass logic
-      const streetsUrl = (window.environmentConfig
-        ? window.environmentConfig.getApiUrl('streets')
-        : new URL('/api/streets', location.origin).toString());
-      const response = await fetch(streetsUrl, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      return response.json();
+      // Prefer centralized client so auth+cookies+re-auth are consistent
+      if (window.apiPost) return window.apiPost('streets', body);
+      return jsonFetch('/api/streets', { method: 'POST', body: JSON.stringify(body) });
     },
     getCounty: () => {
       const county = fromQS().county;
