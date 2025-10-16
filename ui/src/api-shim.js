@@ -13,8 +13,8 @@ if (typeof window !== 'undefined') {
   // Provide the API helper if not already available
   if (typeof window.API !== 'function') {
     window.API = (p) => {
-      const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-      const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+      // Use origin-relative fallback
+      const baseUrl = location.origin;
       return `${baseUrl}/api${p.startsWith('/') ? p : '/' + p}`;
     };
   }

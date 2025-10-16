@@ -30,14 +30,15 @@ class StreetAutocomplete {
     this.getCity = options.getCity || (() => null);
     this.onStreetSelected = options.onStreetSelected || (() => {});
     this.onHouseFieldChange = options.onHouseFieldChange || (() => {});
-    this.apiEndpoint = options.apiEndpoint || (() => {
-      if (window.GrassrootsEnv) return window.GrassrootsEnv.getApiUrl('/api/streets');
-      if (window.environmentConfig) return window.environmentConfig.getApiUrl('streets');
-      // Final fallback - use dynamic origin detection
-      const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-      const apiPort = isLocal ? ':8787' : '';
-      return location.protocol + '//' + location.hostname + apiPort + '/api/streets';
-    })();
+    if (options.apiEndpoint) {
+      this.apiEndpoint = options.apiEndpoint;
+    } else if (typeof window !== 'undefined' && window.environmentConfig) {
+      this.apiEndpoint = window.environmentConfig.getApiUrl('streets');
+    } else if (typeof location !== 'undefined') {
+      this.apiEndpoint = new URL('/api/streets', location.origin).toString();
+    } else {
+      this.apiEndpoint = '/api/streets';
+    }
     this.apiRequest = options.apiRequest || null; // Custom API request function
     this.maxSuggestions = options.maxSuggestions || 20;
     this.enableHouseAfterChars = options.enableHouseAfterChars || 3;

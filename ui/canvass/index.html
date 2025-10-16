@@ -506,7 +506,10 @@
       const filters = fromQS();
       
       // API call to get addresses on this specific street
-      const response = await fetch(window.GrassrootsEnv.getApiUrl('/api/canvass/nearby'), {
+      const nearbyUrl = (window.environmentConfig
+        ? window.environmentConfig.getApiUrl('canvass/nearby')
+        : new URL('/api/canvass/nearby', location.origin).toString());
+      const response = await fetch(nearbyUrl, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
@@ -651,7 +654,10 @@
     apiRequest: async (body) => {
       console.log('🔗 StreetAutocomplete calling API with:', body);
       // Use apiFetch which has proper auth bypass logic
-      const response = await fetch(window.GrassrootsEnv.getApiUrl('/api/streets'), {
+      const streetsUrl = (window.environmentConfig
+        ? window.environmentConfig.getApiUrl('streets')
+        : new URL('/api/streets', location.origin).toString());
+      const response = await fetch(streetsUrl, {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
