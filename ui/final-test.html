@@ -6,7 +6,7 @@
     // Load environment configuration globally
     async function loadEnvironmentConfig() {
       try {
-        const module = await import('./config/environments.js');
+        const module = await import('/config/environments.js');
         window.environmentConfig = module.default || module.environmentConfig;
         console.log('✅ Environment config loaded');
       } catch (error) {

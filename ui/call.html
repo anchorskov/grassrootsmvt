@@ -129,13 +129,7 @@
 
 <script>
   // Load the API shim which exposes window.apiFetch and API()
-  (function(){
-    // Load the API shim as an ES module so imports inside it work correctly.
-    const s = document.createElement('script');
-    s.type = 'module';
-    s.src = '/src/api-shim.js';
-    document.head.appendChild(s);
-  })();
+  // Note: Deprecated api-shim.js injection removed - using direct apiClient.js instead
 
   // Debug snippet: logs token presence and tests /api/ping connectivity
   (function(){
@@ -170,8 +164,10 @@
     }
     // Fallback if environment config not loaded yet
     const baseUrl = window.GrassrootsEnv ? window.GrassrootsEnv.getApiBaseUrl() : 
+                    window.environmentConfig ? window.environmentConfig.getApiUrl('/api').replace('/api', '') :
                     (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 
-                     'http://localhost:8787' : 'https://api.grassrootsmvt.org');
+                     window.GrassrootsEnv?.getApiBaseUrl() || 'http://localhost:8787' : 
+                     window.GrassrootsEnv?.getApiBaseUrl() || 'https://api.grassrootsmvt.org');
     const cleanPath = path.replace(/^\/?(api\/)?/, '');
     return `${baseUrl}/api/${cleanPath}`;
   };

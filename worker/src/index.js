@@ -1,5 +1,6 @@
 // src/index.js — Cloudflare Zero Trust module Worker
 import { verifyAccessJWT } from "../functions/_utils/verifyAccessJWT.js";
+import { serveEnvironmentsJs } from './static-environments.js';
 
 // --- Environment Detection ---------------------------------------------------
 function isLocalDevelopment(env) {
@@ -121,6 +122,12 @@ async function authenticateRequest(request, env) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    
+    // Serve environment configuration with correct MIME type
+    if (url.pathname === '/config/environments.js') {
+      return serveEnvironmentsJs();
+    }
+    
     // Normalize /api/* to /* so both /auth/finish and /api/auth/finish work
     const normalizedPath = url.pathname.replace(/^\/api(?=\/|$)/, "");
 

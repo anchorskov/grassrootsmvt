@@ -30,8 +30,13 @@ class StreetAutocomplete {
     this.getCity = options.getCity || (() => null);
     this.onStreetSelected = options.onStreetSelected || (() => {});
     this.onHouseFieldChange = options.onHouseFieldChange || (() => {});
-    this.apiEndpoint = options.apiEndpoint || (window.GrassrootsEnv ? 
-                      window.GrassrootsEnv.getApiUrl('/api/streets') : 'http://localhost:8787/api/streets');
+    this.apiEndpoint = options.apiEndpoint || (() => {
+      if (window.GrassrootsEnv) return window.GrassrootsEnv.getApiUrl('/api/streets');
+      if (window.environmentConfig) return window.environmentConfig.getApiUrl('streets');
+      // Final fallback - avoid hard-coded origins
+      const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+      return (isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org') + '/api/streets';
+    })();
     this.apiRequest = options.apiRequest || null; // Custom API request function
     this.maxSuggestions = options.maxSuggestions || 20;
     this.enableHouseAfterChars = options.enableHouseAfterChars || 3;
@@ -191,6 +196,7 @@ class StreetAutocomplete {
         console.log('🌐 Using direct fetch to:', this.apiEndpoint);
         const response = await fetch(this.apiEndpoint, {
           method: 'POST',
+          credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ county, city })
         });

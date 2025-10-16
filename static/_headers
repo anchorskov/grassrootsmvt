@@ -1,6 +1,16 @@
 # Cloudflare Pages headers configuration
 # https://developers.cloudflare.com/pages/platform/headers/
 
+# Serve specific JavaScript files with correct MIME type
+/config/environments.js
+  Content-Type: application/javascript; charset=utf-8
+
+/src/apiClient.js
+  Content-Type: application/javascript; charset=utf-8
+
+/src/api-shim.js
+  Content-Type: application/javascript; charset=utf-8
+
 # Serve JavaScript files with correct MIME type
 /config/*.js
   Content-Type: application/javascript

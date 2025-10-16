@@ -1,75 +1,107 @@
 /**
- * GrassrootsMVT API Client with Enhanced Authentication Handling
+ * GrassrootsMVT Centralized API Client
  */
 
-// Environment configuration using centralized helper
+// Environment configuration cache
 let environmentConfig;
 
-// Wait for environment config to be available if needed
-async function ensureEnvironmentConfig() {
-  if (!environmentConfig && typeof window !== 'undefined') {
-    // Wait a bit for the global variable to be set
-    await new Promise(resolve => setTimeout(resolve, 100));
-    if (window.environmentConfig) {
-      environmentConfig = window.environmentConfig;
-    }
-  }
-  
-  // If still no environment config, use centralized environment helper
+// Load environment configuration
+async function loadEnvironmentConfig() {
   if (!environmentConfig) {
-    environmentConfig = {
-      shouldBypassAuth: () => {
-        return window.GrassrootsEnv ? window.GrassrootsEnv.shouldBypassAuth() : 
-               (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
-      },
-      getApiUrl: (endpoint, params = {}) => {
-        const baseUrl = window.GrassrootsEnv ? window.GrassrootsEnv.getApiBaseUrl() : 
-                        (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 
-                         'http://localhost:8787' : 'https://api.grassrootsmvt.org');
-        
-        // Handle endpoint mapping like the real environment config
-        const endpointMap = {
-          'ping': '/api/ping',
-          'voters': '/api/voters',
-          'neighborhoods': '/api/neighborhoods',
-          'log': '/api/log',
-          'call': '/api/call',
-          'whoami': '/api/whoami'
+    try {
+      // Load environment helper module
+      const mod = await import('/config/environments.js');
+      const envHelper = mod.default || window.GrassrootsEnv;
+      
+      if (envHelper) {
+        environmentConfig = {
+          getApiUrl: (endpoint, params = {}) => {
+            const url = new URL(envHelper.getApiUrl(endpoint));
+            Object.entries(params || {}).forEach(([k, v]) => url.searchParams.set(k, v));
+            return url.toString();
+          },
+          shouldBypassAuth: () => envHelper.shouldBypassAuth(),
+          isLocal: envHelper.isLocal,
+          debug: (msg, data) => {
+            if (envHelper.isLocal) console.log(`[API] ${msg}`, data || '');
+          }
         };
-        
-        const endpointPath = endpointMap[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
-        let url = `${baseUrl}${endpointPath}`;
-        
-        if (Object.keys(params).length > 0) {
-          const searchParams = new URLSearchParams(params);
-          url += `?${searchParams.toString()}`;
-        }
-        return url;
-      },
-      debug: (message, data) => {
-        const isLocal = window.GrassrootsEnv ? window.GrassrootsEnv.isLocal : 
-                        (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
-        if (isLocal) {
-          console.log(`[ENV-LOCAL-FALLBACK] ${message}`, data || '');
-        }
-      },
-      config: window.GrassrootsEnv ? window.GrassrootsEnv.getEnvironmentInfo() : {
-        environment: location.hostname === 'localhost' ? 'local' : 'production',
-        isLocal: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
       }
-    };
+    } catch (error) {
+      console.warn('Failed to load environment config, using fallback:', error);
+    }
+    
+    // Fallback if environment helper not available
+    if (!environmentConfig) {
+      const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+      // Use dynamic detection instead of hard-coded origins
+      const baseUrl = (() => {
+        if (window.GrassrootsEnv) return window.GrassrootsEnv.getApiBaseUrl();
+        return isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+      })();
+      
+      environmentConfig = {
+        getApiUrl: (endpoint, params = {}) => {
+          const path = endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`;
+          const url = new URL(baseUrl + path);
+          Object.entries(params || {}).forEach(([k, v]) => url.searchParams.set(k, v));
+          return url.toString();
+        },
+        shouldBypassAuth: () => isLocal,
+        isLocal,
+        debug: (msg, data) => {
+          if (isLocal) console.log(`[API-FALLBACK] ${msg}`, data || '');
+        }
+      };
+    }
   }
   
   return environmentConfig;
 }
 
-const API_ORIGIN = (() => {
-  return window.GrassrootsEnv ? window.GrassrootsEnv.getApiBaseUrl() : 
-         (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 
-          'http://localhost:8787' : 'https://api.grassrootsmvt.org');
-})();
+// Centralized API fetch function
+async function apiFetch(endpoint, options = {}) {
+  const config = await loadEnvironmentConfig();
+  
+  // Build URL using environment-aware helper
+  const url = config.getApiUrl(endpoint, options.params);
+  config.debug('Fetching:', url);
+  
+  // Prepare fetch options with defaults
+  const fetchOptions = {
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...options.headers
+    },
+    ...options
+  };
+  
+  // Remove params from options to avoid conflicts
+  delete fetchOptions.params;
+  
+  const response = await fetch(url, fetchOptions);
+  
+  // Handle auth failures in production
+  if (!config.shouldBypassAuth() && (response.status === 401 || response.status === 403)) {
+    config.debug('Auth failure, redirecting to login flow');
+    
+    // Build auth redirect URL
+    const finishUrl = config.getApiUrl('auth/finish', { to: location.href });
+    const authUrl = config.getApiUrl('ping', { finish: finishUrl });
+    
+    location.replace(authUrl);
+    return new Promise(() => {}); // Halt execution during redirect
+  }
+  
+  return response;
+}
 
-const API_BASE = `${API_ORIGIN}/api`;
+// Helper function for building API URLs
+async function API(path, params) {
+  const config = await loadEnvironmentConfig();
+  return config.getApiUrl(path, params);
+}
 
 // Unified keys used everywhere
 const ACCESS_READY_KEY   = "accessReady:v1";
@@ -163,84 +195,68 @@ async function getCurrentUserOrRedirect() {
   }
 }
 
-// Legacy compatibility - maintain existing function names for backward compatibility
+// Legacy compatibility functions for backward compatibility
 async function ensureAccessSession() {
-  const envConfig = await ensureEnvironmentConfig();
+  const config = await loadEnvironmentConfig();
   
   // Bypass authentication in local development
-  if (envConfig.shouldBypassAuth()) {
-    envConfig.debug('Bypassing authentication in local development');
+  if (config.shouldBypassAuth()) {
+    config.debug('Bypassing authentication in local development');
     sessionStorage.setItem(ACCESS_READY_KEY, 'true');
     return Promise.resolve();
   }
 
   const ready = sessionStorage.getItem(ACCESS_READY_KEY) === 'true';
   if (!ready) {
-    // Use the new getCurrentUserOrRedirect method
     try {
       await getCurrentUserOrRedirect();
       sessionStorage.setItem(ACCESS_READY_KEY, 'true');
     } catch (err) {
-      // getCurrentUserOrRedirect handles redirect, so this shouldn't normally execute
       const returnTo = encodeURIComponent(safeTo(location.href));
-      window.location.href = `${API_ORIGIN}/whoami?nav=1&to=${returnTo}`;
+      const authUrl = await API('whoami', { nav: '1', to: returnTo });
+      window.location.href = authUrl;
       return new Promise(() => {});
     }
   }
   return Promise.resolve();
 }
 
-// Centralized API fetch with credentials
-async function apiFetch(path, options = {}) {
-  await ensureAccessSession(); // make sure we kicked, if needed
-  
-  const envConfig = await ensureEnvironmentConfig();
-  const apiUrl = envConfig.getApiUrl(path);
-  envConfig.debug('API fetch:', apiUrl);
-  
-  const fetchOptions = {
-    credentials: 'include',
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-  };
-
-  const res = await fetch(apiUrl, fetchOptions);
-  
-  // In local development, don't redirect on auth errors
-  if (envConfig.shouldBypassAuth()) {
-    return res;
+async function apiGet(path) {
+  const res = await apiFetch(path);
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const err = new Error(`GET ${path} ${res.status}`);
+    err.status = res.status;
+    err.body = text;
+    throw err;
   }
-  
-  // If something still goes sideways (e.g., Access cookie expired), re-kick.
-  if (res.status === 401 || res.status === 403) {
-    sessionStorage.removeItem('accessReady:v1');
-    // Use the new getCurrentUserOrRedirect method
-    await getCurrentUserOrRedirect();
-    return new Promise(() => {});
-  }
-  return res;
+  return res.json();
 }
+
+async function apiPost(path, body) {
+  const res = await apiFetch(path, { 
+    method: "POST", 
+    body: JSON.stringify(body || {}) 
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const err = new Error(`POST ${path} ${res.status}`);
+    err.status = res.status;
+    err.body = text;
+    throw err;
+  }
+  return res.json();
+}
+
+// Export functions for ES6 modules and global access
+export { apiFetch, API, loadEnvironmentConfig, ensureAccessSession, getCurrentUserOrRedirect, apiGet, apiPost };
 
 // Global browser access (works in all contexts)
 if (typeof window !== 'undefined') {
-  window.ensureAccessSession = ensureAccessSession;
   window.apiFetch = apiFetch;
+  window.API = API;
+  window.ensureAccessSession = ensureAccessSession;
   window.getCurrentUserOrRedirect = getCurrentUserOrRedirect;
   window.apiGet = apiGet;
   window.apiPost = apiPost;
-}
-
-// ES6 module compatibility (for files that import this module)
-if (typeof module !== 'undefined' && module.exports) {
-  // CommonJS exports
-  module.exports = { ensureAccessSession, apiFetch, getCurrentUserOrRedirect, apiGet, apiPost };
-} else if (typeof window === 'undefined') {
-  // ES6 module exports (only if not in browser)
-  if (typeof globalThis !== 'undefined') {
-    globalThis.ensureAccessSession = ensureAccessSession;
-    globalThis.apiFetch = apiFetch;
-    globalThis.getCurrentUserOrRedirect = getCurrentUserOrRedirect;
-    globalThis.apiGet = apiGet;
-    globalThis.apiPost = apiPost;
-  }
 }
