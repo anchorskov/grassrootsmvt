@@ -1,238 +1,111 @@
-# 🔐 JWT Authentication Implementation Verification Steps
+# 🔐 Cloudflare Access Verification Guide
 
-## Overview
-This document provides step-by-step verification instructions for the newly implemented global `window.apiFetch` function with Cloudflare Access JWT authentication.
+This guide documents how to validate the simplified authentication flow that now powers `/ui/call.html` and the other volunteer experiences. The UI no longer relies on a global `window.apiFetch` helper; instead it performs a lightweight `ensureAuth()` check that:
 
-## Implementation Summary
+1. Calls `GET https://api.grassrootsmvt.org/whoami` with `credentials: "include"`.
+2. On `401`, performs a top-level navigation to `https://api.grassrootsmvt.org/whoami?nav=1&to=<current URL>`.
+3. Lets the Worker redirect through Cloudflare Access before returning the user to the UI.
 
-### Core Components Added:
-1. **Global API Client**: `/ui/src/apiClient.js` - Production-ready authentication handler
-2. **Authentication Test Page**: `/ui/auth-test.html` - Comprehensive testing interface
-3. **Updated HTML Pages**: Enhanced `index.html`, `call.html`, and `canvass/index.html` with authentication status
+Because the flow depends entirely on Cloudflare Access issuing the `CF_Authorization` cookie for `api.grassrootsmvt.org`, always cross-reference the [Cloudflare Zero Trust documentation](https://developers.cloudflare.com/cloudflare-one/) when you see unexpected behaviour. A quick way to discover the canonical login URL is to run:
 
-### Key Features Implemented:
-- ✅ Global `window.apiFetch()` function with automatic JWT handling
-- ✅ Cloudflare Access cookie extraction (`CF_Authorization`)
-- ✅ Automatic authentication headers (`Cf-Access-Jwt-Assertion`)
-- ✅ Error handling with 401/403 redirect to `/cdn-cgi/access/login`
-- ✅ Offline request queueing with localStorage/ServiceWorker
-- ✅ Toast notification system
-- ✅ Authentication status indicators
-- ✅ Retry logic with exponential backoff
+```bash
+curl -I https://api.grassrootsmvt.org/whoami | grep -i location
+```
 
-## Verification Steps
+The value of the `Location` header is the source of truth for how Cloudflare expects login redirects to be formatted.
 
-### Step 1: Local Development Testing
+---
 
-**Prerequisites:**
+## 1. Local Development
+
+### Prerequisites
+
 ```bash
 cd /home/anchor/projects/grassrootsmvt
+npm install
+npx wrangler dev --local --port 8787
 npx wrangler pages dev ui --port 8080
 ```
 
-**1.1 Test Authentication Test Page**
-1. Open: http://localhost:8080/auth-test.html
-2. Verify page loads with authentication status
-3. Click "Test window.apiFetch" - should show all global functions available
-4. Click "Run All Tests" - should test API endpoints
-5. Check browser console for authentication logs
+### Steps
 
-**Expected Results:**
-- ✅ All global functions (apiFetch, showToast, getAuthStatus, checkAuth) available
-- ✅ API tests may fail in local dev (expected - no Worker API running)
-- ✅ Toast notifications should appear
-- ✅ Console shows "🔐 API Client initialized successfully"
+1. Open http://localhost:8080/call.html in a fresh tab.
+2. Because the Worker runs with `ENVIRONMENT="local"`, the page prints `Signed in as: dev@localhost` without performing any redirects.
+3. Click **Get Next**. The request hits `http://127.0.0.1:8787/call` and returns either a voter record or an empty response, confirming that authentication is bypassed in local mode.
+4. Check the browser console. You should see exactly one call to `/whoami` and no navigation attempts.
 
-**1.2 Test Main Pages**
-1. Open: http://localhost:8080/index.html
-2. Verify authentication status indicator (top-right)
-3. Check console for authentication initialization logs
+✅ Expected: No Cloudflare Access challenges occur when `ENVIRONMENT` is not `production`.
 
-**1.3 Test Call Interface**
-1. Open: http://localhost:8080/call.html
-2. Verify page loads with authentication status
-3. Check console for API initialization
+---
 
-### Step 2: Production Environment Testing
+## 2. Production Flow
 
-**Prerequisites:**
-- Production deployment at https://volunteers.grassrootsmvt.org
-- Cloudflare Access authentication enabled
+1. Visit https://volunteers.grassrootsmvt.org/call.html in an incognito window.
+2. You should immediately be redirected to `https://api.grassrootsmvt.org/whoami?nav=1&to=…` and then to the Cloudflare Access login page. Complete the login process.
+3. After authentication you are sent back to `https://volunteers.grassrootsmvt.org/call.html`.
+4. When the page reloads it performs a single authenticated fetch to `/whoami`. Inspect the Network tab and confirm:
+   - `whoami` responds `200` with `{ ok: true, email: … }`.
+   - `Access-Control-Allow-Credentials: true` is present.
+   - No further redirects are triggered.
+5. Click **Get Next** to load a voter. Submit a call outcome to ensure `POST /complete` succeeds while authenticated.
 
-**2.1 Production Authentication Flow**
-1. Navigate to: https://volunteers.grassrootsmvt.org/auth-test.html
-2. Should redirect to Cloudflare Access login if not authenticated
-3. After authentication, should return to test page
-4. Authentication status should show "✅ Authenticated"
+✅ Expected: Exactly one Access challenge per browser session. After the cookie is set, the page should remain on the volunteer UI without bouncing back to Access.
 
-**2.2 JWT Token Verification**
-1. Open browser DevTools → Application → Cookies
-2. Verify `CF_Authorization` cookie is present
-3. Open Console and run: `window.getAuthStatus()`
-4. Should return: `{ isAuthenticated: true, authType: "Cloudflare Access JWT" }`
+---
 
-**2.3 API Functionality Testing**
-1. In the auth test page, click "Run All Tests"
-2. All API tests should pass:
-   - ✅ `/api/ping` - Basic connectivity
-   - ✅ `/api/whoami` - User authentication info
-   - ✅ `/api/voters` - Data access (with proper authorization)
+## 3. Configuration Cross-Checks
 
-**2.4 Error Handling Verification**
-1. Open DevTools → Application → Storage → Local Storage
-2. Delete `access_token` if present
-3. Clear `CF_Authorization` cookie
-4. Refresh page and try API call
-5. Should automatically redirect to `/cdn-cgi/access/login`
+Run these commands any time the authentication flow misbehaves:
 
-### Step 3: Integration Testing
+```bash
+# 1. Inspect the official login URL returned by Cloudflare (source of truth)
+curl -I https://api.grassrootsmvt.org/whoami | grep -i location
 
-**3.1 Volunteer Hub Integration**
-1. Open: https://volunteers.grassrootsmvt.org/
-2. Verify authentication status indicator shows "✅ Authenticated"
-3. Select county/district filters
-4. Click "Start Calls" or "Start Canvass"
-5. Verify seamless navigation with maintained authentication
-
-**3.2 Call Interface Integration**
-1. Access: https://volunteers.grassrootsmvt.org/call.html
-2. Should load voter data automatically using authenticated API calls
-3. Submit a call result - should use `window.apiFetch` for POST requests
-4. Verify toast notifications appear for successful operations
-
-**3.3 Offline Capability Testing**
-1. Open call or canvass interface
-2. Disable network connection
-3. Submit a form - should show "queued for sync" toast
-4. Re-enable network - should process queued requests
-5. Check localStorage for `offline_queue` entries
-
-### Step 4: Developer Verification
-
-**4.1 Console Commands**
-Test these commands in browser console on production:
-
-```javascript
-// Test global function availability
-typeof window.apiFetch === 'function'  // Should be true
-typeof window.showToast === 'function'  // Should be true
-typeof window.getAuthStatus === 'function'  // Should be true
-
-// Test authentication status
-window.getAuthStatus()
-// Expected: { isAuthenticated: true, isLocalDev: false, tokenPresent: true, authType: "Cloudflare Access JWT" }
-
-// Test API call
-await window.apiFetch('/ping')
-// Expected: { ok: true, message: "pong" }
-
-// Test authentication check
-await window.checkAuth()
-// Expected: true (if authenticated)
-
-// Show test toast
-window.showToast('Test notification!', 'success')
-// Expected: Green success toast appears
-
-// Check API configuration
-window.apiConfig
-// Expected: { baseUrl: "https://api.grassrootsmvt.org", isLocal: false, version: "2.0.0" }
+# 2. Confirm Worker secrets match that configuration
+npx wrangler secret list --env production | grep -E "TEAM_DOMAIN|POLICY_AUD"
 ```
 
-**4.2 Network Tab Verification**
-1. Open DevTools → Network tab
-2. Make API calls via the interface
-3. Verify requests include proper headers:
-   - `Content-Type: application/json`
-   - `Cf-Access-Jwt-Assertion: [JWT_TOKEN]` (production)
-   - `Authorization: Bearer [TOKEN]` (local development)
+In Cloudflare Zero Trust (dash.cloudflare.com → Zero Trust → Access → Applications):
 
-**4.3 Authentication Headers Verification**
-```javascript
-// Check JWT extraction in console
-const cookies = document.cookie.split(';').map(c => c.trim());
-const cfAuth = cookies.find(c => c.startsWith('CF_Authorization='));
-console.log('CF Auth Cookie:', cfAuth ? 'Present' : 'Missing');
+- Ensure the **Grassroots API** self-hosted application covers `api.grassrootsmvt.org/*`.
+- Attach a policy that ALLOWs the volunteer email group. A mismatch here produces the classic login loop.
+- Verify that the **Volunteers UI** application either shares the same policy or is not protected, so the UI can load before the API challenge fires.
+
+✅ Expected `Location` header format:
+
+```
+https://<team-domain>/cdn-cgi/access/login/api.grassrootsmvt.org?kid=<AUD>&redirect_url=%2Fwhoami
 ```
 
-### Step 5: Error Scenarios Testing
+If the header differs, update the Worker or Access configuration before redeploying.
 
-**5.1 Authentication Failure**
-1. Manually corrupt the JWT token in localStorage
-2. Try API call - should redirect to login
-3. Verify error handling displays appropriate messages
+---
 
-**5.2 Network Failure**
-1. Simulate network failure (DevTools → Network → Offline)
-2. Submit form data
-3. Verify offline queueing works
-4. Go back online - verify sync occurs
+## 4. Troubleshooting Login Loops
 
-**5.3 Invalid API Endpoints**
-1. Test invalid endpoint: `await window.apiFetch('/invalid')`
-2. Should handle gracefully with error toast
+If the browser keeps bouncing between the volunteer UI and Cloudflare Access:
 
-## Debugging Commands
+1. **Inspect `/whoami?nav=1&to=…`** — if it returns `401` instead of redirecting, re-check the `TEAM_DOMAIN` and `POLICY_AUD` secrets.
+2. **Confirm Access policies** — the volunteer email list must be allowed on the API application. Deny or mismatched rules yield infinite redirects.
+3. **Verify CORS** — the Worker must respond with `Access-Control-Allow-Origin: https://volunteers.grassrootsmvt.org` and `Access-Control-Allow-Credentials: true`.
+4. **Reset session storage** — clear `access:redirected` and `accessReady:v1` from `sessionStorage` on the volunteers domain to force a fresh navigation attempt.
 
-If issues arise, use these debugging commands:
+Helpful console snippets:
 
 ```javascript
-// Enable verbose logging
-localStorage.setItem('debug', 'true');
-
-// Check authentication state
-console.log('Auth Status:', window.getAuthStatus());
-console.log('API Config:', window.apiConfig);
-console.log('Has CF Cookie:', document.cookie.includes('CF_Authorization'));
-console.log('Local Token:', !!localStorage.getItem('access_token'));
-
-// Test connectivity
-await window.apiFetch('/ping').then(console.log).catch(console.error);
-
-// Check offline queue
-console.log('Offline Queue:', JSON.parse(localStorage.getItem('offline_queue') || '[]'));
-
-// Force authentication check
-await window.checkAuth();
+sessionStorage.getItem('access:redirected');
+sessionStorage.getItem('accessReady:v1');
 ```
 
-## Success Criteria
+---
 
-**✅ All verification steps should result in:**
+## 5. Success Criteria
 
-1. **Authentication**: Seamless Cloudflare Access integration
-2. **API Calls**: All endpoints accessible with proper JWT headers
-3. **Error Handling**: Graceful failures with user feedback
-4. **Offline Support**: Request queueing and sync functionality
-5. **User Experience**: Toast notifications and status indicators
-6. **Developer Tools**: Global functions accessible and debuggable
+You are finished when all of the following hold:
 
-## Troubleshooting
+- Access login occurs exactly once per session.
+- `/whoami` returns `{ ok: true, email }` without retries.
+- `/call` and `/complete` succeed after authentication.
+- The `Location` header from `curl -I https://api.grassrootsmvt.org/whoami` matches the login URL that `worker/src/index.js` builds.
 
-**Common Issues:**
-
-1. **"apiFetch is not a function"**
-   - Verify `/src/apiClient.js` is loaded before other scripts
-   - Check for JavaScript errors in console
-
-2. **Authentication redirects in infinite loop**
-   - Verify Cloudflare Access configuration
-   - Check if user has proper access permissions
-
-3. **API calls fail with 401/403**
-   - Verify JWT token extraction from cookies
-   - Check if token has expired
-
-4. **Offline queue not working**
-   - Verify IndexedDB support in browser
-   - Check if Service Worker is properly registered
-
-## Files Modified
-
-- ✅ `/ui/src/apiClient.js` - Complete rewrite with global apiFetch
-- ✅ `/ui/index.html` - Added script loading and auth status
-- ✅ `/ui/call.html` - Added script loading and integration
-- ✅ `/ui/canvass/index.html` - Added script loading and auth status
-- ✅ `/ui/auth-test.html` - New comprehensive testing page
-
-This completes the JWT authentication implementation with global `window.apiFetch` function as specified. All verification steps should confirm proper authentication handling, error management, and offline capabilities.
+Document any deviations and resolve them by consulting the official Cloudflare documentation before changing Worker logic.

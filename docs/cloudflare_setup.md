@@ -5,17 +5,18 @@ Maintained by: GrassrootsMVT DevOps
 
 🧭 Summary of Current State
 
-The GrassrootsMVT production Cloudflare Worker is now fully functional with complete volunteer engagement APIs.
-It integrates Cloudflare Zero Trust authentication and an optimized D1 database, with a dual-path authentication model:
+The GrassrootsMVT production Cloudflare Worker provides the complete volunteer engagement API, protected by
+Cloudflare Access. The architecture now follows a single, streamlined authentication path:
 
-✅ Browser-based volunteer login via Cloudflare Access JWT (email policies)
-✅ Service token authentication for scripts and CI tasks  
+✅ Cloudflare Access challenge in the Worker via `/whoami?nav=1&to=…` top-level redirects  
+✅ Service token authentication for automation (unchanged)  
 ✅ Public healthcheck endpoint for uptime monitoring
-✅ Complete API suite: /api/call, /api/canvass, /api/pulse, /api/templates
+✅ Complete API suite: /call, /canvass, /pulse, /templates (exposed via `/api/*`)
 ✅ Database performance optimized (95% query speed improvement)
-⚠️ UI integration requires JWT token handling for production deployment
 
-✅ Everything tested end-to-end and verified in production.
+Everything below reflects the current Worker (`worker/src/index.js`) behaviour. Always confirm against the
+[official Cloudflare Zero Trust documentation](https://developers.cloudflare.com/cloudflare-one/) when
+making changes or debugging authentication issues.
 
 ⚙️ Worker & Wrangler Configuration
 worker/wrangler.toml
@@ -45,7 +46,7 @@ migrations_dir = "db/migrations"
 [env.production]
 preview_urls = true
 ENVIRONMENT = "production"
-ALLOW_ORIGIN = "https://grassrootsmvt.org"
+ALLOW_ORIGIN = "https://volunteers.grassrootsmvt.org"
 ACCESS_HEADER = "Cf-Access-Authenticated-User-Email"
 ACCESS_JWT_HEADER = "Cf-Access-Jwt-Assertion"
 DATA_BACKEND = "d1"
@@ -57,6 +58,9 @@ binding = "d1"
 database_name = "wy"
 database_id = "4b4227f1-bf30-4fcf-8a08-6967b536a5ab"
 migrations_dir = "db/migrations"
+
+🌐 CORS Configuration
+In production, set ALLOW_ORIGIN to https://volunteers.grassrootsmvt.org only. Use the preview environment for any *.pages.dev testing.
 
 🗄️ D1 Migrations
 # Local (preview)
@@ -133,6 +137,15 @@ Verify:
 
 npx wrangler secret list --env production
 
+Quick sanity check (source of truth for login URL):
+
+```bash
+curl -I https://api.grassrootsmvt.org/whoami | grep -i location
+```
+
+The returned `Location` header must match the login URL you redirect to inside
+`worker/src/index.js` (host-in-path: `/cdn-cgi/access/login/api.grassrootsmvt.org`).
+
 🔧 Service Token (Automation) Access
 
 Service tokens are used for backend scripts, CI, and tests without browser login.
@@ -163,23 +176,35 @@ Expected JSON response:
 
 🌍 Browser Volunteer Authentication
 
-1️⃣ Visit https://volunteers.grassrootsmvt.org
-→ Redirects to Cloudflare Access login screen.
+1️⃣ Visit https://volunteers.grassrootsmvt.org/call.html (or any volunteer UI page).  
+   The page immediately calls `https://api.grassrootsmvt.org/whoami`. If the user is not authenticated,
+   the Worker issues a `302` to `https://api.grassrootsmvt.org/whoami?nav=1&to=<return url>` which then
+   redirects through the Cloudflare Access login hosted at `https://skovgard.cloudflareaccess.com`.
 
-2️⃣ Log in with an allowed volunteer email.
-→ JWT cookie CF_Authorization is set for .grassrootsmvt.org.
+2️⃣ After completing the Access login, Cloudflare sets the `CF_Authorization` cookie on
+    `api.grassrootsmvt.org` and redirects back to the original volunteer page.
 
-3️⃣ Visit
-https://api.grassrootsmvt.org/api/whoami
+3️⃣ Reloading the page (or clicking **Get Next**) triggers a single authenticated request:
 
-✅ Expected response:
+```bash
+curl -I https://api.grassrootsmvt.org/whoami
+```
 
+✅ Expected `Location` header when unauthenticated:
+
+```
+https://skovgard.cloudflareaccess.com/cdn-cgi/access/login/api.grassrootsmvt.org?kid=<AUD>&redirect_url=%2Fwhoami
+```
+
+✅ Expected JSON response when authenticated:
+
+```json
 {
   "ok": true,
-  "email": "anchorskov@gmail.com",
-  "environment": "production",
-  "source": "Cloudflare Zero Trust"
+  "email": "volunteer@example.com",
+  "environment": "production"
 }
+```
 
 🧩 Health Check
 
@@ -196,7 +221,7 @@ hello world
 npx wrangler dev
 curl http://127.0.0.1:8787/api/ping
 curl -H "Cf-Access-Authenticated-User-Email: volunteer@grassrootsmvt.org" \
-     http://127.0.0.1:8787/api/whoami
+  http://127.0.0.1:8787/whoami
 
 🧰 Deployment Commands
 # Deploy production Worker
@@ -212,7 +237,7 @@ npx wrangler tail --env production
 Item	Status	Description
 Wrangler deploys successfully	✅	Ignore [vars] inheritance warning
 D1 connected	✅	Production + local
-JWT browser login	✅	Verified (/api/whoami)
+JWT browser login	✅	Verified (/whoami)
 Service token login	✅	Tested, returns JSON
 Health check	✅	/api/ping reachable
 Access policies	✅	All linked to application

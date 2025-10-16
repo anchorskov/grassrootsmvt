@@ -3,6 +3,11 @@ import { verifyAccessJWT } from "../functions/_utils/verifyAccessJWT.js";
 
 // --- Environment Detection ---------------------------------------------------
 function isLocalDevelopment(env) {
+  // Primary check: explicit environment setting
+  if (env.ENVIRONMENT === 'production') {
+    return false;
+  }
+  
   // Check for local development indicators
   const hasLocalEnvVars = (
     env.ENVIRONMENT === 'local' ||
@@ -40,15 +45,15 @@ function getEnvironmentConfig(env) {
 
 // --- CORS helpers ------------------------------------------------------------
 function parseAllowedOrigins(env) {
-  const defaultOrigins = isLocalDevelopment(env) 
+  const defaultOrigins = isLocalDevelopment(env)
     ? ["http://localhost:8788", "http://localhost:8080", "http://127.0.0.1:8788"]
     : ["https://volunteers.grassrootsmvt.org"];
-    
-  return (env.ALLOW_ORIGIN || "")
+  const envList = (env.ALLOW_ORIGIN || "")
     .split(",")
     .map(s => s.trim())
-    .filter(Boolean)
-    .concat(defaultOrigins);
+    .filter(Boolean);
+  // If ALLOW_ORIGIN is set, use it exactly; otherwise fall back to defaults.
+  return envList.length ? envList : defaultOrigins;
 }
 
 // Return the request's Origin only if it's allowed; otherwise null
@@ -61,8 +66,10 @@ function pickAllowedOrigin(request, env) {
 
 function withCorsHeaders(headers, allowedOrigin) {
   const h = new Headers(headers || {});
-  h.set("Access-Control-Allow-Origin", allowedOrigin);
-  h.set("Access-Control-Allow-Credentials", "true");
+  if (allowedOrigin) {
+    h.set("Access-Control-Allow-Origin", allowedOrigin);
+    h.set("Access-Control-Allow-Credentials", "true");
+  }
   const vary = h.get("Vary");
   if (!vary) h.set("Vary", "Origin");
   else if (!/\bOrigin\b/i.test(vary)) h.set("Vary", vary + ", Origin");
@@ -114,35 +121,48 @@ async function authenticateRequest(request, env) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    // Normalize /api/* to /* so both /auth/finish and /api/auth/finish work
+    const normalizedPath = url.pathname.replace(/^\/api(?=\/|$)/, "");
+
+    // ---- helpers ----------------------------------------------------------
+    const getOrigin = () => request.headers.get("Origin") || "";
+
+    // Read Access JWT from cookie first, then header as fallback
+    function getAccessJwt(req) {
+      const cookie = req.headers.get("Cookie") || "";
+      const fromCookie = cookie.split(/;\s*/).find(x => x.startsWith("CF_Authorization="));
+      if (fromCookie) {
+        return decodeURIComponent(fromCookie.split("=", 2)[1] || "");
+      }
+      return req.headers.get("Cf-Access-Jwt-Assertion") || "";
+    }
+
+    async function verifyAccessJWTOrFail(req, env) {
+      const jwt = getAccessJwt(req);
+      if (!jwt) {
+        throw new Error("Missing Access token");
+      }
+      // Use existing verifyAccessJWT utility
+      const result = await verifyAccessJWT(req, env);
+      return { ok: true, email: result.email, details: result };
+    }
+
     const config = getEnvironmentConfig(env);
-    const allowedOrigin = pickAllowedOrigin(request, env) || config.allowedOrigins[0];
+    const allowedOrigin = pickAllowedOrigin(request, env);
     
     // Debug logging for local development
     if (config.debug) {
       console.log(`[${config.environment.toUpperCase()}] ${request.method} ${url.pathname}`);
     }
 
-    // Extract JWT from header or cookie
-    const headerToken = request.headers.get("Cf-Access-Jwt-Assertion");
-    const cookieToken = getCookie(request, "CF_Authorization");
-    const accessJWT = headerToken || cookieToken;
-
-    // CORS Preflight handler for OPTIONS requests
+    // Handle OPTIONS preflight early
     if (request.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: {
-          'Access-Control-Allow-Origin': allowedOrigin,
-          'Access-Control-Allow-Credentials': 'true',
-          'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Cf-Access-Jwt-Assertion, Cache-Control, Pragma, X-Requested-With',
-          'Vary': 'Origin'
-        }
-      });
+      return preflightResponse(allowedOrigin || null);
     }
 
     // Auth finish route - returns user to UI after Access login
-    if (url.pathname === "/auth/finish") {
+    // Canonical finish endpoint: /auth/finish (and /api/auth/finish via normalization)
+    if (normalizedPath === "/auth/finish") {
       const to = url.searchParams.get("to") || config.allowedOrigins[0] + "/";
       const html = `<!doctype html><meta charset="utf-8">
       <title>Returning…</title>
@@ -151,28 +171,48 @@ export default {
       return new Response(html, { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
 
+    // Logout: clear CF Access session and bounce back to UI
+    if (normalizedPath === "/auth/logout") {
+      const to = encodeURIComponent(url.searchParams.get("to") || config.allowedOrigins[0] + "/");
+      const target = `https://api.grassrootsmvt.org/cdn-cgi/access/logout?return_to=${to}`;
+      return Response.redirect(target, 302);
+    }
+
+    // Defensive catch: /auth/<encoded-destination> (only for actual encoded URLs, not query params)
+    // This handles the mistaken UI redirect /api/auth/<encoded> but not /auth/finish?to=...
+    if (normalizedPath.startsWith("/auth/") && normalizedPath !== "/auth/config" && !normalizedPath.startsWith("/auth/finish")) {
+      const encoded = normalizedPath.slice("/auth/".length);
+      // Only redirect if it looks like a URL (contains ://)
+      if (encoded && (encoded.includes("%3A%2F%2F") || encoded.includes("://"))) {
+        return Response.redirect(decodeURIComponent(encoded), 302);
+      }
+    }
+
     // Auth config route - returns environment-specific auth configuration
-    if (url.pathname === "/auth/config") {
-      const authConfig = config.isLocal ? {
-        environment: 'local',
-        authRequired: false,
-        message: 'Local development - authentication bypassed'
-      } : {
-        environment: 'production',
-        authRequired: true,
-        teamDomain: "https://skovgard.cloudflareaccess.com",
-        policyAud: "76fea0745afec089a3eddeba8d982b10aab6d6f871e43661cb4977765b78f3f0"
-      };
+    if (normalizedPath === "/auth/config") {
+      const authConfig = config.isLocal
+        ? {
+            environment: 'local',
+            authRequired: false,
+            teamDomain: null,
+            policyAud: null
+          }
+        : {
+            environment: 'production',
+            authRequired: true,
+            teamDomain: env.TEAM_DOMAIN,
+            policyAud: env.POLICY_AUD
+          };
       
       return new Response(JSON.stringify(authConfig), {
         headers: withCorsHeaders({
           "Content-Type": "application/json"
-        }, allowedOrigin)
+        }, allowedOrigin || null)
       });
     }
 
     // Tiny fast-path for the connecting probe
-    if (url.pathname === "/api/ping") {
+    if (normalizedPath === "/ping") {
       const finishUrl = url.searchParams.get("finish");
       
       // In local development, always return success
@@ -188,7 +228,7 @@ export default {
           auth: 'bypassed'
         }), { 
           status: 200,
-          headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+          headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
         });
       }
       
@@ -207,14 +247,14 @@ export default {
           timestamp: Date.now()
         }), { 
           status: 200,
-          headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+          headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
         });
       }
       // else: fall through; Access will intercept and 302 to team domain.
     }
 
     // Error logging endpoint - public endpoint for debugging Access URL issues
-    if (url.pathname === "/api/error-log" && request.method === "POST") {
+    if (normalizedPath === "/error-log" && request.method === "POST") {
       try {
         const body = await request.json();
         const timestamp = new Date().toISOString();
@@ -249,7 +289,7 @@ export default {
         }), {
           headers: withCorsHeaders({
             "Content-Type": "application/json"
-          }, allowedOrigin)
+          }, allowedOrigin || null)
         });
       } catch (error) {
         console.error('Error logging endpoint failed:', error);
@@ -260,35 +300,80 @@ export default {
           status: 500,
           headers: withCorsHeaders({
             "Content-Type": "application/json"
-          }, allowedOrigin)
+          }, allowedOrigin || null)
         });
       }
     }
 
-    if (url.pathname === "/api/whoami") {
+    if (normalizedPath === "/whoami") {
+      // Check for navigation parameter - this handles the unified auth flow
+      const nav = url.searchParams.get("nav");
+      const to = url.searchParams.get("to");
+      if (nav === "1" && to) {
+        // Top-level navigation path:
+        //  - If already authenticated, 302 back to the UI.
+        //  - If NOT authenticated, 302 to Cloudflare Access login (first-party),
+        //    with redirect back to /whoami?nav=1&to=...
+        try {
+          const authResult = await authenticateRequest(request, env);
+          if (authResult && authResult.email) {
+            const dest = (() => {
+              try {
+                const u = new URL(to);
+                // Only allow destinations whose origin is in our allowlist
+                const ok = parseAllowedOrigins(env).includes(u.origin);
+                return ok ? u.toString() : (parseAllowedOrigins(env)[0] + "/");
+              } catch {
+                return (parseAllowedOrigins(env)[0] + "/");
+              }
+            })();
+            return Response.redirect(dest, 302);
+          }
+        } catch {}
+        // Force an Access login challenge explicitly
+        const team = env.TEAM_DOMAIN;   // e.g. https://<team>.cloudflareaccess.com
+        const aud  = env.POLICY_AUD;    // your Access application AUD
+        const back = encodeURIComponent(`/whoami?nav=1&to=${encodeURIComponent(to)}`);
+        if (team && aud) {
+          const login = `${team.replace(/\/+$/,'')}/cdn-cgi/access/login/api.grassrootsmvt.org?kid=${aud}&redirect_url=${back}`;
+          return Response.redirect(login, 302);
+        }
+        // Fallback if env not set
+        return new Response("Unauthorized", { status: 401 });
+      }
+      
+      // Regular whoami API call (no navigation)
       try {
-        const user = await authenticateRequest(request, env);
-        return new Response(JSON.stringify({
-          ok: true,
-          email: user.email,
-          name: user.name || user.email,
-          environment: config.environment,
-          source: user.isLocal ? "Local Development" : "Cloudflare Zero Trust"
-        }), { 
-          status: 200,
-          headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+        const authResult = await authenticateRequest(request, env);
+        if (!authResult || !authResult.email) {
+          return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
+            status: 401,
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
+          });
+        }
+        return new Response(JSON.stringify({ 
+          ok: true, 
+          email: authResult.email,
+          isLocal: authResult.isLocal || false
+        }), {
+          headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
         });
       } catch (err) {
-        return new Response(JSON.stringify({ ok: false, error: err.message }), {
-          status: 401, 
-          headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+        // In production: 401 so the UI can send the browser to /auth/finish
+        return new Response(JSON.stringify({ 
+          ok: false, 
+          error: "unauthorized", 
+          details: err.message 
+        }), {
+          status: 401,
+          headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
         });
       }
     }
 
     // � Volunteer & Call Logging API
 
-    if (url.pathname === '/api/voters') {
+    if (normalizedPath === '/voters') {
       // Enhanced voter filtering with context-aware queries
       try {
         const db = env.d1;
@@ -409,7 +494,7 @@ export default {
             headers: withCorsHeaders({
               "Content-Type": "application/json",
               "Cache-Control": "max-age=120"
-            }, allowedOrigin)
+            }, allowedOrigin || null)
           }
         );
       } catch (error) {
@@ -421,14 +506,14 @@ export default {
             message: error.message 
           }),
           { 
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin),
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null),
             status: 500 
           }
         );
       }
     }
 
-    if (url.pathname === '/api/call' && request.method === 'POST') {
+    if (normalizedPath === '/call' && request.method === 'POST') {
       try {
         const user = await authenticateRequest(request, env);
         const email = user.email;
@@ -501,7 +586,7 @@ export default {
                 city: result.city,
                 political_party: result.political_party
               }),
-              { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+              { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
             );
           } else {
             return new Response(
@@ -510,7 +595,7 @@ export default {
                 empty: true,
                 message: 'No eligible voters found'
               }),
-              { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+              { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
             );
           }
           
@@ -530,19 +615,19 @@ export default {
               message: 'Call logged successfully',
               volunteer: email
             }),
-            { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+            { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
           );
         }
 
       } catch (error) {
         return new Response(
           JSON.stringify({ ok: false, error: error.message }),
-          { status: 401, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+          { status: 401, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
         );
       }
     }
 
-    if (url.pathname === '/api/canvass' && request.method === 'POST') {
+    if (normalizedPath === '/canvass' && request.method === 'POST') {
       // Log canvassing activity from volunteer
       try {
         const user = await authenticateRequest(request, env);
@@ -585,7 +670,7 @@ export default {
             volunteer: email
           }),
           { 
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
           }
         );
       } catch (error) {
@@ -593,13 +678,79 @@ export default {
           JSON.stringify({ ok: false, error: error.message }),
           { 
             status: error.message.includes('JWT') ? 401 : 500, 
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
           }
         );
       }
     }
 
-    if (url.pathname === '/api/canvass/nearby' && request.method === 'POST') {
+    if (normalizedPath === '/streets' && request.method === 'POST') {
+      // Get all unique streets for a county/city combination - optimized for autocomplete
+      try {
+        const user = await authenticateRequest(request, env);
+        const { county, city } = await request.json();
+
+        if (!county || !city) {
+          return new Response(
+            JSON.stringify({ ok: false, error: 'county and city are required' }),
+            { status: 400, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
+          );
+        }
+
+        const db = env.d1;
+        
+        // Optimized query to get all unique streets for a county/city
+        // Extract street name by removing house number from addr1
+        const streetsQuery = `
+          SELECT DISTINCT 
+                 UPPER(TRIM(SUBSTR(va.addr1, INSTR(va.addr1, ' ') + 1))) as street_name,
+                 COUNT(*) as voter_count
+          FROM voters v
+          JOIN voters_addr_norm va ON v.voter_id = va.voter_id
+          WHERE v.county = ?1 
+            AND va.city = ?2
+            AND va.addr1 IS NOT NULL 
+            AND va.addr1 != ''
+            AND INSTR(va.addr1, ' ') > 0
+            AND LENGTH(TRIM(SUBSTR(va.addr1, INSTR(va.addr1, ' ') + 1))) > 0
+          GROUP BY UPPER(TRIM(SUBSTR(va.addr1, INSTR(va.addr1, ' ') + 1)))
+          ORDER BY street_name
+        `;
+
+        const result = await db.prepare(streetsQuery).bind(county, city).all();
+        
+        const streets = (result.results || []).map(row => ({
+          name: row.street_name,
+          count: row.voter_count
+        }));
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            county: county,
+            city: city,
+            streets: streets,
+            total: streets.length
+          }),
+          { 
+            headers: withCorsHeaders({ 
+              "Content-Type": "application/json",
+              "Cache-Control": "max-age=3600" // Cache for 1 hour since streets don't change often
+            }, allowedOrigin || null)
+          }
+        );
+      } catch (error) {
+        return new Response(
+          JSON.stringify({ ok: false, error: error.message }),
+          { 
+            status: error.message.includes('JWT') ? 401 : 500, 
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
+          }
+        );
+      }
+    }
+
+    if (normalizedPath === '/canvass/nearby' && request.method === 'POST') {
       // Find nearby addresses for door-to-door canvassing
       try {
         const user = await authenticateRequest(request, env);
@@ -675,7 +826,7 @@ export default {
             filters_applied: filters
           }),
           { 
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
           }
         );
       } catch (error) {
@@ -683,47 +834,100 @@ export default {
           JSON.stringify({ ok: false, error: error.message }),
           { 
             status: error.message.includes('JWT') ? 401 : 500, 
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
           }
         );
       }
     }
 
-    if (url.pathname === '/api/complete' && request.method === 'POST') {
-      // Alias for /api/canvass - log completion of canvass activity
+    if (normalizedPath === '/complete' && request.method === 'POST') {
+      // Enhanced call/canvass completion endpoint with email collection
       try {
         const user = await authenticateRequest(request, env);
         const email = user.email;
-        const { voter_id, outcome, comments } = await request.json();
+        const callData = await request.json();
+        
+        console.log('📞 Received call completion data:', callData);
+        
+        const {
+          voter_id,
+          outcome,
+          ok_callback = false,
+          requested_info = false,
+          dnc = false,
+          best_day = null,
+          best_time_window = null,
+          optin_sms = false,
+          optin_email = false,
+          email: voterEmail = null,
+          wants_volunteer = false,
+          share_insights_ok = false,
+          for_term_limits = false,
+          issue_public_lands = false,
+          comments = null
+        } = callData;
 
         // Map frontend outcome values to database result values
         const resultMap = {
-          'contacted': 'Contacted',
+          'connected': 'Contacted',
+          'vm': 'Contacted',
           'no_answer': 'Not Home', 
-          'moved': 'Moved',
+          'wrong_number': 'Wrong Number',
           'refused': 'Refused',
-          'dnc': 'Do Not Contact',
-          'note': 'Contacted' // Notes count as contact
+          'follow_up': 'Follow Up',
+          'dnc': 'Do Not Contact'
         };
         
         const mappedResult = resultMap[outcome] || 'Contacted';
 
         const db = env.d1;
+        
+        // Log in canvass_activity for backwards compatibility
         await db.prepare(
           `INSERT INTO canvass_activity 
-           (voter_id, volunteer_email, result, notes, created_at)
-           VALUES (?1, ?2, ?3, ?4, datetime('now'))`
-        ).bind(voter_id, email, mappedResult, comments || '').run();
+           (voter_id, volunteer_email, result, notes, pulse_opt_in, created_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))`
+        ).bind(
+          voter_id, 
+          email, 
+          mappedResult, 
+          comments || '', 
+          (optin_email || optin_sms) ? 1 : 0
+        ).run();
+
+        // If email is provided, store it in the voter_emails table
+        if (voterEmail && voterEmail.trim()) {
+          try {
+            await db.prepare(`
+              INSERT OR REPLACE INTO voter_emails (
+                voter_id, email, email_verified, opt_in_status, source, collected_by, collected_at, last_updated
+              ) VALUES (
+                ?1, ?2, 0, ?3, 'phone_call', ?4, datetime('now'), datetime('now')
+              )
+            `).bind(
+              voter_id,
+              voterEmail.trim(),
+              optin_email ? 'opted_in' : 'unknown',
+              email
+            ).run();
+            console.log('📧 Email stored in voter_emails table from call:', voterEmail);
+          } catch (emailError) {
+            console.warn('Failed to store email in voter_emails table:', emailError);
+            // Continue execution - don't fail the whole call if email storage fails
+          }
+        }
 
         return new Response(
           JSON.stringify({
             ok: true,
-            message: 'Activity logged successfully',
+            message: 'Call completed successfully',
             voter_id: voter_id,
-            volunteer: email
+            volunteer: email,
+            outcome: outcome,
+            email_collected: !!voterEmail
           }),
           { 
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
           }
         );
       } catch (error) {
@@ -731,14 +935,118 @@ export default {
           JSON.stringify({ ok: false, error: error.message }),
           { 
             status: error.message.includes('JWT') ? 401 : 500, 
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
           }
         );
       }
     }
 
-    if (url.pathname === '/api/contact' && request.method === 'POST') {
-      // Enhanced contact recording with rich data collection
+    if (normalizedPath === '/contact-staging' && request.method === 'POST') {
+      // NEW: Handle new voter contact submissions for staging system
+      try {
+        const user = await authenticateRequest(request, env);
+        const volunteer_email = user.email;
+        const contactData = await request.json();
+        
+        console.log('📝 Received staging contact data:', contactData);
+        
+        const {
+          county,
+          city,
+          streetName,
+          houseNumber,
+          firstName,
+          lastName,
+          middleName,
+          suffix,
+          fullAddress,
+          unitNumber,
+          zipCode,
+          phonePrimary,
+          email,
+          estimatedParty,
+          votingLikelihood,
+          contactMethod,
+          interactionNotes,
+          issuesInterested,
+          volunteerNotes
+        } = contactData;
+
+        // Validate required fields for staging
+        if (!county || !city || !firstName || !lastName) {
+          return new Response(
+            JSON.stringify({ ok: false, error: 'county, city, firstName, and lastName are required' }),
+            { status: 400, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
+          );
+        }
+
+        const db = env.d1;
+        
+        // Insert into voter_contact_staging table
+        const result = await db.prepare(`
+          INSERT INTO voter_contact_staging (
+            submitted_by, vol_email, search_county, search_city, search_street_name, search_house_number,
+            fn, ln, middle_name, suffix, addr1, house_number, street_name, unit_number,
+            city, county, state, zip, phone_e164, email, political_party, voting_likelihood,
+            contact_method, interaction_notes, issues_interested, volunteer_notes, created_at
+          ) VALUES (
+            ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, datetime('now')
+          )
+        `).bind(
+          volunteer_email,
+          volunteer_email,
+          county,
+          city,
+          streetName || '',
+          houseNumber || '',
+          firstName,
+          lastName,
+          middleName || '',
+          suffix || '',
+          fullAddress || `${houseNumber || ''} ${streetName || ''}`.trim(),
+          houseNumber || '',
+          streetName || '',
+          unitNumber || '',
+          city,
+          county,
+          'WY',
+          zipCode || '',
+          phonePrimary || '',
+          email || '',
+          estimatedParty || '',
+          votingLikelihood || 'unknown',
+          contactMethod || 'door',
+          interactionNotes || '',
+          issuesInterested || '',
+          volunteerNotes || ''
+        ).run();
+
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            message: 'Contact submitted to staging successfully',
+            staging_id: result.meta.last_row_id,
+            volunteer: volunteer_email,
+            status: 'pending_verification'
+          }),
+          { 
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
+          }
+        );
+      } catch (error) {
+        console.error('Error submitting staging contact:', error);
+        return new Response(
+          JSON.stringify({ ok: false, error: error.message }),
+          { 
+            status: 500,
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
+          }
+        );
+      }
+    }
+
+    if (normalizedPath === '/contact' && request.method === 'POST') {
+      // Enhanced contact recording with rich data collection (for existing voters)
       try {
         const user = await authenticateRequest(request, env);
         const volunteer_email = user.email;
@@ -766,7 +1074,7 @@ export default {
         if (!voter_id || !outcome) {
           return new Response(
             JSON.stringify({ ok: false, error: 'voter_id and outcome are required' }),
-            { status: 400, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+            { status: 400, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
           );
         }
 
@@ -799,6 +1107,28 @@ export default {
           issue_public_lands ? 1 : 0,
           comments
         ).run();
+
+        // If email is provided, store it in the voter_emails table
+        if (email && email.trim()) {
+          try {
+            await db.prepare(`
+              INSERT OR REPLACE INTO voter_emails (
+                voter_id, email, email_verified, opt_in_status, source, collected_by, collected_at, last_updated
+              ) VALUES (
+                ?1, ?2, 0, ?3, 'contact_form', ?4, datetime('now'), datetime('now')
+              )
+            `).bind(
+              voter_id,
+              email.trim(),
+              optin_email ? 'opted_in' : 'unknown',
+              volunteer_email
+            ).run();
+            console.log('📧 Email stored in voter_emails table:', email);
+          } catch (emailError) {
+            console.warn('Failed to store email in voter_emails table:', emailError);
+            // Continue execution - don't fail the whole contact if email storage fails
+          }
+        }
 
         // Also log in canvass_activity for backwards compatibility
         const resultMap = {
@@ -836,7 +1166,7 @@ export default {
             rich_data_captured: true
           }),
           { 
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
           }
         );
       } catch (error) {
@@ -845,13 +1175,13 @@ export default {
           JSON.stringify({ ok: false, error: error.message }),
           { 
             status: 500,
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
           }
         );
       }
     }
 
-    if (url.pathname === '/api/contact/status' && request.method === 'GET') {
+    if (normalizedPath === '/contact/status' && request.method === 'GET') {
       // Get contact status for voters (for canvass page display)
       try {
         const user = await authenticateRequest(request, env);
@@ -860,7 +1190,7 @@ export default {
         if (!voter_ids.length || voter_ids.length > 50) {
           return new Response(
             JSON.stringify({ ok: false, error: 'voter_ids parameter required (max 50 IDs)' }),
-            { status: 400, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+            { status: 400, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
           );
         }
 
@@ -918,7 +1248,7 @@ export default {
             ok: true,
             contacts: latestContacts
           }),
-          { headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+          { headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
         );
         
       } catch (error) {
@@ -927,13 +1257,13 @@ export default {
           JSON.stringify({ ok: false, error: error.message }),
           { 
             status: error.message.includes('JWT') ? 401 : 500,
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
           }
         );
       }
     }
 
-    if (url.pathname === '/api/pulse' && request.method === 'POST') {
+    if (normalizedPath === '/pulse' && request.method === 'POST') {
       // Track pulse opt-ins (text/email consent)
       try {
         const { voter_id, contact_method, consent_source } = await request.json();
@@ -972,7 +1302,7 @@ export default {
             method: contact_method
           }),
           { 
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
           }
         );
       } catch (error) {
@@ -980,13 +1310,13 @@ export default {
           JSON.stringify({ ok: false, error: error.message }),
           { 
             status: 500, 
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
           }
         );
       }
     }
 
-    if (url.pathname === '/api/activity') {
+    if (normalizedPath === '/activity') {
       // Return recent call activity by authenticated volunteer
       try {
         const user = await authenticateRequest(request, env);
@@ -999,18 +1329,18 @@ export default {
 
         return new Response(
           JSON.stringify({ ok: true, activity: result.results || [] }),
-          { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+          { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
         );
       } catch (error) {
         return new Response(
           JSON.stringify({ ok: false, error: error.message }),
-          { status: 401, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+          { status: 401, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
         );
       }
     }
 
     // 📍 Geographic Metadata for Forms with Enhanced District↔City Logic
-    if (url.pathname === '/api/metadata') {
+    if (normalizedPath === '/metadata') {
       try {
         const db = env.d1;
         
@@ -1050,7 +1380,7 @@ export default {
               headers: withCorsHeaders({
                 "Content-Type": "application/json",
                 "Cache-Control": "max-age=86400"
-              }, allowedOrigin)
+              }, allowedOrigin || null)
             }
           );
         }
@@ -1088,7 +1418,7 @@ export default {
               headers: withCorsHeaders({
                 "Content-Type": "application/json",
                 "Cache-Control": "max-age=86400"
-              }, allowedOrigin)
+              }, allowedOrigin || null)
             }
           );
         }
@@ -1129,7 +1459,7 @@ export default {
             headers: withCorsHeaders({
               "Content-Type": "application/json",
               "Cache-Control": "max-age=86400"
-            }, allowedOrigin)
+            }, allowedOrigin || null)
           }
         );
       } catch (error) {
@@ -1155,7 +1485,7 @@ export default {
                               "21", "22", "23", "24", "25", "26", "27", "28", "29", "30"]
           }),
           { 
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin),
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null),
             status: 500
           }
         );
@@ -1163,7 +1493,7 @@ export default {
     }
 
     // � Message Templates API
-    if (url.pathname === '/api/templates') {
+    if (normalizedPath === '/templates') {
       try {
         const db = env.d1;
         const category = url.searchParams.get('category');
@@ -1193,7 +1523,7 @@ export default {
             headers: withCorsHeaders({
               "Content-Type": "application/json",
               "Cache-Control": "max-age=300"
-            }, allowedOrigin)
+            }, allowedOrigin || null)
           }
         );
       } catch (error) {
@@ -1205,7 +1535,7 @@ export default {
             message: error.message 
           }),
           { 
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin),
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null),
             status: 500 
           }
         );
@@ -1213,7 +1543,7 @@ export default {
     }
 
     // �🗄️ List D1 Tables
-    if (url.pathname === '/api/db/tables') {
+    if (normalizedPath === '/db/tables') {
       try {
         const db = env.d1;
         if (!db) throw new Error('No D1 binding available. Check wrangler.toml.');
@@ -1228,7 +1558,7 @@ export default {
             tables: result.results || [],
             environment: env.ENVIRONMENT || 'unknown'
           }),
-          { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+          { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
         );
       } catch (error) {
         console.error('DB Error:', error);
@@ -1238,13 +1568,13 @@ export default {
             error: error.message,
             environment: env.ENVIRONMENT || 'unknown'
           }),
-          { status: 500, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+          { status: 500, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
         );
       }
     }
 
     // 🔍 Check table schema
-    if (url.pathname === '/api/db/schema' && url.searchParams.get('table')) {
+    if (normalizedPath === '/db/schema' && url.searchParams.get('table')) {
       try {
         const db = env.d1;
         const tableName = url.searchParams.get('table');
@@ -1260,7 +1590,7 @@ export default {
             columns: result.results || [],
             environment: env.ENVIRONMENT || 'unknown'
           }),
-          { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+          { status: 200, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
         );
       } catch (error) {
         return new Response(
@@ -1269,14 +1599,14 @@ export default {
             error: error.message,
             environment: env.ENVIRONMENT || 'unknown'
           }),
-          { status: 500, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin) }
+          { status: 500, headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null) }
         );
       }
     }
 
     return new Response(JSON.stringify({ ok: false, error: "Not Found" }), {
       status: 404,
-      headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin)
+      headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
     });
   }
 };

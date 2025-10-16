@@ -48,7 +48,7 @@
       };
     }
   }
-  loadEnvironmentConfig();
+  window.envConfigReady = loadEnvironmentConfig();  // Store promise for later
 </script>
 <script src="/src/apiClient.js"></script>
 <style>
@@ -234,19 +234,38 @@
   }
 
   async function jsonFetch(url, init = {}) {
+    console.log('📡 jsonFetch:', url, init.method || 'GET');
+    console.log('  window.apiFetch available?', !!window.apiFetch);
+    
+    // Wait for apiFetch to be available
+    if (!window.apiFetch) {
+      console.warn('⏳ Waiting for apiFetch to be available...');
+      let attempts = 0;
+      while (!window.apiFetch && attempts < 20) {
+        await new Promise(r => setTimeout(r, 100));
+        attempts++;
+      }
+      if (!window.apiFetch) {
+        throw new Error('apiFetch not available after waiting');
+      }
+      console.log('✅ apiFetch now available');
+    }
+    
     // For API endpoints, use the environment-aware apiFetch
-    if (url.includes('/api/') && window.apiFetch) {
+    if (url.includes('/api/')) {
       // Extract the endpoint from the full URL
       const endpointMatch = url.match(/\/api\/(.+)/);
       if (endpointMatch) {
         const endpoint = endpointMatch[1];
+        console.log('  → Using apiFetch for endpoint:', endpoint);
         const response = await window.apiFetch(endpoint, init);
+        console.log('  → Response status:', response.status);
         const ct = response.headers.get("content-type") || "";
         return ct.includes("application/json") ? response.json() : response.text();
       }
     }
     
-    // Fallback for non-API endpoints or if apiFetch not available
+    // Fallback for non-API endpoints
     const r = await fetch(url, {
       credentials: "include",
       ...init,
@@ -281,6 +300,7 @@
   let inFlightNext = false;
 
   async function nextVoter() {
+    console.log('🔄 nextVoter called');
     if (inFlightNext) return;
     inFlightNext = true;
     getNextBtn.disabled = true;
@@ -289,15 +309,17 @@
 
     try {
       const filters = getFilters();
-      const exclude_ids = getSeen();              // NEW: send a short history
-  const v = await jsonFetch(API('/call'), {
+      const exclude_ids = getSeen();
+      console.log('📋 Filters:', filters, 'Excluding:', exclude_ids);
+      const v = await jsonFetch(API('/call'), {
         method: 'POST',
-        cache: 'no-store',
-        headers: { 'pragma': 'no-cache' },
         body: JSON.stringify({ filters, exclude_ids })
       });
 
+      console.log('📨 Received voter data:', v);
+      
       if (!v || v.empty || !v.voter_id) {
+        console.warn('⚠️ No voter data:', {hasData: !!v, isEmpty: v?.empty, hasVoterId: !!v?.voter_id});
         voterCard.hidden = true; empty.hidden = false; setMsg("");
         return;
       }
@@ -315,6 +337,7 @@
       pushSeen(v.voter_id);                       // NEW
       setMsg("");
     } catch (e) {
+      console.error('❌ nextVoter error:', e);
       voterCard.hidden = true; empty.hidden = false;
       setMsg(`Error: ${e.message}`, "error");
     } finally {
@@ -386,6 +409,8 @@
   const filters = getFilters();
   showFiltersBadge(filters);
   (async () => {
+    if (window.envConfigReady) await window.envConfigReady;  // Wait for environment
+    console.log("✅ Ready, loading data...");
     await loadWho();     // don’t block if this fails; loadWho() already swallows errors
     await nextVoter();   // show a voter immediately
   })();

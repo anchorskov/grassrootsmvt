@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head>
+  <title>API Test</title>
+  <script src="/src/apiClient.js"></script>
+</head>
+<body>
+  <h1>API Connection Test</h1>
+  <div id="status">Testing...</div>
+  <button id="testBtn">Test /api/call</button>
+  <pre id="result"></pre>
+  
+  <script>
+    const status = document.getElementById('status');
+    const result = document.getElementById('result');
+    const testBtn = document.getElementById('testBtn');
+    
+    (async () => {
+      status.textContent = 'Waiting for API client...';
+      while (!window.apiFetch) {
+        await new Promise(r => setTimeout(r, 50));
+      }
+      status.textContent = '✅ API client ready!';
+      
+      testBtn.onclick = async () => {
+        try {
+          status.textContent = 'Testing /api/call...';
+          const response = await window.apiFetch('call', {
+            method: 'POST',
+            body: JSON.stringify({
+              filters: {county: 'CAMPBELL', city: 'GILLETTE', parties: ['Republican'], require_phone: true},
+              exclude_ids: []
+            })
+          });
+          const data = await response.json();
+          result.textContent = JSON.stringify(data, null, 2);
+          status.textContent = '✅ Success!';
+        } catch (err) {
+          result.textContent = 'Error: ' + err.message;
+          status.textContent = '❌ Failed';
+        }
+      };
+    })();
+  </script>
+</body>
+</html>

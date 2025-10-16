@@ -71,7 +71,9 @@ class EnvironmentConfig {
             neighborhoods: '/api/neighborhoods',
             log: '/api/log',
             call: '/api/call',
-            whoami: '/api/whoami'
+            whoami: '/api/whoami',
+            metadata: '/api/metadata',
+            'contact-staging': '/api/contact-staging'
           }
         },
         ui: {
@@ -108,7 +110,9 @@ class EnvironmentConfig {
             neighborhoods: '/api/neighborhoods',
             log: '/api/log',
             call: '/api/call',
-            whoami: '/api/whoami'
+            whoami: '/api/whoami',
+            metadata: '/api/metadata',
+            'contact-staging': '/api/contact-staging'
           }
         },
         ui: {

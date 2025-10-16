@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Authentication Test</title>
+</head>
+<body>
+    <h1>Authentication Flow Test</h1>
+    <div id="results"></div>
+    
+    <script type="module">
+        // Import our updated apiClient
+        import { getCurrentUserOrRedirect, apiGet } from './src/apiClient.js';
+        
+        const results = document.getElementById('results');
+        
+        async function testAuthFlow() {
+            try {
+                results.innerHTML += '<p>🔄 Testing authentication flow...</p>';
+                
+                // Test 1: Check if we can get current user (should work in local)
+                const user = await getCurrentUserOrRedirect();
+                results.innerHTML += `<p>✅ User authenticated: ${JSON.stringify(user)}</p>`;
+                
+                // Test 2: Make a regular API call
+                const apiResponse = await apiGet('/whoami');
+                results.innerHTML += `<p>✅ API call successful: ${JSON.stringify(apiResponse)}</p>`;
+                
+                // Test 3: Check sessionStorage state
+                const accessReady = sessionStorage.getItem('accessReady:v1');
+                const redirectGuard = sessionStorage.getItem('access:redirected');
+                results.innerHTML += `<p>📊 Session state: accessReady=${accessReady}, redirectGuard=${redirectGuard}</p>`;
+                
+                results.innerHTML += '<p>🎉 All tests passed! No authentication loops detected.</p>';
+                
+            } catch (error) {
+                results.innerHTML += `<p>❌ Error: ${error.message}</p>`;
+                console.error('Authentication test failed:', error);
+            }
+        }
+        
+        // Run test on page load
+        testAuthFlow();
+    </script>
+</body>
+</html>

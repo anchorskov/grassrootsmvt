@@ -1,16 +1,9 @@
 /**
- * GrassrootsMVT API Client with Environment Detection
- * Works in both ES6 module and global script contexts
+ * GrassrootsMVT API Client with Enhanced Authentication Handling
  */
 
 // Environment configuration - try different ways to access it
 let environmentConfig;
-
-// Try to get environment config from different sources
-if (typeof window !== 'undefined' && window.environmentConfig) {
-  // Global variable (for non-module scripts)
-  environmentConfig = window.environmentConfig;
-}
 
 // Wait for environment config to be available if needed
 async function ensureEnvironmentConfig() {
@@ -68,68 +61,130 @@ async function ensureEnvironmentConfig() {
   return environmentConfig;
 }
 
-// Ensure we're authenticated *before* making any API fetches.
-// In local development, authentication is bypassed.
+const API_ORIGIN = (() => {
+  const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  return isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+})();
+
+const API_BASE = `${API_ORIGIN}/api`;
+
+// Unified keys used everywhere
+const ACCESS_READY_KEY   = "accessReady:v1";
+const REDIRECT_GUARD_KEY = "access:redirected";
+
+// Small safety to prevent open-redirects: only allow same-origin destinations
+function safeTo(urlString) {
+  try {
+    const dest = new URL(urlString, window.location.href);
+    const here = new URL(window.location.href);
+    if (dest.origin !== here.origin) {
+      // if different origin, fall back to site root
+      return `${here.origin}/`;
+    }
+    return dest.toString();
+  } catch { return window.location.origin + "/"; }
+}
+
+async function withAuthHeaders(init = {}) {
+  const headers = new Headers(init.headers || {});
+  if (!headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  // include cookies so CF Access session is sent
+  return { ...init, headers, credentials: "include" };
+}
+
+async function apiGet(path) {
+  const res = await fetch(`${API_BASE}${path}`, await withAuthHeaders());
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const err = new Error(`GET ${path} ${res.status}`);
+    err.status = res.status;
+    err.body = text;
+    throw err;
+  }
+  return res.json();
+}
+
+async function apiPost(path, body) {
+  const res = await fetch(
+    `${API_BASE}${path}`,
+    await withAuthHeaders({ method: "POST", body: JSON.stringify(body || {}) })
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    const err = new Error(`POST ${path} ${res.status}`);
+    err.status = res.status;
+    err.body = text;
+    throw err;
+  }
+  return res.json();
+}
+
+// Call this once during app bootstrap OR before showing identity
+async function getCurrentUserOrRedirect() {
+  // If we just returned from Access and whoami succeeds, mark ready and clear guard.
+  try {
+    const who = await apiGet("/whoami");
+    sessionStorage.setItem(ACCESS_READY_KEY, "true");
+    sessionStorage.removeItem(REDIRECT_GUARD_KEY);
+    return who;
+  } catch (e) {
+    if (e.status === 401) {
+      // Respect older bootstrap flag if present, to avoid double-redirects
+      const bootstrapReady = sessionStorage.getItem(ACCESS_READY_KEY) === "true";
+      const already        = sessionStorage.getItem(REDIRECT_GUARD_KEY) === "1";
+
+      // Only one top-level navigation attempt per load, and only if not already "ready"
+      if (!bootstrapReady && !already) {
+        sessionStorage.setItem(REDIRECT_GUARD_KEY, "1");
+        const to = encodeURIComponent(safeTo(window.location.href));
+        // Use WHOAMI nav flow so Access becomes first-party and sets its cookie
+        window.location.href = `${API_ORIGIN}/whoami?nav=1&to=${to}`;
+        return new Promise(() => {}); // halt while navigating
+      }
+
+      // If we get here: we either already tried once, or bootstrap claimed ready.
+      // Surface a visible banner rather than looping.
+      console.error("Auth still not established after redirect.");
+      const banner = document.getElementById("auth-banner") || document.createElement("div");
+      banner.id = "auth-banner";
+      banner.style.cssText = "position:fixed;top:0;left:0;right:0;padding:10px;background:#ffe0e0;color:#900;font-weight:600;z-index:99999";
+      banner.textContent = "Login did not stick. Click to finish sign-in.";
+      banner.onclick = () => {
+        const to = encodeURIComponent(safeTo(window.location.href));
+        window.location.href = `${API_ORIGIN}/whoami?nav=1&to=${to}`;
+      };
+      if (!banner.isConnected) document.body.appendChild(banner);
+      throw e;
+    }
+    throw e;
+  }
+}
+
+// Legacy compatibility - maintain existing function names for backward compatibility
 async function ensureAccessSession() {
   const envConfig = await ensureEnvironmentConfig();
   
   // Bypass authentication in local development
   if (envConfig.shouldBypassAuth()) {
     envConfig.debug('Bypassing authentication in local development');
-    sessionStorage.setItem('accessReady:v1', 'true');
+    sessionStorage.setItem(ACCESS_READY_KEY, 'true');
     return Promise.resolve();
   }
 
-  const ready = sessionStorage.getItem('accessReady:v1') === 'true';
+  const ready = sessionStorage.getItem(ACCESS_READY_KEY) === 'true';
   if (!ready) {
-    // Direct kick to protected endpoint - no interstitial needed
-    const returnTo = encodeURIComponent(location.href);
-    const apiUrl = envConfig.getApiUrl('ping', {
-      finish: envConfig.getApiUrl('auth/finish', { to: returnTo })
-    });
-    envConfig.debug('Redirecting to authentication:', apiUrl);
-    window.location.replace(apiUrl);
-    // Return a pending promise so callers don't proceed
-    return new Promise(() => {});
+    // Use the new getCurrentUserOrRedirect method
+    try {
+      await getCurrentUserOrRedirect();
+      sessionStorage.setItem(ACCESS_READY_KEY, 'true');
+    } catch (err) {
+      // getCurrentUserOrRedirect handles redirect, so this shouldn't normally execute
+      const returnTo = encodeURIComponent(safeTo(location.href));
+      window.location.href = `${API_ORIGIN}/whoami?nav=1&to=${returnTo}`;
+      return new Promise(() => {});
+    }
   }
   return Promise.resolve();
-}
-
-// Call this once when your UI loads (e.g., in main.js or on DOMContentLoaded)
-async function initializeAuthStatus() {
-  const envConfig = await ensureEnvironmentConfig();
-  
-  // In local development, skip authentication checks
-  if (envConfig.shouldBypassAuth()) {
-    envConfig.debug('Skipping authentication check in local development');
-    sessionStorage.setItem('accessReady:v1', 'true');
-    return true;
-  }
-
-  try {
-    // a lightweight, credentialed call — if we're not allowed,
-    // the browser would hit CORS/redirect, so we proactively kick instead.
-    const authConfigUrl = envConfig.getApiUrl('auth/config');
-    const res = await fetch(authConfigUrl, { credentials: 'include' });
-    if (res.ok) {
-      sessionStorage.setItem('accessReady:v1', 'true');
-      envConfig.debug('Authentication check passed');
-      return true;
-    }
-  } catch (error) {
-    envConfig.debug('Authentication check failed:', error);
-  }
-  
-  sessionStorage.removeItem('accessReady:v1');
-  // if not authenticated → top-level nav to a protected endpoint
-  // Cloudflare Access will 302 to team domain and back to /auth/finish
-  const returnTo = encodeURIComponent(location.href);
-  const apiUrl = envConfig.getApiUrl('ping', {
-    finish: envConfig.getApiUrl('auth/finish', { to: returnTo })
-  });
-  envConfig.debug('Redirecting to authentication:', apiUrl);
-  location.replace(apiUrl);
-  return false;
 }
 
 // Centralized API fetch with credentials
@@ -156,13 +211,8 @@ async function apiFetch(path, options = {}) {
   // If something still goes sideways (e.g., Access cookie expired), re-kick.
   if (res.status === 401 || res.status === 403) {
     sessionStorage.removeItem('accessReady:v1');
-    // Direct kick to protected endpoint - no interstitial needed
-    const returnTo = encodeURIComponent(location.href);
-    const authUrl = envConfig.getApiUrl('ping', {
-      finish: envConfig.getApiUrl('auth/finish', { to: returnTo })
-    });
-    envConfig.debug('Re-authenticating due to 401/403:', authUrl);
-    window.location.replace(authUrl);
+    // Use the new getCurrentUserOrRedirect method
+    await getCurrentUserOrRedirect();
     return new Promise(() => {});
   }
   return res;
@@ -171,21 +221,23 @@ async function apiFetch(path, options = {}) {
 // Global browser access (works in all contexts)
 if (typeof window !== 'undefined') {
   window.ensureAccessSession = ensureAccessSession;
-  window.initializeAuthStatus = initializeAuthStatus;
   window.apiFetch = apiFetch;
+  window.getCurrentUserOrRedirect = getCurrentUserOrRedirect;
+  window.apiGet = apiGet;
+  window.apiPost = apiPost;
 }
 
 // ES6 module compatibility (for files that import this module)
-// Only define exports if we're in a module context
 if (typeof module !== 'undefined' && module.exports) {
   // CommonJS exports
-  module.exports = { ensureAccessSession, initializeAuthStatus, apiFetch };
+  module.exports = { ensureAccessSession, apiFetch, getCurrentUserOrRedirect, apiGet, apiPost };
 } else if (typeof window === 'undefined') {
   // ES6 module exports (only if not in browser)
-  // This will be handled by bundlers or Node.js module systems
   if (typeof globalThis !== 'undefined') {
     globalThis.ensureAccessSession = ensureAccessSession;
-    globalThis.initializeAuthStatus = initializeAuthStatus;
     globalThis.apiFetch = apiFetch;
+    globalThis.getCurrentUserOrRedirect = getCurrentUserOrRedirect;
+    globalThis.apiGet = apiGet;
+    globalThis.apiPost = apiPost;
   }
 }

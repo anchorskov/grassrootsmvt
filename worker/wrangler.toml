@@ -13,7 +13,7 @@ workers_dev = false  # production deploys use zone routes below
 [vars]
 ENVIRONMENT = "local"
 # Allow popular local UI hosts (vite 5173, pages-dev 8788). Add others if needed.
-ALLOW_ORIGIN = "http://127.0.0.1:8788,http://localhost:5173"
+ALLOW_ORIGIN = "http://127.0.0.1:8788,http://localhost:8788,http://localhost:5173"
 DATA_BACKEND = "d1"
 
 # Local D1 binding (you already have a preview DB wired here — fine for local)
@@ -33,7 +33,7 @@ routes = [
 
 [env.production.vars]
 ENVIRONMENT = "production"
-ALLOW_ORIGIN = "https://volunteers.grassrootsmvt.org,https://grassrootsmvt-production.pages.dev"
+ALLOW_ORIGIN = "https://volunteers.grassrootsmvt.org"
 DATA_BACKEND = "d1"
 DEBUG_CORS = "false"
 TEAM_DOMAIN = "https://skovgard.cloudflareaccess.com"
@@ -61,8 +61,8 @@ migrations_dir = "db/migrations"
 
 [env.preview.vars]
 ENVIRONMENT  = "preview"
-# Allow your local Pages dev (8788) and the live volunteers site for cross-checks
-ALLOW_ORIGIN = "http://127.0.0.1:8788,https://volunteers.grassrootsmvt.org"
+# allow preview plus production UI for cross checks
+ALLOW_ORIGIN = "http://127.0.0.1:8788,https://grassrootsmvt-production.pages.dev,https://volunteers.grassrootsmvt.org"
 DATA_BACKEND = "d1"
 # TEAM_DOMAIN / POLICY_AUD should be set as secrets for preview:
 #   npx wrangler secret put TEAM_DOMAIN --env preview

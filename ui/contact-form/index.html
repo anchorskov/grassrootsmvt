@@ -32,6 +32,33 @@
     .match-item { padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; margin: 0.5rem 0; cursor: pointer; }
     .match-item:hover { background: #f3f4f6; }
     .match-score { font-size: 0.875rem; color: #6b7280; }
+    
+    /* Autocomplete styling from canvass form */
+    .autocomplete-container { position: relative; }
+    .autocomplete-suggestions { 
+      position: absolute; 
+      top: 100%; 
+      left: 0; 
+      right: 0; 
+      background: white; 
+      border: 2px solid #2563eb; 
+      border-top: none; 
+      border-radius: 0 0 10px 10px; 
+      max-height: 200px; 
+      overflow-y: auto; 
+      z-index: 9999; 
+      display: none; 
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    .autocomplete-suggestion { 
+      padding: 12px 16px; 
+      cursor: pointer; 
+      border-bottom: 1px solid #f1f5f9; 
+      font-weight: 500;
+      background: white;
+    }
+    .autocomplete-suggestion:hover { background: #f8fafc; border-color: #e2e8f0; }
+    .autocomplete-suggestion:last-child { border-bottom: none; }
   </style>
 </head>
 <body>
@@ -82,8 +109,10 @@
       </div>
       <div class="form-group">
         <label for="street-name">Street Name *</label>
-        <input type="text" id="street-name" placeholder="Main St" required>
-        <div id="street-suggestions" class="search-results"></div>
+        <div class="autocomplete-container">
+          <input type="text" id="street-name" placeholder="Main St" required>
+          <div id="street-suggestions" class="autocomplete-suggestions"></div>
+        </div>
       </div>
     </div>
     
@@ -148,6 +177,11 @@
         <label for="phone-primary">Phone Number</label>
         <input type="tel" id="phone-primary">
       </div>
+    </div>
+
+    <div class="form-group">
+      <label for="email">Email Address</label>
+      <input type="email" id="email" placeholder="voter@example.com">
     </div>
     
     <div class="form-row">
@@ -223,6 +257,7 @@
   <div class="card" id="success-message" style="display: none;">
     <h2>✅ Contact Submitted Successfully!</h2>
     <p>Thank you for adding this voter contact. The information has been saved and will be reviewed.</p>
+    <div id="success-details" style="background: #f0f9ff; padding: 1rem; border-radius: 6px; margin: 1rem 0; font-family: monospace; font-size: 0.9rem;"></div>
     <button type="button" class="btn-primary" onclick="location.reload()">Add Another Contact</button>
     <button type="button" class="btn-secondary" onclick="location.href='/canvass/'">Return to Canvassing</button>
   </div>
@@ -232,6 +267,9 @@
 
   <button class="btn-primary" onclick="location.href='/ui/contact-form/index.html'">New Contact</button>
 
+  <!-- Import the reusable street autocomplete component -->
+  <script src="../shared/streetAutocomplete.js"></script>
+  
   <script type="module">
     // Progressive form logic with API integration
     import environmentConfig from '../config/environments.js';
@@ -239,19 +277,46 @@
     let currentStep = 1;
     let formData = {};
     let potentialMatches = [];
-    
+    let wyomingData = {}; // Will hold citiesByCounty data
+
     // Initialize form
     async function init() {
+      await loadWyomingData();
       await loadCounties();
       setupEventListeners();
     }
+
+    // Load Wyoming data (counties, cities by county, etc.)
+    async function loadWyomingData() {
+      try {
+        const tryPaths = ['/admin/wy.json', '/ui/admin/wy.json'];
+        let lastErr = null;
+        for (const path of tryPaths) {
+          try {
+            const response = await fetch(path, { cache: 'no-store' });
+            if (response.ok) {
+              wyomingData = await response.json();
+              console.log('Wyoming data loaded:', wyomingData);
+              return;
+            }
+            lastErr = new Error(`${path} -> HTTP ${response.status}`);
+          } catch (e) { 
+            lastErr = e; 
+          }
+        }
+        throw lastErr || new Error('wy.json not found');
+      } catch (error) {
+        console.error('Failed to load Wyoming data:', error);
+        // Fallback to API approach
+        wyomingData = { counties: [], citiesByCounty: {} };
+      }
+    }
     
-    // Load counties from API
+    // Load counties from Wyoming data
     async function loadCounties() {
       try {
-        const response = await fetch('/api/contact-form/counties');
-        const counties = await response.json();
         const select = document.getElementById('county');
+        const counties = wyomingData.counties || [];
         
         counties.forEach(county => {
           const option = document.createElement('option');
@@ -259,6 +324,8 @@
           option.textContent = county;
           select.appendChild(option);
         });
+        
+        console.log(`Loaded ${counties.length} counties`);
       } catch (error) {
         console.error('Failed to load counties:', error);
       }
@@ -275,18 +342,44 @@
           await loadCities(county);
           document.getElementById('city').disabled = false;
         }
+        // Clear street cache when county changes
+        streetAutocomplete.clearCache();
         updateButtonStates();
       });
       
       // City selection  
       document.getElementById('city').addEventListener('change', (e) => {
         formData.city = e.target.value;
+        // Clear street cache when city changes  
+        streetAutocomplete.clearCache();
         updateButtonStates();
       });
       
       // Address fields
       document.getElementById('house-number').addEventListener('input', checkAddress);
-      document.getElementById('street-name').addEventListener('input', debounce(searchStreets, 300));
+      // Street autocomplete setup using reusable component
+      const streetAutocomplete = new StreetAutocomplete({
+        streetInputId: 'street-name',
+        suggestionsId: 'street-suggestions',
+        getCounty: () => formData.county,
+        getCity: () => formData.city,
+        onStreetSelected: (streetName) => {
+          // Enable house field and trigger address check
+          enableHouseField();
+          populateHouseNumbers(streetName);
+          checkAddress();
+        },
+        onHouseFieldChange: (enabled) => {
+          if (enabled) {
+            enableHouseField();
+          } else {
+            disableHouseField();
+          }
+        }
+      });
+      
+      // Initialize house field as disabled
+      disableHouseField();
       
       // Name fields
       document.getElementById('first-name').addEventListener('input', debounce(searchNames, 500));
@@ -321,60 +414,104 @@
       document.getElementById(`step-dot-${step}`).classList.add('active');
     }
     
-    // API integration functions
+    // Load actual cities for selected county
     async function loadCities(county) {
       try {
-        const response = await fetch(`/api/contact-form/cities?county=${encodeURIComponent(county)}`);
-        const cities = await response.json();
         const select = document.getElementById('city');
         
         select.innerHTML = '<option value="">Select City</option>';
-        cities.forEach(city => {
+        
+        // Get actual cities for this county from Wyoming data
+        const cities = (wyomingData.citiesByCounty && wyomingData.citiesByCounty[county]) || [];
+        
+        if (cities.length > 0) {
+          cities.forEach(city => {
+            const option = document.createElement('option');
+            option.value = city;
+            option.textContent = city;
+            select.appendChild(option);
+          });
+          console.log(`Loaded ${cities.length} cities for ${county}`);
+        } else {
+          // Fallback: use county as city option
           const option = document.createElement('option');
-          option.value = city;
-          option.textContent = city;
+          option.value = county;
+          option.textContent = `${county} County Area`;
           select.appendChild(option);
-        });
+          console.log(`No cities found for ${county}, using county fallback`);
+        }
+        
       } catch (error) {
         console.error('Failed to load cities:', error);
+        // Fallback: just show the county as an option
+        const select = document.getElementById('city');
+        select.innerHTML = '<option value="">Select City</option>';
+        const option = document.createElement('option');
+        option.value = county;
+        option.textContent = `${county} County Area`;
+        select.appendChild(option);
       }
     }
-    
-    async function searchStreets() {
-      const county = formData.county;
-      const city = formData.city;
-      const streetInput = document.getElementById('street-name').value;
+
+    // Enable house number field
+    function enableHouseField() {
+      const houseInput = document.getElementById('house-number');
+      houseInput.disabled = false;
+      houseInput.placeholder = "e.g. 5201";
+      houseInput.style.backgroundColor = "";
+      houseInput.style.cursor = "";
+    }
+
+    // Disable house number field  
+    function disableHouseField() {
+      const houseInput = document.getElementById('house-number');
       
-      if (!county || !city || streetInput.length < 3) return;
+      houseInput.disabled = true;
+      houseInput.value = "";
+      houseInput.placeholder = "Select street first";
+    }
+
+    // Function to populate house numbers based on selected street
+    async function populateHouseNumbers(streetName) {
+      console.log('🏠 Loading house numbers for street:', streetName);
       
       try {
-        const response = await fetch(`/api/contact-form/streets?county=${encodeURIComponent(county)}&city=${encodeURIComponent(city)}`);
-        const streets = await response.json();
+        const filters = {
+          county: formData.county,
+          city: formData.city
+        };
         
-        // Filter and display suggestions
-        const suggestions = streets.filter(s => 
-          s.street_name.toLowerCase().includes(streetInput.toLowerCase())
-        ).slice(0, 5);
-        
-        const container = document.getElementById('street-suggestions');
-        container.innerHTML = '';
-        
-        suggestions.forEach(street => {
-          const div = document.createElement('div');
-          div.className = 'match-item';
-          div.textContent = `${street.street_name} (${street.voter_count} voters)`;
-          div.onclick = () => {
-            document.getElementById('street-name').value = street.street_name;
-            container.innerHTML = '';
-            checkAddress();
-          };
-          container.appendChild(div);
+        // API call to get addresses on this specific street
+        const response = await fetch('http://localhost:8787/api/canvass/nearby', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filters, street: streetName, limit: 100 })
         });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('📡 House numbers API response:', data);
+        
+        if (data.rows && data.rows.length > 0) {
+          // Extract house numbers from addresses
+          const houseNumbers = [...new Set(data.rows.map(r => {
+            const match = r.address.match(/^(\d+)/);
+            return match ? match[1] : null;
+          }).filter(Boolean))].sort((a, b) => parseInt(a) - parseInt(b));
+          
+          console.log('🏠 Available house numbers:', houseNumbers);
+          
+          // For contact form, we don't need a dropdown - just enable the field
+          // The house numbers are available for validation if needed
+        }
       } catch (error) {
-        console.error('Failed to search streets:', error);
+        console.error('❌ Failed to load house numbers:', error);
       }
     }
-    
+
     async function checkAddress() {
       const county = formData.county;
       const city = formData.city;
@@ -388,8 +525,14 @@
       }
       
       try {
-        const response = await fetch(`/api/contact-form/check-address?county=${encodeURIComponent(county)}&city=${encodeURIComponent(city)}&street=${encodeURIComponent(street)}&number=${encodeURIComponent(number)}`);
-        const result = await response.json();
+        // Address validation temporarily disabled
+        console.log('Address validation temporarily disabled for:', { county, city, street, number });
+        
+        // Hide any existing voter alerts since we can't check
+        document.getElementById('existing-voter-alert').style.display = 'none';
+        updateButtonStates();
+        
+        return;
         
         if (result.exists && result.matches.length > 0) {
           // Show existing voter alert
@@ -425,12 +568,25 @@
       }
       
       try {
-        const response = await fetch('/api/contact-form/search-names', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ county, city, firstName, lastName })
+        // For now, disable name search since it requires complex voter lookup
+        // This can be enhanced later with proper /api/voters integration
+        console.log('Name search temporarily disabled - would search for:', { county, city, firstName, lastName });
+        
+        const resultsContainer = document.getElementById('name-match-results');
+        resultsContainer.innerHTML = `
+          <div class="info-message" style="padding: 1rem; background: #eff6ff; border: 1px solid #3b82f6; border-radius: 8px; color: #1e40af;">
+            📝 <strong>Note:</strong> Duplicate checking is temporarily unavailable. Please proceed with contact entry.
+          </div>
+        `;
+        return;
+        
+        // Original code commented out until voter lookup API is integrated:
+        /*
+        const response = await fetch('/api/voters', {
+          method: 'GET',
+          // Add appropriate query parameters for voter search
         });
-        const matches = await response.json();
+        */
         
         const container = document.getElementById('name-match-results');
         if (matches.length > 0) {
@@ -468,6 +624,7 @@
         unitNumber: document.getElementById('unit-number').value,
         zipCode: document.getElementById('zip-code').value,
         phonePrimary: document.getElementById('phone-primary').value,
+        email: document.getElementById('email').value,
         estimatedParty: document.getElementById('estimated-party').value,
         votingLikelihood: document.getElementById('voting-likelihood').value,
         contactMethod: document.getElementById('contact-method').value,
@@ -479,7 +636,7 @@
       };
       
       try {
-        const response = await fetch('/api/contact-form/submit', {
+        const response = await fetch(environmentConfig.getApiUrl('contact-staging'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(contactData)
@@ -487,11 +644,20 @@
         
         const result = await response.json();
         
-        if (result.success) {
+        if (result.ok) {
           // Hide form, show success
           document.querySelector('.step.active').style.display = 'none';
           document.querySelector('.step-indicator').style.display = 'none';
           document.getElementById('success-message').style.display = 'block';
+          
+          // Update success message with staging info
+          document.getElementById('success-details').innerHTML = `
+            <p><strong>Submission ID:</strong> ${result.staging_id}</p>
+            <p><strong>Temporary Voter ID:</strong> ${result.temp_voter_id}</p>
+            <p>This contact will be reviewed and verified before being added to the main database.</p>
+          `;
+        } else {
+          alert('Failed to submit contact: ' + (result.error || 'Unknown error'));
         }
       } catch (error) {
         console.error('Failed to submit contact:', error);

@@ -1,0 +1,227 @@
+[0;34m[08:30:53] 📁 Working directory: /home/anchor/projects/grassrootsmvt/worker[0m
+[0;34m[08:30:53] 🔧 Starting deployment process...[0m
+[1;33m[08:30:53] 🚀 Deploying Cloudflare Worker (with retry)...[0m
+[0;36m[08:30:53] 🔍 Checking existing route assignments...[0m
+[0;36m[08:30:54] 📦 Attempt #1 to deploy...[0m
+
+ ⛅️ wrangler 4.42.2
+───────────────────
+Total Upload: 22.71 KiB / gzip: 4.07 KiB
+Your Worker has access to the following bindings:
+Binding                                                        Resource                  
+env.d1 (wy)                                                    D1 Database               
+env.ENVIRONMENT ("production")                                 Environment Variable      
+env.ALLOW_ORIGIN ("https://volunteers.grassrootsmvt.org")      Environment Variable      
+env.DATA_BACKEND ("d1")                                        Environment Variable      
+env.DEBUG_CORS ("false")                                       Environment Variable      
+
+Uploaded grassrootsmvt-production-production (3.05 sec)
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mCan't deploy routes that are assigned to another worker.[0m
+
+  "grassrootsmvt-production" is already assigned to routes:
+    - api.grassrootsmvt.org/*
+  ,  - grassrootsmvt.org/api/*
+  
+  Unassign other workers from the routes you want to deploy to, and then try again.
+  Visit [4mhttps://dash.cloudflare.com/8bfd3f60fbdcc89183e9e312fb03e86e/workers/overview[0m to unassign a worker from a route.
+
+
+🪵  Logs were written to "/home/anchor/.config/.wrangler/logs/wrangler-2025-10-13_14-30-54_859.log"
+[0;32m[08:30:59] ✅ Worker code updated successfully (routes already assigned to same worker)[0m
+[1;33m[08:30:59] 🌐 Verifying Worker deployments...[0m
+
+=== DEPLOYMENT VERIFICATION ===
+
+ ⛅️ wrangler 4.42.2
+───────────────────
+Created:     2025-10-13T14:25:55.746Z
+Author:      anchorskov@gmail.com
+Source:      Upload
+Message:     Automatic deployment on upload.
+Version(s):  (100%) 24b47339-a79d-403b-af03-a24488a46df4
+                 Created:  2025-10-13T14:25:55.746Z
+                     Tag:  -
+                 Message:  -
+
+Created:     2025-10-13T14:26:07.246Z
+Author:      anchorskov@gmail.com
+Source:      Unknown (deployment)
+Message:     -
+Version(s):  (100%) 5f403317-6039-4bee-9ae8-cd13c213de06
+                 Created:  2025-10-13T14:26:06.059Z
+                     Tag:  -
+                 Message:  -
+[0;32m[08:31:01] ✅ Deployment listing[0m
+[0;36m[08:31:01] 🔍 Verifying configured routes from wrangler.toml...[0m
+Expected routes:
+  - api.grassrootsmvt.org/*
+  - grassrootsmvt.org/api/*
+[1;33m[08:31:01] 🏥 Running API health checks...[0m
+
+=== API HEALTH CHECKS ===
+[0;36m[08:31:01] 🔍 Testing /ping endpoint...[0m
+HTTP/2 302 
+date: Mon, 13 Oct 2025 14:31:01 GMT
+location: https://skovgard.cloudflareaccess.com/cdn-cgi/access/login/api.grassrootsmvt.org?kid=76fea0745afec089a3eddeba8d982b10aab6d6f871e43661cb4977765b78f3f0&meta=eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6ImMxNDMwN2QwMzVhOWM0OGY1MWE5NGUzNDBiNjE5YjMzMjA2MGMyNzBkYWI2MzU1YTBjNjY4MjQyZTY0ZmM5YjQifQ.eyJ0eXBlIjoibWV0YSIsImF1ZCI6Ijc2ZmVhMDc0NWFmZWMwODlhM2VkZGViYThkOTgyYjEwYWFiNmQ2Zjg3MWU0MzY2MWNiNDk3Nzc2NWI3OGYzZjAiLCJob3N0bmFtZSI6ImFwaS5ncmFzc3Jvb3RzbXZ0Lm9yZyIsInJlZGlyZWN0X3VybCI6Ii9waW5nIiwic2VydmljZV90b2tlbl9zdGF0dXMiOmZhbHNlLCJpc193YXJwIjpmYWxzZSwiaXNfZ2F0ZXdheSI6ZmFsc2UsImV4cCI6MTc2MDM2NjE2MSwibmJmIjoxNzYwMzY1ODYxLCJpYXQiOjE3NjAzNjU4NjEsImF1dGhfc3RhdHVzIjoiTk9ORSIsIm10bHNfYXV0aCI6eyJjZXJ0X2lzc3Vlcl9kbiI6IiIsImNlcnRfc2VyaWFsIjoiIiwiY2VydF9pc3N1ZXJfc2tpIjoiIiwiY2VydF9wcmVzZW50ZWQiOmZhbHNlLCJjb21tb25fbmFtZSI6IiIsImF1dGhfc3RhdHVzIjoiTk9ORSJ9LCJyZWFsX2NvdW50cnkiOiJVUyIsImFwcF9zZXNzaW9uX2hhc2giOiJhNDBmYjJmN2YyNDA0NzZiNWJhMDhmZDhhYzRiYmNlMjZiODZkMmY0Y2VjNDc0ZDQ3MzE3NTllMmY4NTVhZDAxIn0.M9AACaA6ghvZbCObyUczpwNYEndTlHkOuSCdX3nees9ceFAbHXFJgL8KTHT2b9vcB_aVp4YDtFHP_mxvWAYWq2xDUY2k2Q0Tq23EhwHDffANwbKkmdfnZT4NJ4reqyKOHxpZJJhR0yQ5UjLlMQLQ1xiw9DalMhTZSVp1xCm0s7S5PFroL3P1cv8zyJSSPGm1cVthevZJlpAzGPl2cfgVz5v7iytpbJW6EQ6D3-2Gcc2xJO-C2sbhB8wy0lQ-blNn2NOS5-6bQREPFV18lX7e_TgvJY9Bt87IDApoXgvv_dkqpp-PZI-sAVMSlXxSvusA4Y104KwNR-zJiBvuxHG4-w&redirect_url=%2Fping
+cache-control: private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0
+access-control-allow-credentials: true
+expires: Thu, 01 Jan 1970 00:00:01 GMT
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=qiA%2Ff3dMfJ%2FxRiy2sbNmXDLDfR9hYZzrSx31Mawut%2F2WxQeditOQWRw3Qk6J2k0qxk7rjwxmv2H5R4Sx4Kx%2BtTiODrPB9a8Rq3OTG%2BYFtriXuag%3D"}]}
+nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+server: cloudflare
+set-cookie: CF_AppSession=21cec8e1f9cdf7b3; HttpOnly; Secure; Path=/; Expires=Tue, 14 Oct 2025 14:31:01 GMT
+cf-ray: 98df89cccf20e64f-DEN
+alt-svc: h3=":443"; ma=86400
+
+[0;31m[08:31:01] ❌ /ping endpoint not responding correctly[0m
+[0;36m[08:31:01] 🔍 Testing /whoami endpoint...[0m
+HTTP/2 302 
+date: Mon, 13 Oct 2025 14:31:02 GMT
+location: https://skovgard.cloudflareaccess.com/cdn-cgi/access/login/api.grassrootsmvt.org?kid=76fea0745afec089a3eddeba8d982b10aab6d6f871e43661cb4977765b78f3f0&meta=eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6ImMxNDMwN2QwMzVhOWM0OGY1MWE5NGUzNDBiNjE5YjMzMjA2MGMyNzBkYWI2MzU1YTBjNjY4MjQyZTY0ZmM5YjQifQ.eyJ0eXBlIjoibWV0YSIsImF1ZCI6Ijc2ZmVhMDc0NWFmZWMwODlhM2VkZGViYThkOTgyYjEwYWFiNmQ2Zjg3MWU0MzY2MWNiNDk3Nzc2NWI3OGYzZjAiLCJob3N0bmFtZSI6ImFwaS5ncmFzc3Jvb3RzbXZ0Lm9yZyIsInJlZGlyZWN0X3VybCI6Ii93aG9hbWkiLCJzZXJ2aWNlX3Rva2VuX3N0YXR1cyI6ZmFsc2UsImlzX3dhcnAiOmZhbHNlLCJpc19nYXRld2F5IjpmYWxzZSwiZXhwIjoxNzYwMzY2MTYyLCJuYmYiOjE3NjAzNjU4NjIsImlhdCI6MTc2MDM2NTg2MiwiYXV0aF9zdGF0dXMiOiJOT05FIiwibXRsc19hdXRoIjp7ImNlcnRfaXNzdWVyX2RuIjoiIiwiY2VydF9zZXJpYWwiOiIiLCJjZXJ0X2lzc3Vlcl9za2kiOiIiLCJjZXJ0X3ByZXNlbnRlZCI6ZmFsc2UsImNvbW1vbl9uYW1lIjoiIiwiYXV0aF9zdGF0dXMiOiJOT05FIn0sInJlYWxfY291bnRyeSI6IlVTIiwiYXBwX3Nlc3Npb25faGFzaCI6IjEwOTdlZjg2ZTc4Y2FlNzU0ZWIwMDAxNWEzYjlmYzgyZTkyMWE0ZWEyNWY2OTYwNTVjNmFiMzRlZjBhYWY3YWMifQ.W5cMgJgyXg-9oHkFZbuTiAcVtTnDOMUvbPCWJtrsng3d_FK3O0iehf8dvanyfL8QvcgxqJza2d1G01fvoE7o65mDnPIQDQzu9qyxI-vjXcIsN56NwmGPCxTrVPnTz3Ym5u4dWhnQUJQIsechuO08uEo9OIu-CLOWn4pdHLrrvMnN5I1go_uIWwOGEhALMH4ZiI7SClGYG1hly8mjgARwvpRncQYaq76V4J1r4zCk60SBwfyeowNnTE0AIsferNDZGsjaYGN2x3FE8nAs87yE-GTgetf0RCpCaNkNFDbQw81qxSSBWdMGrRSF7mQNSryAPHRt29mU8SAvgk5xMPgELw&redirect_url=%2Fwhoami
+expires: Thu, 01 Jan 1970 00:00:01 GMT
+access-control-allow-credentials: true
+cache-control: private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=UYYwVV0oii5V3Okc1MKhAOf8oGaIvV0ORK0UVuwwm39dhdQGE9%2BLW7rdCQDwDngbK2zfLykEKajWvfxUDM%2FKSboF3AgjFH6pPNlmLnAjwqApT4U%3D"}]}
+nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+server: cloudflare
+set-cookie: CF_AppSession=6830b6f8220dd346; HttpOnly; Secure; Path=/; Expires=Tue, 14 Oct 2025 14:31:02 GMT
+cf-ray: 98df89ce1a3d1f4d-DEN
+alt-svc: h3=":443"; ma=86400
+
+[0;32m[08:31:01] ✅ /whoami endpoint responding (may require authentication)[0m
+[1;33m[08:31:01] 🔐 JWT Authentication Test...[0m
+
+=== JWT AUTHENTICATION ===
+[0;36m[08:31:01] 🔑 Testing with provided JWT token...[0m
+HTTP/2 302 
+date: Mon, 13 Oct 2025 14:31:02 GMT
+location: https://skovgard.cloudflareaccess.com/cdn-cgi/access/login/api.grassrootsmvt.org?kid=76fea0745afec089a3eddeba8d982b10aab6d6f871e43661cb4977765b78f3f0&meta=eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6ImMxNDMwN2QwMzVhOWM0OGY1MWE5NGUzNDBiNjE5YjMzMjA2MGMyNzBkYWI2MzU1YTBjNjY4MjQyZTY0ZmM5YjQifQ.eyJ0eXBlIjoibWV0YSIsImF1ZCI6Ijc2ZmVhMDc0NWFmZWMwODlhM2VkZGViYThkOTgyYjEwYWFiNmQ2Zjg3MWU0MzY2MWNiNDk3Nzc2NWI3OGYzZjAiLCJob3N0bmFtZSI6ImFwaS5ncmFzc3Jvb3RzbXZ0Lm9yZyIsInJlZGlyZWN0X3VybCI6Ii9waW5nIiwic2VydmljZV90b2tlbl9zdGF0dXMiOmZhbHNlLCJpc193YXJwIjpmYWxzZSwiaXNfZ2F0ZXdheSI6ZmFsc2UsImV4cCI6MTc2MDM2NjE2MiwibmJmIjoxNzYwMzY1ODYyLCJpYXQiOjE3NjAzNjU4NjIsImF1dGhfc3RhdHVzIjoiTk9ORSIsIm10bHNfYXV0aCI6eyJjZXJ0X2lzc3Vlcl9kbiI6IiIsImNlcnRfc2VyaWFsIjoiIiwiY2VydF9pc3N1ZXJfc2tpIjoiIiwiY2VydF9wcmVzZW50ZWQiOmZhbHNlLCJjb21tb25fbmFtZSI6IiIsImF1dGhfc3RhdHVzIjoiTk9ORSJ9LCJyZWFsX2NvdW50cnkiOiJVUyIsImFwcF9zZXNzaW9uX2hhc2giOiJhMDZkNzg3MmU2NTZkNmMzYWE4N2U5NjMzNDczMmE1YTFmOWIzZjYxMjk2YTlhNGUzODM5NDI3ZDE1YzNlZmI3In0.cYo7VvuXEENFv1_P6ov3PQdr0MB2h1bmyZyrAvBqwyYYQR13qrgP-0g1t-C9Uwx8delnGFqat4RPunE169TWUSEGaYFpDk2IAE2Os5p5H55Rpejyhwd76-s_2g6WCb27FxRxc1zAZaoEe9bG1r2jyZsYUQ0UOfRlC9rdcsizXBD0T2bOfNymYvDMLGLZbesjm2dGeZ39G0Q6JWhc5wmnbqZeMDCoezyU75HLZSvm8djgambXgdJaMuiLDasx7C6T58zH3EgsSjZ8nSFuA_S9OhLRONuehHHp1fNzWNO4AOgT7GPxwQhJ_nMf84FlLZ6BQOcqOdrpLlOGmsAnQammHQ&redirect_url=%2Fping
+cache-control: private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0
+access-control-allow-credentials: true
+expires: Thu, 01 Jan 1970 00:00:01 GMT
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=Vl2ABbyb2wSngBi7WchM%2BfKP2SYu0ZpoPcW%2B11ZBwW5ed07zUebK1r8%2FLrSCwfxlO6THDzccyxpGnD9YGWTbsLj0zrel0xq9XeE4J2oWYm1mykI%3D"}]}
+nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+server: cloudflare
+set-cookie: CF_AppSession=3129d4de48ff9f51; HttpOnly; Secure; Path=/; Expires=Tue, 14 Oct 2025 14:31:02 GMT
+cf-ray: 98df89cf7af61f38-DEN
+alt-svc: h3=":443"; ma=86400
+
+[1;33m[08:31:02] ⚠️  JWT authentication may have issues[0m
+[1;33m[08:31:02] 🌐 Testing UI to API connectivity...[0m
+
+=== UI CONNECTIVITY ===
+HTTP/2 302 
+date: Mon, 13 Oct 2025 14:31:02 GMT
+location: https://skovgard.cloudflareaccess.com/cdn-cgi/access/login/volunteers.grassrootsmvt.org?kid=76fea0745afec089a3eddeba8d982b10aab6d6f871e43661cb4977765b78f3f0&meta=eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsImtpZCI6ImMxNDMwN2QwMzVhOWM0OGY1MWE5NGUzNDBiNjE5YjMzMjA2MGMyNzBkYWI2MzU1YTBjNjY4MjQyZTY0ZmM5YjQifQ.eyJ0eXBlIjoibWV0YSIsImF1ZCI6Ijc2ZmVhMDc0NWFmZWMwODlhM2VkZGViYThkOTgyYjEwYWFiNmQ2Zjg3MWU0MzY2MWNiNDk3Nzc2NWI3OGYzZjAiLCJob3N0bmFtZSI6InZvbHVudGVlcnMuZ3Jhc3Nyb290c212dC5vcmciLCJyZWRpcmVjdF91cmwiOiIvIiwic2VydmljZV90b2tlbl9zdGF0dXMiOmZhbHNlLCJpc193YXJwIjpmYWxzZSwiaXNfZ2F0ZXdheSI6ZmFsc2UsImV4cCI6MTc2MDM2NjE2MiwibmJmIjoxNzYwMzY1ODYyLCJpYXQiOjE3NjAzNjU4NjIsImF1dGhfc3RhdHVzIjoiTk9ORSIsIm10bHNfYXV0aCI6eyJjZXJ0X2lzc3Vlcl9kbiI6IiIsImNlcnRfc2VyaWFsIjoiIiwiY2VydF9pc3N1ZXJfc2tpIjoiIiwiY2VydF9wcmVzZW50ZWQiOmZhbHNlLCJjb21tb25fbmFtZSI6IiIsImF1dGhfc3RhdHVzIjoiTk9ORSJ9LCJyZWFsX2NvdW50cnkiOiJVUyIsImFwcF9zZXNzaW9uX2hhc2giOiI1MGM4NjE5OTA2YWNiOTAxZmU0OTBhOGRiZTBhY2QwMjU3MjQwNTg1Y2JkMDQ1MDcyZGJiMWRiZDYxNDkzMGNmIn0.O-uKiuUefFcnr5Bi0YHohJ1PZ6lr2QyNtP8JdFqGUFU-ruPrYCwYyAj9IcuPVetbAhLvs9SX9NzInx8roa4ju1d0GWedhLEvuF8NR2DLYXmO9IbCaeJ3-IZ9Wv__SUJyxSE79W082pD738y8z_Ox-T2DbniLrR2g7eumnsUZQMN65b7pnUFHa7bNAuHMx_bLvNUagXLDmwV8yih2RZqxtfYEC8IKFaZVW2vsbBYlCF4l4VdllKPQES0i7P8K09W5eUnvu2TWM40XtF4rErqMorDDGNRAbJ9M1nXsb-YQk1ONuRaYeNvlTUQw5IyMr-7JtYL0wohEFg7AI4FsWaUGuA&redirect_url=%2F
+cache-control: private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0
+access-control-allow-credentials: true
+expires: Thu, 01 Jan 1970 00:00:01 GMT
+report-to: {"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=YR%2F5dncQ3qH9GqIozgTlfeAag7Mnmmsn%2FbnAM6t2SbrSUgWO6L9jCas1LTkjKleAtgy5IvM0Iw8N1GtgZecLTu%2BRqAtQxq2de5FFfI1vq6kizaRcD%2FhOPmJ7"}]}
+nel: {"report_to":"cf-nel","success_fraction":0.0,"max_age":604800}
+server: cloudflare
+set-cookie: CF_AppSession=a55bcbde2fc81e9d; HttpOnly; Secure; Path=/; Expires=Tue, 14 Oct 2025 14:31:02 GMT
+cf-ray: 98df89d19b2c4de3-MCI
+alt-svc: h3=":443"; ma=86400
+
+[0;32m[08:31:02] ✅ UI is accessible[0m
+[1;33m[08:31:02] 🗄️  Verifying D1 database configuration...[0m
+
+=== D1 DATABASE ===
+
+ ⛅️ wrangler 4.42.2
+───────────────────
+┌──────────────────────────────────────┬───────────────────┬──────────────────────────┬────────────┬────────────┬───────────┐
+│ uuid                                 │ name              │ created_at               │ version    │ num_tables │ file_size │
+├──────────────────────────────────────┼───────────────────┼──────────────────────────┼────────────┼────────────┼───────────┤
+│ de78cb41-176d-40e8-bd3b-e053e347ac3f │ wy_preview        │ 2025-10-09T11:50:32.991Z │ production │ 0          │ 12288     │
+├──────────────────────────────────────┼───────────────────┼──────────────────────────┼────────────┼────────────┼───────────┤
+│ 4b4227f1-bf30-4fcf-8a08-6967b536a5ab │ wy                │ 2025-09-30T22:20:26.496Z │ production │ 0          │ 97804288  │
+├──────────────────────────────────────┼───────────────────┼──────────────────────────┼────────────┼────────────┼───────────┤
+│ 6c3fffd4-e6dc-47b8-b541-3857c2882e0c │ events_db_local   │ 2025-07-02T01:51:37.088Z │ production │ 0          │ 0         │
+├──────────────────────────────────────┼───────────────────┼──────────────────────────┼────────────┼────────────┼───────────┤
+│ 9c4b0c27-eb33-46e6-a477-fb49d4c81474 │ ballot_sources    │ 2025-05-18T12:12:12.252Z │ production │ 1          │ 77824     │
+├──────────────────────────────────────┼───────────────────┼──────────────────────────┼────────────┼────────────┼───────────┤
+│ 1624450c-f228-4802-8a76-9c65f29295fa │ events_db_preview │ 2025-05-05T13:59:50.370Z │ production │ 4          │ 45056     │
+├──────────────────────────────────────┼───────────────────┼──────────────────────────┼────────────┼────────────┼───────────┤
+│ b5814930-2779-4bfb-8052-24ee419e09fd │ events_db         │ 2025-05-05T12:03:41.589Z │ production │ 8          │ 73728     │
+├──────────────────────────────────────┼───────────────────┼──────────────────────────┼────────────┼────────────┼───────────┤
+│ aeedccf4-14bb-48f8-91c0-a9023c9f153c │ sibidrift         │ 2025-03-15T00:51:53.315Z │ production │ 4          │ 2646016   │
+└──────────────────────────────────────┴───────────────────┴──────────────────────────┴────────────┴────────────┴───────────┘
+[0;32m[08:31:03] ✅ D1 database 'wy' found[0m
+[1;33m[08:31:03] 📊 Sampling Worker logs...[0m
+
+=== WORKER LOGS SAMPLE ===
+[0;36m[08:31:03] 🔍 Starting log tail for 10 seconds...[0m
+[0;36m[08:31:05] 🎯 Making test request to generate logs...[0m
+[0;32m[08:31:13] ✅ Log sampling complete[0m
+[0;34m[08:31:13] 📋 Generating deployment summary...[0m
+
+=== DEPLOYMENT SUMMARY ===
+
+✅ GrassrootsMVT Wrangler Deployment Verification
+===============================================
+📅 Date: Mon Oct 13 08:31:13 MDT 2025
+🏷️  Worker: grassrootsmvt-production
+🌐 API Base: https://api.grassrootsmvt.org
+🖥️  UI Base: https://volunteers.grassrootsmvt.org
+
+🌐 Routes verified:
+  - api.grassrootsmvt.org/*
+  - grassrootsmvt.org/api/*
+
+🔐 JWT authentication: TESTEDeyJhbGciOiJSUzI1NiIsImtpZCI6ImMxNDMwN2QwMzVhOWM0OGY1MWE5NGUzNDBiNjE5YjMzMjA2MGMyNzBkYWI2MzU1YTBjNjY4MjQyZTY0ZmM5YjQifQ.eyJhdWQiOlsiNzZmZWEwNzQ1YWZlYzA4OWEzZWRkZWJhOGQ5ODJiMTBhYWI2ZDZmODcxZTQzNjYxY2I0OTc3NzY1Yjc4ZjNmMCJdLCJlbWFpbCI6ImFuY2hvcnNrb3ZAZ21haWwuY29tIiwiZXhwIjoxNzYwMzY3MDY1LCJpYXQiOjE3NjAyODA2NjUsIm5iZiI6MTc2MDI4MDY2NSwiaXNzIjoiaHR0cHM6Ly9za292Z2FyZC5jbG91ZGZsYXJlYWNjZXNzLmNvbSIsInR5cGUiOiJhcHAiLCJpZGVudGl0eV9ub25jZSI6IjFZd1k4QzVxRVR0WlZHekMiLCJzdWIiOiI3OTUyZGE5Mi00NTUwLTUzOGEtYjU4MC1jODAyYTZiNmI2NTgiLCJjb3VudHJ5IjoiVVMifQ.RKQqQmxU3VbSaL1UHjEe8k2sohV2-LJQo5zZhD-VLyRGmlOFjT_3usO2guRu0EwVh8tgB8ValmBiY3_PvrtPyBvFjYlp4v5bijsEtpsRYQcuRsDBQb3NwV0qDQaP3-Ex9-PS5f8Rf3MFM5WnBFs_4vZfdGkmvoB5Jaws7EZNUeicltIEeiOGC5Y6khU7lNkIfXpIhAlMV30ce7kpxUCtEvH0OAQZxalzJfWzsIuvq4RF5X5p2ZAIONUc5yI0BRF6UGiXX2tRGCImfV10MPtgcDSdv7vGTnqRTzKdNDzoUURPWIWA-ahccuknyAW_dZZPPctg5r3gVH17jYxigiAfDg
+🔍 Observability logs: ENABLED
+📦 D1 binding: wy (production)
+📊 CORS headers: volunteers.grassrootsmvt.org
+
+🎯 Endpoints tested:
+  - https://api.grassrootsmvt.org/ping
+  - https://api.grassrootsmvt.org/whoami
+  - https://volunteers.grassrootsmvt.org
+
+📁 Log file: /home/anchor/projects/grassrootsmvt/logs/deploy_summary_20251013_083053.txt
+[0;32m[08:31:13] 
+✅ GrassrootsMVT Wrangler Deployment Verification
+===============================================
+📅 Date: Mon Oct 13 08:31:13 MDT 2025
+🏷️  Worker: grassrootsmvt-production
+🌐 API Base: https://api.grassrootsmvt.org
+🖥️  UI Base: https://volunteers.grassrootsmvt.org
+
+🌐 Routes verified:
+  - api.grassrootsmvt.org/*
+  - grassrootsmvt.org/api/*
+
+🔐 JWT authentication: TESTEDeyJhbGciOiJSUzI1NiIsImtpZCI6ImMxNDMwN2QwMzVhOWM0OGY1MWE5NGUzNDBiNjE5YjMzMjA2MGMyNzBkYWI2MzU1YTBjNjY4MjQyZTY0ZmM5YjQifQ.eyJhdWQiOlsiNzZmZWEwNzQ1YWZlYzA4OWEzZWRkZWJhOGQ5ODJiMTBhYWI2ZDZmODcxZTQzNjYxY2I0OTc3NzY1Yjc4ZjNmMCJdLCJlbWFpbCI6ImFuY2hvcnNrb3ZAZ21haWwuY29tIiwiZXhwIjoxNzYwMzY3MDY1LCJpYXQiOjE3NjAyODA2NjUsIm5iZiI6MTc2MDI4MDY2NSwiaXNzIjoiaHR0cHM6Ly9za292Z2FyZC5jbG91ZGZsYXJlYWNjZXNzLmNvbSIsInR5cGUiOiJhcHAiLCJpZGVudGl0eV9ub25jZSI6IjFZd1k4QzVxRVR0WlZHekMiLCJzdWIiOiI3OTUyZGE5Mi00NTUwLTUzOGEtYjU4MC1jODAyYTZiNmI2NTgiLCJjb3VudHJ5IjoiVVMifQ.RKQqQmxU3VbSaL1UHjEe8k2sohV2-LJQo5zZhD-VLyRGmlOFjT_3usO2guRu0EwVh8tgB8ValmBiY3_PvrtPyBvFjYlp4v5bijsEtpsRYQcuRsDBQb3NwV0qDQaP3-Ex9-PS5f8Rf3MFM5WnBFs_4vZfdGkmvoB5Jaws7EZNUeicltIEeiOGC5Y6khU7lNkIfXpIhAlMV30ce7kpxUCtEvH0OAQZxalzJfWzsIuvq4RF5X5p2ZAIONUc5yI0BRF6UGiXX2tRGCImfV10MPtgcDSdv7vGTnqRTzKdNDzoUURPWIWA-ahccuknyAW_dZZPPctg5r3gVH17jYxigiAfDg
+🔍 Observability logs: ENABLED
+📦 D1 binding: wy (production)
+📊 CORS headers: volunteers.grassrootsmvt.org
+
+🎯 Endpoints tested:
+  - https://api.grassrootsmvt.org/ping
+  - https://api.grassrootsmvt.org/whoami
+  - https://volunteers.grassrootsmvt.org
+
+📁 Log file: /home/anchor/projects/grassrootsmvt/logs/deploy_summary_20251013_083053.txt[0m
+[1;33m[08:31:13] 📝 Committing deployment logs...[0m
+[main 39637d4] ✅ Verified Wrangler deployment 2025-10-13
+ 6 files changed, 594 insertions(+)
+ create mode 100644 logs/deploy_summary_20251013_082551.txt
+ create mode 100644 logs/deploy_summary_20251013_082705.txt
+ create mode 100644 logs/deploy_summary_20251013_082838.txt
+ create mode 100644 logs/deploy_summary_20251013_082915.txt
+ create mode 100644 logs/deploy_summary_20251013_082956.txt
+ create mode 100644 logs/deploy_summary_20251013_083053.txt
+[0;32m[08:31:14] ✅ Git commit[0m
+[0;36m[08:31:14] 📤 Pushing to main branch...[0m
+To github.com:anchorskov/grassrootsmvt.git
+   e475006..39637d4  main -> main
+[0;32m[08:31:15] ✅ Git push[0m
+[0;32m[08:31:15] 🎉 Deployment verification complete![0m
+[0;34m[08:31:15] 📁 Full log saved to: /home/anchor/projects/grassrootsmvt/logs/deploy_summary_20251013_083053.txt[0m
+[0;36m[08:31:15] 🔗 Next steps:[0m
+[0;36m[08:31:15]    • Monitor logs at: https://dash.cloudflare.com[0m
+[0;36m[08:31:15]    • Test UI at: https://volunteers.grassrootsmvt.org[0m
+[0;36m[08:31:15]    • Test API at: https://api.grassrootsmvt.org/ping[0m
+[0;36m[08:31:15] 🌐 Opening Cloudflare dashboard...[0m

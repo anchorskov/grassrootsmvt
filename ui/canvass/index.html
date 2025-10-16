@@ -53,6 +53,7 @@
   loadEnvironmentConfig();
 </script>
 <script src="/src/apiClient.js"></script>
+<script src="../shared/streetAutocomplete.js"></script>
 <style>
   :root { --gap: 10px; }
   body { font-family: system-ui, sans-serif; margin: 12px; position: relative; }
@@ -193,17 +194,10 @@
         const token = localStorage.getItem("access_token");
         console.log("🔐 Access token present:", !!token);
         if (!token) console.warn("No access_token in localStorage — /api/whoami will return 401");
-        try {
-          // Wait for apiFetch to be available
-          await new Promise(resolve => {
-            if (window.apiFetch) resolve();
-            else setTimeout(resolve, 500);
-          });
-          const j = await window.apiFetch('ping'); // Remove leading slash
-          console.log('🌎 /api/ping result:', j);
-        } catch (err) {
-          console.error('Failed to reach /api/ping:', err);
-        }
+        
+        // Note: Removed automatic apiFetch call to prevent redirect loops
+        // API connectivity will be tested when user actually performs actions
+        console.log('🚪 Canvass page initialized - API calls will happen on user interaction');
       })();
     `;
     document.head.appendChild(dbg);
@@ -534,147 +528,6 @@
     }
   }
 
-  function setupStreetAutocomplete() {
-    const streetInput = document.getElementById('street');
-    const suggestions = document.getElementById('streetSuggestions');
-    
-    // ON FOCUS: Load and show streets immediately
-    streetInput.addEventListener('focus', async function() {
-      // Show loading indicator
-      suggestions.innerHTML = '<div class="autocomplete-suggestion">Loading streets...</div>';
-      suggestions.style.display = 'block';
-      
-      try {
-        // Get filters directly from URL
-        const filters = fromQS();
-        
-        // Direct API call - bypass any caching issues
-        const response = await fetch('http://localhost:8787/api/canvass/nearby', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filters, limit: 200 })
-        });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
-        
-        if (data.rows && data.rows.length > 0) {
-          // Extract unique street names
-          const streets = [...new Set(data.rows.map(r => {
-            return r.address.replace(/^\d+\s+/, '').toUpperCase();
-          }))].sort();
-          
-          // Populate dropdown immediately
-          suggestions.innerHTML = streets.map(street => 
-            `<div class="autocomplete-suggestion" data-street="${street}">${street}</div>`
-          ).join('');
-          suggestions.style.display = 'block';
-          suggestions.style.backgroundColor = '#f0f9ff'; // Light blue highlight
-        } else {
-          suggestions.innerHTML = '<div class="autocomplete-suggestion">No streets found for this area</div>';
-        }
-      } catch (error) {
-        console.error('Failed to load streets:', error);
-        suggestions.innerHTML = '<div class="autocomplete-suggestion">Error loading streets</div>';
-      }
-    });
-    
-    streetInput.addEventListener('input', async function() {
-      const value = this.value.toUpperCase();
-      
-      // If there are already suggestions, filter them
-      const existingSuggestions = Array.from(suggestions.querySelectorAll('.autocomplete-suggestion'));
-      if (existingSuggestions.length > 0) {
-        const allStreets = existingSuggestions.map(el => el.dataset.street).filter(Boolean);
-        
-        if (value.length === 0) {
-          // Show all streets when input is empty
-          suggestions.innerHTML = allStreets.map(street => 
-            `<div class="autocomplete-suggestion" data-street="${street}">${street}</div>`
-          ).join('');
-          suggestions.style.display = 'block';
-        } else {
-          // Filter streets based on input
-          const matches = allStreets.filter(street => 
-            street && street.includes(value)
-          ).slice(0, 10);
-          
-          if (matches.length > 0) {
-            suggestions.innerHTML = matches.map(street => 
-              `<div class="autocomplete-suggestion" data-street="${street}">${street}</div>`
-            ).join('');
-            suggestions.style.display = 'block';
-          } else {
-            suggestions.style.display = 'none';
-          }
-        }
-      }
-    });
-    
-    // Handle suggestion clicks
-    suggestions.addEventListener('click', function(e) {
-      if (e.target.classList.contains('autocomplete-suggestion')) {
-        if (e.target.dataset.street) {
-          streetInput.value = e.target.dataset.street;
-          suggestions.style.display = 'none';
-          
-          // Enable house number field and populate it
-          enableHouseField();
-          
-          // Update instructions when street is selected
-          updateInstruction('streetSelected');
-          
-          // Load house numbers for this street
-          setTimeout(() => {
-            populateHouseNumbers(e.target.dataset.street);
-          }, 100);
-          
-          // Don't refocus - it causes instruction to revert to streetFocused
-          // streetInput.focus();
-        }
-      }
-    });
-    
-    // Also enable house numbers when user types and pauses on a complete street name
-    let streetTimeout;
-    streetInput.addEventListener('input', function() {
-      const currentValue = this.value.toUpperCase().trim();
-      
-      // Clear previous timeout
-      clearTimeout(streetTimeout);
-      
-      // Disable house field if street is cleared
-      if (currentValue.length === 0) {
-        disableHouseField();
-      }
-      
-      // Set timeout to check for complete street name
-      streetTimeout = setTimeout(() => {
-        if (currentValue.length > 3) {
-          enableHouseField();
-          populateHouseNumbers(currentValue);
-        }
-      }, 500); // Wait 500ms after user stops typing
-    });
-    
-    // Clear house field when street field is focused (starting new selection)
-    streetInput.addEventListener('focus', function() {
-      if (this.value.trim() === '') {
-        disableHouseField();
-      }
-    });
-    
-    // Hide suggestions when clicking outside
-    document.addEventListener('click', function(e) {
-      if (!streetInput.contains(e.target) && !suggestions.contains(e.target)) {
-        suggestions.style.display = 'none';
-      }
-    });
-  }
-
   // Enable house number field
   function enableHouseField() {
     const houseInput = document.getElementById('house');
@@ -832,8 +685,32 @@
     streetEl.selectionStart = streetEl.selectionEnd = pos;
   });
 
-  // Initialize autocomplete (streets will load on focus)
-  setupStreetAutocomplete();
+  // Initialize reusable street autocomplete component
+  const streetAutocomplete = new StreetAutocomplete({
+    streetInputId: 'street',
+    suggestionsId: 'streetSuggestions',
+    getCounty: () => fromQS().county,
+    getCity: () => fromQS().city,
+    onStreetSelected: (streetName) => {
+      // Enable house number field
+      enableHouseField();
+      
+      // Update instructions when street is selected
+      updateInstruction('streetSelected');
+      
+      // Load house numbers for this street
+      setTimeout(() => {
+        populateHouseNumbers(streetName);
+      }, 100);
+    },
+    onHouseFieldChange: (enabled) => {
+      if (enabled) {
+        enableHouseField();
+      } else {
+        disableHouseField();
+      }
+    }
+  });
   
   // Instructions system
   const instructionsToggle = document.getElementById('instructionsToggle');

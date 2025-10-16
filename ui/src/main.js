@@ -1,24 +1,20 @@
 // Main application initialization
-import { initializeAuthStatus, apiFetch } from './apiClient.js';
+import { apiFetch, getCurrentUserOrRedirect } from './apiClient.js';
 
 // Initialize authentication on page load
 document.addEventListener('DOMContentLoaded', async () => {
   console.log('🚀 GrassrootsMVT initializing...');
   
-  // This will check auth status and redirect to protected API endpoint if needed
-  const isAuthenticated = await initializeAuthStatus();
+  // Unified auth handled by getCurrentUserOrRedirect when needed
+  console.log('✅ App ready - authentication handled per API call');
   
-  if (isAuthenticated) {
-    console.log('✅ Authentication verified, app ready');
-    
-    // Example: Test API access
-    try {
-      const response = await apiFetch('/api/ping');
-      const data = await response.json();
-      console.log('📡 API test successful:', data);
-    } catch (error) {
-      console.warn('⚠️ API test failed:', error);
-    }
+  // Example: Test API access
+  try {
+    const response = await apiFetch('/api/ping');
+    const data = await response.json();
+    console.log('📡 API test successful:', data);
+  } catch (error) {
+    console.warn('⚠️ API test failed:', error);
   }
 });
 

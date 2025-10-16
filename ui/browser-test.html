@@ -139,7 +139,7 @@
     function testModuleLoading() {
       try {
         if (typeof window.apiFetch === 'function' && 
-            typeof window.initializeAuthStatus === 'function' && 
+            typeof window.getCurrentUserOrRedirect === 'function' && 
             typeof window.ensureAccessSession === 'function') {
           updateTestStatus('moduleTest', true, 'All API client functions are available globally');
         } else {

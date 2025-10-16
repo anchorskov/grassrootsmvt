@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Wyoming Voter Registration – Data Entry (JSON Export)</title>
+  <style>
+    :root { --bg:#0b1020; --card:#121831; --ink:#eaf1ff; --muted:#94a3b8; --accent:#7c9cff; --edge:#223; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; font: 16px/1.45 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Noto Sans", "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji"; background: linear-gradient(180deg, var(--bg), #0d1530); color: var(--ink); }
+    .wrap { max-width: 1100px; margin: 28px auto 80px; padding: 0 20px; }
+    .title { font-weight: 800; letter-spacing: .2px; font-size: 28px; margin: 0 0 14px; }
+    .sub { color: var(--muted); margin: 0 0 24px; }
+    .card { background: var(--card); border: 1px solid var(--edge); border-radius: 16px; padding: 18px; margin: 16px 0; box-shadow: 0 10px 30px rgba(0,0,0,.25); }
+    h2 { font-size: 18px; margin: 0 0 12px; letter-spacing: .2px; }
+    .row { display: grid; grid-template-columns: repeat(12, 1fr); gap: 12px; }
+    .col-3 { grid-column: span 3; }
+    .col-4 { grid-column: span 4; }
+    .col-6 { grid-column: span 6; }
+    .col-8 { grid-column: span 8; }
+    .col-9 { grid-column: span 9; }
+    .col-12 { grid-column: span 12; }
+
+    label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    input[type="text"], input[type="number"], select { width: 100%; background: #0f152b; color: var(--ink); border: 1px solid #2a355b; border-radius: 10px; padding: 10px 12px; outline: none; }
+    input[type="text"]:focus, input[type="number"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(124,156,255,.18); }
+    .check { display: flex; align-items: center; gap: 10px; margin: 6px 0; }
+    .check input { width: 18px; height: 18px; }
+
+    .toolbar { position: sticky; bottom: 0; left: 0; right: 0; background: rgba(10,14,30,.8); backdrop-filter: blur(10px); border-top: 1px solid #1d2543; padding: 10px 16px; display: flex; gap: 10px; justify-content: center; }
+    button { appearance: none; background: var(--accent); color: #0c1228; border: 0; border-radius: 999px; padding: 10px 16px; font-weight: 700; cursor: pointer; box-shadow: 0 6px 18px rgba(124,156,255,.35); }
+    button.secondary { background: transparent; color: var(--ink); border: 1px solid #33406b; box-shadow: none; }
+    textarea { width: 100%; height: 160px; background: #0f152b; color: var(--ink); border: 1px solid #2a355b; border-radius: 10px; padding: 10px 12px; }
+    .hint { font-size: 12px; color: var(--muted); }
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background: #0e1b41; border: 1px solid #213066; color: #bcd; font-size: 12px; margin-left: 6px; }
+    .grid-compact .row { gap: 10px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1 class="title">Wyoming Voter Registration – Data Entry</h1>
+    <p class="sub">This helper form mirrors the PDF fields and exports a JSON payload that matches the standardized field names. Use the Download button below, then run the JSON through your autofill step.</p>
+
+    <!-- SECTION 0: Application type -->
+    <section class="card">
+      <h2>Application Type <span class="pill">section0</span></h2>
+      <div class="row">
+        <div class="col-4 check"><input id="section0_application_new_cb" name="section0_application_new_cb" type="checkbox"><label for="section0_application_new_cb">New Voter Application</label></div>
+        <div class="col-4 check"><input id="section0_application_name_change_cb" name="section0_application_name_change_cb" type="checkbox"><label for="section0_application_name_change_cb">Name Change</label></div>
+        <div class="col-4 check"><input id="section0_application_change_current_cb" name="section0_application_change_current_cb" type="checkbox"><label for="section0_application_change_current_cb">Change to Current Registration</label></div>
+      </div>
+    </section>
+
+    <!-- SECTION 1: Eligibility -->
+    <section class="card grid-compact">
+      <h2>Eligibility <span class="pill">section1</span></h2>
+      <div class="row">
+        <div class="col-6">
+          <div class="check"><input id="section1_elig_citizen_true_cb" name="section1_elig_citizen_true_cb" type="checkbox"><label for="section1_elig_citizen_true_cb">#1 I am a citizen of the United States (True)</label></div>
+          <div class="check"><input id="section1_elig_citizen_false_cb" name="section1_elig_citizen_false_cb" type="checkbox"><label for="section1_elig_citizen_false_cb">#1 I am a citizen of the United States (False)</label></div>
+        </div>
+        <div class="col-6">
+          <div class="check"><input id="section1_elig_age_true_cb" name="section1_elig_age_true_cb" type="checkbox"><label for="section1_elig_age_true_cb">#2 I will be at least 18 by election day (True)</label></div>
+          <div class="check"><input id="section1_elig_age_false_cb" name="section1_elig_age_false_cb" type="checkbox"><label for="section1_elig_age_false_cb">#2 I will be at least 18 by election day (False)</label></div>
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-12">
+          <div class="check"><input id="section1_conviction_not_felon_cb" name="section1_conviction_not_felon_cb" type="checkbox"><label for="section1_conviction_not_felon_cb">#3 I am not a convicted felon.</label></div>
+          <div class="check"><input id="section1_conviction_felon_not_restored_cb" name="section1_conviction_felon_not_restored_cb" type="checkbox"><label for="section1_conviction_felon_not_restored_cb">#3 I am a convicted felon and my WY voting rights have not been restored.</label></div>
+          <div class="check"><input id="section1_conviction_felon_restored_cb" name="section1_conviction_felon_restored_cb" type="checkbox"><label for="section1_conviction_felon_restored_cb">#3 I am a convicted felon and my WY voting rights have been restored.</label></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 2: Name -->
+    <section class="card grid-compact">
+      <h2>Name <span class="pill">section2</span></h2>
+      <div class="row">
+        <div class="col-6">
+          <label for="section2_last_name_txt">Legal Last Name</label>
+          <input id="section2_last_name_txt" name="section2_last_name_txt" type="text" autocomplete="family-name" />
+        </div>
+        <div class="col-6">
+          <label for="section2_first_name_txt">Legal First Name</label>
+          <input id="section2_first_name_txt" name="section2_first_name_txt" type="text" autocomplete="given-name" />
+        </div>
+        <div class="col-8">
+          <label for="section2_middle_name_txt">Legal Middle Name</label>
+          <input id="section2_middle_name_txt" name="section2_middle_name_txt" type="text" />
+        </div>
+        <div class="col-4">
+          <label for="section2_suffix_txt">Suffix (Jr./Sr./II/III)</label>
+          <input id="section2_suffix_txt" name="section2_suffix_txt" type="text" />
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 3: Identification -->
+    <section class="card grid-compact">
+      <h2>Identification <span class="pill">section3</span></h2>
+      <div class="row">
+        <div class="col-3">
+          <label for="section3_dob_mm_txt">Date of Birth — Month (MM)</label>
+          <input id="section3_dob_mm_txt" name="section3_dob_mm_txt" type="text" inputmode="numeric" pattern="\\d{1,2}" maxlength="2" placeholder="MM" />
+        </div>
+        <div class="col-3">
+          <label for="section3_dob_dd_txt">Date of Birth — Day (DD)</label>
+          <input id="section3_dob_dd_txt" name="section3_dob_dd_txt" type="text" inputmode="numeric" pattern="\\d{1,2}" maxlength="2" placeholder="DD" />
+        </div>
+        <div class="col-3">
+          <label for="section3_dob_yyyy_txt">Date of Birth — Year (YYYY)</label>
+          <input id="section3_dob_yyyy_txt" name="section3_dob_yyyy_txt" type="text" inputmode="numeric" pattern="\\d{4}" maxlength="4" placeholder="YYYY" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="col-12">
+          <div class="check"><input id="section3_has_wy_dl_cb" name="section3_has_wy_dl_cb" type="checkbox"><label for="section3_has_wy_dl_cb">I have a valid Wyoming Driver’s License.</label></div>
+          <div class="row">
+            <div class="col-3">
+              <label for="section3_dl_part1_txt">DL Number — Part 1</label>
+              <input id="section3_dl_part1_txt" name="section3_dl_part1_txt" type="text" />
+            </div>
+            <div class="col-9">
+              <label for="section3_dl_part2_txt">DL Number — Part 2 (or use Full below)</label>
+              <input id="section3_dl_part2_txt" name="section3_dl_part2_txt" type="text" />
+            </div>
+            <div class="col-12">
+              <label for="section3_dl_full_txt">DL Number — Full (alternate to Part 1 + Part 2)</label>
+              <input id="section3_dl_full_txt" name="section3_dl_full_txt" type="text" />
+            </div>
+          </div>
+          <div class="check"><input id="section3_no_wy_dl_cb" name="section3_no_wy_dl_cb" type="checkbox"><label for="section3_no_wy_dl_cb">I do not have a Wyoming Driver’s License.</label></div>
+          <div class="row">
+            <div class="col-4">
+              <label for="section3_ssn_last4_txt">SSN Last Four (XXX-XX-<strong>####</strong>)</label>
+              <input id="section3_ssn_last4_txt" name="section3_ssn_last4_txt" type="text" inputmode="numeric" pattern="\\d{4}" maxlength="4" placeholder="1234" />
+            </div>
+          </div>
+          <div class="check"><input id="section3_no_wy_dl_no_ssn_cb" name="section3_no_wy_dl_no_ssn_cb" type="checkbox"><label for="section3_no_wy_dl_no_ssn_cb">I do not have a Wyoming Driver’s License or a Social Security Number. (Other ID will be required.)</label></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>JSON Preview</h2>
+      <textarea id="json_out" readonly placeholder="Your JSON will appear here when you click Generate JSON."></textarea>
+      <p class="hint">Keys match the standardized field names used in the PDF.</p>
+    </section>
+
+  </div>
+
+  <div class="toolbar">
+    <button id="btn-generate">Generate JSON</button>
+    <button id="btn-download" class="secondary">Download JSON</button>
+    <button id="btn-copy" class="secondary">Copy</button>
+    <input id="file-load" type="file" accept="application/json" hidden>
+    <button id="btn-load" class="secondary">Load JSON</button>
+    <button id="btn-reset" class="secondary">Reset</button>
+  </div>
+
+<script>
+(function(){
+  const fieldNames = [
+    // section0
+    'section0_application_new_cb','section0_application_name_change_cb','section0_application_change_current_cb',
+    // section1
+    'section1_elig_citizen_true_cb','section1_elig_citizen_false_cb','section1_elig_age_true_cb','section1_elig_age_false_cb',
+    'section1_conviction_not_felon_cb','section1_conviction_felon_not_restored_cb','section1_conviction_felon_restored_cb',
+    // section2
+    'section2_last_name_txt','section2_first_name_txt','section2_middle_name_txt','section2_suffix_txt',
+    // section3
+    'section3_dob_mm_txt','section3_dob_dd_txt','section3_dob_yyyy_txt',
+    'section3_has_wy_dl_cb','section3_no_wy_dl_cb','section3_no_wy_dl_no_ssn_cb',
+    'section3_dl_part1_txt','section3_dl_part2_txt','section3_dl_full_txt','section3_ssn_last4_txt'
+  ];
+
+  function collect() {
+    const data = {};
+    fieldNames.forEach(name => {
+      const el = document.getElementById(name);
+      if (!el) return;
+      if (el.type === 'checkbox') {
+        data[name] = !!el.checked;
+      } else {
+        data[name] = el.value || '';
+      }
+    });
+    return data;
+  }
+
+  function hydrate(data) {
+    Object.entries(data || {}).forEach(([k, v]) => {
+      const el = document.getElementById(k);
+      if (!el) return;
+      if (el.type === 'checkbox') el.checked = !!v; else el.value = v ?? '';
+    });
+    document.getElementById('json_out').value = JSON.stringify(collect(), null, 2);
+  }
+
+  function downloadJSON(filename, obj) {
+    const blob = new Blob([JSON.stringify(obj, null, 2)], {type: 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  document.getElementById('btn-generate').addEventListener('click', () => {
+    document.getElementById('json_out').value = JSON.stringify(collect(), null, 2);
+  });
+
+  document.getElementById('btn-download').addEventListener('click', () => {
+    const data = collect();
+    downloadJSON('wy_voter_registration_data.json', data);
+  });
+
+  document.getElementById('btn-copy').addEventListener('click', async () => {
+    const txt = document.getElementById('json_out').value || JSON.stringify(collect(), null, 2);
+    try { await navigator.clipboard.writeText(txt); alert('JSON copied to clipboard'); } catch(e) { alert('Copy failed: ' + e.message); }
+  });
+
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    document.querySelectorAll('input[type="text"]').forEach(i => i.value='');
+    document.querySelectorAll('input[type="checkbox"]').forEach(i => i.checked=false);
+    document.getElementById('json_out').value = '';
+  });
+
+  // Load JSON
+  const fileInput = document.getElementById('file-load');
+  document.getElementById('btn-load').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    if (!f) return;
+    const txt = await f.text();
+    try { const data = JSON.parse(txt); hydrate(data); } catch(e) { alert('Invalid JSON: ' + e.message); }
+    fileInput.value = '';
+  });
+
+  // Seed with a tiny example for quick testing
+  hydrate({
+    section0_application_new_cb: true,
+    section1_elig_citizen_true_cb: true,
+    section1_elig_age_true_cb: true,
+    section2_last_name_txt: 'DOE',
+    section2_first_name_txt: 'JANE',
+    section3_dob_mm_txt: '10',
+    section3_dob_dd_txt: '15',
+    section3_dob_yyyy_txt: '1990',
+    section3_ssn_last4_txt: '1234'
+  });
+})();
+</script>
+</body>
+</html>

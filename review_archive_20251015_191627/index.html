@@ -5,25 +5,31 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>GrassrootsMVT Volunteer Hub</title>
 <style>
-  body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 880px; pos  console.log('🚀 GrassrootsMVT initializing...');tion: relative; }
-  .auth-status { position: fixed; top: 8px; right: 8px; z-index: 100; font-size: 0.875rem; padding: 0.5rem 0.75rem; border-radius: 8px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 1rem; max-width: 880px; position: relative; }
+  .auth-status { position: fixed; top: 8px; right: 8px; z-index: 100; font-size: .875rem; padding: .5rem .75rem; border-radius: 8px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
   .card { border:1px solid #e5e7eb; border-radius: 12px; padding: 1rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
   .row { display:flex; gap:1rem; flex-wrap: wrap; }
   .row > * { flex:1 1 220px; }
   label { display:block; margin:.4rem 0 .25rem; font-weight:600; }
   select, input[type=number] { width:100%; padding:.6rem; border:1px solid #cbd5e1; border-radius:8px; }
   .muted { color:#64748b; }
-  .btns { display:flex; gap:.75rem; flex-wrap: wrap; margin-top:.75rem; }
+  .btns { display:flex; gap:.75rem; flex-wrap: wrap; margin-top:.75rem; align-items:center; }
   button { padding:.7rem 1.1rem; border-radius:10px; border:0; font-weight:700; cursor:pointer; }
   button.primary { background:#0ea5e9; color:white; }
   button.secondary { background:#e2e8f0; color:#0f172a; }
   button[disabled] { opacity:.5; cursor:not-allowed; }
   .chips { display:flex; gap:.5rem; flex-wrap: wrap; }
+  a { color: #0ea5e9; }
+  .quick-actions { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1rem; margin: 1rem 0; }
+  .quick-actions h3 { margin: 0 0 0.75rem; font-size: 1.1rem; color: #334155; }
+  .btn-contact { background: #059669; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: background 0.2s; font-size: 0.95rem; }
+  .btn-contact:hover { background: #047857; }
 </style>
 </head>
 
 <body>
-<!-- Sign in to API banner (shown only if ensureApiSession() detects no API session) -->
+<!-- Sign in to API banner (shown only if initializeAuthStatus says we're not ready) -->
 <div id="api-session-banner" style="display:none; padding:12px; background:#fff3cd; color:#3d3a00; border:1px solid #ffe69c; border-radius:8px; margin:12px 0;">
   <strong>Action needed:</strong>
   Please <a data-api-login href="#" style="text-decoration:underline;">sign in to the API</a> to continue.
@@ -36,6 +42,14 @@
 
 <h1>Volunteer Hub</h1>
 <p class="muted">Pick your target set, then start calling or canvassing.</p>
+
+<!-- Quick Actions Section -->
+<div class="quick-actions">
+  <h3>Quick Actions</h3>
+  <button class="btn-contact" onclick="location.href='contact-form/index.html'">
+    📋 New Contact Entry
+  </button>
+</div>
 
 <div class="card">
   <div class="row">
@@ -261,33 +275,152 @@
 </script>
 
 <script type="module">
-import { initializeAuthStatus, apiFetch } from './src/apiClient.js';
+// Import environment configuration
+import environmentConfig from './config/environments.js';
+
+// Environment-aware API client implementation
+function ensureAccessSession() {
+  // Bypass authentication in local development
+  if (environmentConfig.shouldBypassAuth()) {
+    environmentConfig.debug('Bypassing authentication in local development');
+    sessionStorage.setItem('accessReady:v1', 'true');
+    return Promise.resolve();
+  }
+
+  const ready = sessionStorage.getItem('accessReady:v1') === 'true';
+  if (!ready) {
+    // Direct kick to protected endpoint - no interstitial needed
+    const returnTo = encodeURIComponent(location.href);
+    const apiUrl = environmentConfig.getApiUrl('ping', {
+      finish: environmentConfig.getApiUrl('auth/finish', { to: returnTo })
+    });
+    environmentConfig.debug('Redirecting to authentication:', apiUrl);
+    window.location.replace(apiUrl);
+    // Return a pending promise so callers don't proceed
+    return new Promise(() => {});
+  }
+  return Promise.resolve();
+}
+
+// Call this once when your UI loads
+async function initializeAuthStatus() {
+  // In local development, skip authentication checks
+  if (environmentConfig.shouldBypassAuth()) {
+    environmentConfig.debug('Skipping authentication check in local development');
+    sessionStorage.setItem('accessReady:v1', 'true');
+    return true;
+  }
+
+  try {
+    // a lightweight, credentialed call — if we're not allowed,
+    // the browser would hit CORS/redirect, so we proactively kick instead.
+    const authConfigUrl = environmentConfig.getApiUrl('auth/config');
+    const res = await fetch(authConfigUrl, { credentials: 'include' });
+    if (res.ok) {
+      sessionStorage.setItem('accessReady:v1', 'true');
+      environmentConfig.debug('Authentication check passed');
+      return true;
+    }
+  } catch (error) {
+    environmentConfig.debug('Authentication check failed:', error);
+  }
+  
+  sessionStorage.removeItem('accessReady:v1');
+  // Use the same authentication pattern as apiClient.js to avoid loops
+  const returnTo = encodeURIComponent(location.href);
+  const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+  const apiOrigin = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+  const authUrl = `${apiOrigin}/auth/finish?to=${returnTo}`;
+  environmentConfig.debug('Redirecting to authentication:', authUrl);
+  location.replace(authUrl);
+  return false;
+}
+
+// Centralized API fetch with credentials
+async function apiFetch(path, options = {}) {
+  await ensureAccessSession(); // make sure we kicked, if needed
+  
+  const apiUrl = environmentConfig.getApiUrl(path);
+  environmentConfig.debug('API fetch:', apiUrl);
+  
+  const fetchOptions = {
+    credentials: 'include',
+    ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+  };
+
+  const res = await fetch(apiUrl, fetchOptions);
+  
+  // In local development, don't redirect on auth errors
+  if (environmentConfig.shouldBypassAuth()) {
+    return res;
+  }
+  
+  // If something still goes sideways (e.g., Access cookie expired), re-kick.
+  if (res.status === 401 || res.status === 403) {
+    sessionStorage.removeItem('accessReady:v1');
+    // Direct kick to protected endpoint - no interstitial needed
+    const returnTo = encodeURIComponent(location.href);
+    const authUrl = environmentConfig.getApiUrl('ping', {
+      finish: environmentConfig.getApiUrl('auth/finish', { to: returnTo })
+    });
+    environmentConfig.debug('Re-authenticating due to 401/403:', authUrl);
+    window.location.replace(authUrl);
+    return new Promise(() => {});
+  }
+  return res;
+}
+
+function showBanner() {
+  const banner = document.getElementById('api-session-banner');
+  banner.style.display = '';
+  const link = banner.querySelector('[data-api-login]');
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    // Direct kick to protected API endpoint
+    const returnTo = encodeURIComponent(location.href);
+    const authUrl = environmentConfig.getApiUrl('ping', {
+      finish: environmentConfig.getApiUrl('auth/finish', { to: returnTo })
+    });
+    location.href = authUrl;
+  });
+}
 
 // Initialize authentication on page load
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log('� GrassrootsMVT initializing...');
-  
-  // This will check auth status and redirect to /connecting if needed
-  const isAuthenticated = await initializeAuthStatus();
-  
+  console.log(`🚀 GrassrootsMVT initializing in ${environmentConfig.config.environment} environment...`);
+  environmentConfig.debug('Environment configuration:', environmentConfig.config);
+
+  // initializeAuthStatus should:
+  //  - check API with credentials (or bypass in local)
+  //  - if not ready, navigate directly to protected API endpoint
+  const isAuthenticated = await initializeAuthStatus().catch(() => false);
+
+  const indicator = document.querySelector('.online-indicator');
   if (isAuthenticated) {
-    console.log('✅ Authentication verified, app ready');
-    
-    // Update auth status display
-    const indicator = document.querySelector('.online-indicator');
     if (indicator) {
-      indicator.textContent = '✅ Authenticated';
+      const envLabel = environmentConfig.config.isLocal ? ' (Local)' : '';
+      indicator.textContent = `✅ Authenticated${envLabel}`;
       indicator.parentElement.style.background = '#dcfce7';
       indicator.parentElement.style.color = '#166534';
     }
-    
-    // Test API access
+    // Optional: test API access
     try {
-      const response = await apiFetch('/api/whoami');
-      const data = await response.json();
+      const res = await apiFetch('/api/whoami');
+      const data = await res.json();
       console.log('👤 User info:', data);
-    } catch (error) {
-      console.warn('⚠️ API test failed:', error);
+    } catch (err) {
+      console.warn('⚠️ API test failed:', err);
+    }
+  } else {
+    if (indicator) {
+      indicator.textContent = '⚠️ Not signed in';
+      indicator.parentElement.style.background = '#fee2e2';
+      indicator.parentElement.style.color = '#991b1b';
+    }
+    // If initializeAuthStatus didn't already redirect, show banner as a fallback.
+    if (!environmentConfig.shouldBypassAuth()) {
+      showBanner();
     }
   }
 });

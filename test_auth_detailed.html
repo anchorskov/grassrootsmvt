@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Production Auth Simulation</title>
+</head>
+<body>
+    <h1>Production Authentication Simulation</h1>
+    <div id="results"></div>
+    <button onclick="clearSession()">Clear Session</button>
+    <button onclick="testAuth()">Test Auth Flow</button>
+    
+    <script type="module">
+        // Import our updated apiClient
+        import { getCurrentUserOrRedirect, apiGet } from './src/apiClient.js';
+        
+        const results = document.getElementById('results');
+        
+        window.clearSession = function() {
+            sessionStorage.removeItem('accessReady:v1');
+            sessionStorage.removeItem('access:redirected');
+            results.innerHTML += '<p>🧹 Session cleared</p>';
+        };
+        
+        window.testAuth = async function() {
+            try {
+                results.innerHTML += '<p>🔄 Testing authentication flow...</p>';
+                
+                // Check current session state
+                const accessReady = sessionStorage.getItem('accessReady:v1');
+                const redirectGuard = sessionStorage.getItem('access:redirected');
+                results.innerHTML += `<p>📊 Initial session state: accessReady=${accessReady}, redirectGuard=${redirectGuard}</p>`;
+                
+                // Test: Try to get current user
+                const user = await getCurrentUserOrRedirect();
+                results.innerHTML += `<p>✅ User authenticated: ${JSON.stringify(user)}</p>`;
+                
+                // Check session state after auth
+                const accessReadyAfter = sessionStorage.getItem('accessReady:v1');
+                const redirectGuardAfter = sessionStorage.getItem('access:redirected');
+                results.innerHTML += `<p>📊 Final session state: accessReady=${accessReadyAfter}, redirectGuard=${redirectGuardAfter}</p>`;
+                
+            } catch (error) {
+                results.innerHTML += `<p>❌ Error: ${error.message}</p>`;
+                console.error('Authentication test failed:', error);
+            }
+        };
+        
+        // Auto-run test on page load
+        window.testAuth();
+    </script>
+</body>
+</html>
