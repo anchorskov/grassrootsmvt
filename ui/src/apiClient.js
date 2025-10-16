@@ -11,13 +11,28 @@ let envHelper = null;
 async function getEnvironmentHelper() {
   if (!envHelper) {
     try {
-      const mod = await import('/config/environments.js');
-      envHelper = {
-        getApiUrl: mod.getApiUrl,
-        shouldBypassAuth: mod.shouldBypassAuth,
-        detectEnvironment: mod.detectEnvironment,
-        getEnvironmentInfo: mod.getEnvironmentInfo
-      };
+      // Check if environment config is available globally first
+      if (typeof window !== 'undefined' && window.GrassrootsEnv) {
+        envHelper = {
+          getApiUrl: window.GrassrootsEnv.getApiUrl,
+          shouldBypassAuth: window.GrassrootsEnv.shouldBypassAuth,
+          detectEnvironment: window.GrassrootsEnv.detectEnvironment,
+          getEnvironmentInfo: window.GrassrootsEnv.getEnvironmentInfo
+        };
+      } else {
+        // Try to import as module (this will load the script and make globals available)
+        await import('/config/environments.js');
+        if (window.GrassrootsEnv) {
+          envHelper = {
+            getApiUrl: window.GrassrootsEnv.getApiUrl,
+            shouldBypassAuth: window.GrassrootsEnv.shouldBypassAuth,
+            detectEnvironment: window.GrassrootsEnv.detectEnvironment,
+            getEnvironmentInfo: window.GrassrootsEnv.getEnvironmentInfo
+          };
+        } else {
+          throw new Error('Environment config not available after import');
+        }
+      }
     } catch (err) {
       console.warn('Failed to load environment config, using fallback:', err);
       // Origin-relative fallback (no hard-coded hosts)

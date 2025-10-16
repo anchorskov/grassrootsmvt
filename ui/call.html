@@ -385,22 +385,7 @@
     }
   });
   
-    // Optional improvement: allow API(path, params) to append query strings when needed
-    // Keeps existing behavior for current calls. Safe no-op if params not used.
-    {
-      const _API = API;
-      window.API = (path, params = null) => {
-        const url = _API(path);
-        if (!params) return url;
-        try {
-          const u = new URL(url, location.origin);
-          Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, v));
-          return u.toString();
-        } catch {
-          return url;
-        }
-      };
-    }
+  // API calls now handled by centralized apiClient - no legacy API function needed
 
   const filters = getFilters();
   showFiltersBadge(filters);

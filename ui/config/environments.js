@@ -213,21 +213,14 @@ class EnvironmentConfig {
 // Global instance
 const environmentConfig = new EnvironmentConfig();
 
-// Export for different module systems
-// ES6 modules (default export)
-export default environmentConfig;
-
-// CommonJS
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = environmentConfig;
-}
-
 // Global browser access
 if (typeof window !== 'undefined') {
+  window.GrassrootsEnv = environmentConfig;
   window.environmentConfig = environmentConfig;
+  window.EnvironmentConfig = EnvironmentConfig;
 }
 
-// Also expose the class for custom instances
-if (typeof window !== 'undefined') {
-  window.EnvironmentConfig = EnvironmentConfig;
+// CommonJS (for server-side usage)
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = environmentConfig;
 }
