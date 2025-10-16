@@ -1,0 +1,1 @@
+console.log('Testing API directly...'); window.apiPost('/streets', { county: 'NATRONA', city: 'CASPER' }).then(result => console.log('API Result:', result)).catch(err => console.error('API Error:', err));

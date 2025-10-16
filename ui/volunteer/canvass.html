@@ -38,6 +38,8 @@
       }
     }
   </script>
+</script>
+<script src="../shared/streetAutocomplete.js"></script>
 </head>
 <body class="bg-gray-50 min-h-screen">
 
@@ -295,6 +297,21 @@
         }
       }
     }
+  
+    // Initialize shared street autocomplete for full street listings
+    const streetAutocomplete = new StreetAutocomplete({
+      streetInputId: 'street',
+      suggestionsId: 'streetSuggestions',
+      getCounty: () => fromQS().county,
+      getCity: () => fromQS().city,
+      onStreetSelected: (streetName) => {
+        enableHouseField();
+        populateHouseNumbers(streetName);
+      },
+      onHouseFieldChange: (enabled) => {
+        if (enabled) enableHouseField(); else disableHouseField();
+      }
+    });
 
     // Fetch canvass templates using authenticated client
     async function fetchTemplates() {
@@ -601,6 +618,20 @@
       // Fetch data
       fetchVoters();
       fetchTemplates();
+      // Initialize street autocomplete after loading data
+      const streetAutocomplete = new StreetAutocomplete({
+        streetInputId: 'street',
+        suggestionsId: 'streetSuggestions',
+        getCounty: () => fromQS().county,
+        getCity: () => fromQS().city,
+        onStreetSelected: (streetName) => {
+          enableHouseField();
+          populateHouseNumbers(streetName);
+        },
+        onHouseFieldChange: (enabled) => {
+          if (enabled) enableHouseField(); else disableHouseField();
+        }
+      });
       
       console.log('✅ Authenticated canvassing page initialized successfully');
     });

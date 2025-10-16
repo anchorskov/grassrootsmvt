@@ -1,0 +1,12 @@
+# Cloudflare Pages configuration for GrassrootsMVT UI
+
+# Project name set in Wrangler Pages dashboard
+project = "grassrootsmvt-ui"
+
+# Account ID (matches worker config)
+account_id = "8bfd3f60fbdcc89183e9e312fb03e86e"
+
+# Specify this directory as the site bucket so all files (including /config) are published
+[site]
+bucket = "."
+entry-point = "."

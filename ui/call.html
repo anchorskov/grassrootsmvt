@@ -380,7 +380,7 @@
   async function saveAndNext() {
     const payload = {
       voter_id: voterCard.dataset.voter || "",
-      outcome: document.getElementById("outcome").value,
+        outcome: document.getElementById("outcome").value, // Map UI 'outcome' to API 'result'
       ok_callback: +document.getElementById("ok_callback").checked,
       requested_info: +document.getElementById("requested_info").checked,
       dnc: +document.getElementById("dnc").checked,
@@ -395,12 +395,29 @@
       issue_public_lands: +document.getElementById("issue_public_lands").checked,
       comments: document.getElementById("comments").value || null
     };
+      const saveBody = {
+        voter_id: payload.voter_id,
+        result: payload.outcome,              // server expects 'result'
+        notes: payload.comments || null,
+        ok_callback: payload.ok_callback,
+        requested_info: payload.requested_info,
+        dnc: payload.dnc,
+        best_day: payload.best_day || null,
+        best_time_window: payload.best_time_window || null,
+        optin_sms: payload.optin_sms,
+        optin_email: payload.optin_email,
+        email: payload.email || null,
+        wants_volunteer: payload.wants_volunteer,
+        share_insights_ok: payload.share_insights_ok,
+        for_term_limits: payload.for_term_limits,
+        issue_public_lands: payload.issue_public_lands
+      };
     if (!payload.voter_id) { alert("No voter selected."); return; }
     if (!payload.outcome) { alert("Choose an outcome."); return; }
 
     try {
       setMsg("Saving...");
-  await jsonFetch(API("/complete"), { method: "POST", body: JSON.stringify(payload) });
+        await jsonFetch(API("/call"), { method: "POST", body: JSON.stringify(saveBody) });
       // reset a few fields
       document.getElementById("outcome").value = "";
       document.getElementById("best_day").value = "";
@@ -432,6 +449,23 @@
       e.preventDefault(); nextVoter();
     }
   });
+  
+    // Optional improvement: allow API(path, params) to append query strings when needed
+    // Keeps existing behavior for current calls. Safe no-op if params not used.
+    {
+      const _API = API;
+      window.API = (path, params = null) => {
+        const url = _API(path);
+        if (!params) return url;
+        try {
+          const u = new URL(url, location.origin);
+          Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, v));
+          return u.toString();
+        } catch {
+          return url;
+        }
+      };
+    }
 
   const filters = getFilters();
   showFiltersBadge(filters);

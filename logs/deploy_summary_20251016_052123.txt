@@ -1,0 +1,64 @@
+PRODUCTION DEPLOYMENT SUCCESSFUL
+=====================================
+
+Date: October 16, 2025
+Branch: main
+Commit: 399baeb - Add authentication loop prevention to call.html
+
+COMPONENTS DEPLOYED:
+-------------------
+✅ Worker API (v1.1)
+   - Route: api.grassrootsmvt.org/*
+   - Version: c7d2ff00-2e96-48c0-9222-ac05ae4f9a78
+   - CORS fix: pragma header removed
+   - Auth: Cloudflare Zero Trust enabled
+
+✅ Pages UI
+   - Domain: volunteers.grassrootsmvt.org
+   - Deployment: 02d42dd4.grassrootsmvt-production.pages.dev
+
+KEY IMPROVEMENTS:
+----------------
+1. Authentication Loop Prevention
+   - Max 2 retry attempts per session
+   - Auto-reset on successful API calls
+   - User-friendly error banner with recovery option
+   - Documented in docs/call_page_loop_prevention.md
+
+2. CORS Compliance
+   - Removed pragma header causing preflight failures
+   - Includes Cf-Access-Jwt-Assertion in allowed headers
+   - credentials: "include" on all API calls
+
+3. Production Ready
+   - Environment detection working
+   - Local dev bypasses auth
+   - Production enforces Cloudflare Access
+   - Race condition fixed (environment config loading)
+
+VERIFICATION:
+------------
+✅ API endpoint: 302 (Access protected)
+✅ Config endpoint: 200
+✅ Pages: 200
+✅ call.html: Loop prevention code deployed
+
+TESTING CHECKLIST:
+-----------------
+[ ] Visit https://volunteers.grassrootsmvt.org/call
+[ ] Verify Cloudflare Access redirect
+[ ] Complete login flow
+[ ] Test "Get Next" button loads voters
+[ ] Verify no authentication loops occur
+[ ] Check browser console for errors
+
+GIT TAGS:
+--------
+v1.1-call-workflow-working (CORS fix)
+v1.2-loop-prevention (recommended next tag)
+
+MONITORING:
+-----------
+- Worker logs in Cloudflare Dashboard
+- Check /diagnostics.html for errors
+- Monitor sessionStorage for retry counts

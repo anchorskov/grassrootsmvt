@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Debug Streets API</title>
+</head>
+<body>
+    <h1>Debug Streets API</h1>
+    <button onclick="testDirect()">Test Direct API</button>
+    <button onclick="testApiPost()">Test apiPost</button>
+    <div id="results"></div>
+
+    <script src="/src/apiClient.js"></script>
+    <script>
+        async function testDirect() {
+            const results = document.getElementById('results');
+            results.innerHTML = '<p>Testing direct API call...</p>';
+            
+            try {
+                console.log('Testing direct fetch to worker...');
+                const response = await fetch('http://localhost:8787/api/streets', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ county: 'NATRONA', city: 'CASPER' })
+                });
+                
+                console.log('Response status:', response.status);
+                const data = await response.json();
+                console.log('Response data:', data);
+                results.innerHTML += `<p>✅ Direct API: ${data.total} streets</p>`;
+                results.innerHTML += `<p>First 3: ${data.streets.slice(0,3).map(s => s.name).join(', ')}</p>`;
+            } catch (error) {
+                console.error('Direct API error:', error);
+                results.innerHTML += `<p>❌ Direct API Error: ${error.message}</p>`;
+            }
+        }
+        
+        async function testApiPost() {
+            const results = document.getElementById('results');
+            results.innerHTML += '<p>Testing apiPost...</p>';
+            
+            try {
+                console.log('apiPost available:', !!window.apiPost);
+                console.log('Testing apiPost call...');
+                const data = await window.apiPost('/streets', { county: 'NATRONA', city: 'CASPER' });
+                console.log('apiPost response:', data);
+                results.innerHTML += `<p>✅ apiPost: ${data.total} streets</p>`;
+                results.innerHTML += `<p>First 3: ${data.streets.slice(0,3).map(s => s.name).join(', ')}</p>`;
+            } catch (error) {
+                console.error('apiPost error:', error);
+                results.innerHTML += `<p>❌ apiPost Error: ${error.message}</p>`;
+            }
+        }
+    </script>
+</body>
+</html>

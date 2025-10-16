@@ -1,0 +1,62 @@
+🚨 CRITICAL HOTFIX DEPLOYED
+============================
+
+Date: October 16, 2025
+Commit: f1dbdb6 - HOTFIX: Use absolute path for environments.js import
+Priority: CRITICAL - Fixed production authentication loop
+
+ISSUE:
+------
+Production was experiencing authentication loops caused by:
+- Relative import path: './config/environments.js'
+- When accessing /call (extensionless URL), browser resolved path as /call/config/environments.js
+- This caused 404, triggering fallback config and auth loops
+- Error: "Failed to load module script: Expected JavaScript but got HTML (404 page)"
+
+ROOT CAUSE:
+-----------
+Cloudflare Pages serves /call without .html extension
+Browser interprets relative paths based on current URL
+./config/environments.js → /call/config/environments.js ❌
+
+FIX:
+----
+Changed to absolute path from root:
+- Before: await import('./config/environments.js')
+- After:  await import('/config/environments.js')
+- Result: Always resolves to correct path regardless of URL
+
+DEPLOYMENT:
+-----------
+✅ Git commit: f1dbdb6
+✅ Git push: success
+✅ Pages deploy: 56bb662f.grassrootsmvt-production.pages.dev
+✅ Production verified: https://volunteers.grassrootsmvt.org/call
+✅ File accessible: https://volunteers.grassrootsmvt.org/config/environments.js
+
+VERIFICATION:
+-------------
+✅ Import path now absolute: import('/config/environments.js')
+✅ environments.js returns 200 with application/javascript MIME type
+✅ Loop prevention still in place (AUTH_RETRY_KEY)
+✅ Fallback config still available if import fails
+
+LESSONS LEARNED:
+---------------
+1. Always use absolute paths (starting with /) for module imports in HTML
+2. Test with both /page.html and /page URLs (extensionless)
+3. Cloudflare Pages serves extensionless URLs by default
+4. Relative paths in modules are resolved relative to current URL path
+
+MONITORING:
+-----------
+- Check browser console: should see no "Failed to load module" errors
+- Verify sessionStorage: 'accessReady:v1' and 'call.auth_retry_count'
+- Monitor for authentication loops (max 2 retries enforced)
+
+NEXT STEPS:
+-----------
+[ ] Test in production: https://volunteers.grassrootsmvt.org/call
+[ ] Verify Cloudflare Access flow works
+[ ] Confirm no console errors
+[ ] Create git tag: v1.2.1-hotfix-module-path

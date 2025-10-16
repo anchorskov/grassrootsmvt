@@ -31,6 +31,7 @@ class StreetAutocomplete {
     this.onStreetSelected = options.onStreetSelected || (() => {});
     this.onHouseFieldChange = options.onHouseFieldChange || (() => {});
     this.apiEndpoint = options.apiEndpoint || 'http://localhost:8787/api/streets';
+    this.apiRequest = options.apiRequest || null; // Custom API request function
     this.maxSuggestions = options.maxSuggestions || 20;
     this.enableHouseAfterChars = options.enableHouseAfterChars || 3;
     
@@ -105,16 +106,21 @@ class StreetAutocomplete {
     const county = this.getCounty();
     const city = this.getCity();
     
+    console.log('🎯 Street input focused, location:', { county, city });
+    
     if (!county || !city) {
+      console.warn('⚠️ Missing county or city for street loading');
       this.showMessage('Please select county and city first', 'no-results');
       return;
     }
     
     // Check if we need to reload streets
     if (this.needsReload(county, city)) {
+      console.log('🔄 Need to reload streets for', { county, city });
       await this.loadStreets(county, city);
     } else if (this.allStreets.length > 0) {
       // Show existing streets
+      console.log('✅ Using cached streets:', this.allStreets.length);
       this.showStreetSuggestions(this.allStreets, '');
     }
   }
@@ -162,21 +168,39 @@ class StreetAutocomplete {
   async loadStreets(county, city) {
     if (this.isLoading) return;
     
+    console.log('🔄 Starting loadStreets for:', { county, city });
+    console.log('🔧 API configuration:', { 
+      hasApiRequest: !!this.apiRequest, 
+      apiEndpoint: this.apiEndpoint 
+    });
+    
     this.isLoading = true;
     this.showMessage('Loading streets...', 'loading');
     
     try {
-      const response = await fetch(this.apiEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ county, city })
-      });
+      let data;
       
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      if (this.apiRequest) {
+        // Use custom API request function (with authentication)
+        console.log('🔗 Using custom apiRequest function');
+        data = await this.apiRequest({ county, city });
+        console.log('📡 API response received:', data);
+      } else {
+        // Use direct fetch (fallback)
+        console.log('🌐 Using direct fetch to:', this.apiEndpoint);
+        const response = await fetch(this.apiEndpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ county, city })
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
+        data = await response.json();
+        console.log('📡 Fetch response received:', data);
       }
-      
-      const data = await response.json();
       
       if (data.streets && data.streets.length > 0) {
         // Cache streets and location

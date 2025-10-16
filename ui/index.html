@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="en">
+<!-- Volunteer Hub -->
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -275,8 +276,28 @@
 </script>
 
 <script type="module">
-// Import environment configuration
-import environmentConfig from './config/environments.js';
+// Load environment configuration with fallback
+let environmentConfig;
+try {
+  const mod = await import('/config/environments.js');
+  environmentConfig = mod.default || mod.environmentConfig;
+} catch (err) {
+  console.warn('environments.js failed to load, using fallback', err);
+  const isLocal = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  environmentConfig = {
+    shouldBypassAuth: () => isLocal,
+    getApiUrl: (endpoint, params = {}) => {
+      const base = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+      const map = { ping:'/api/ping', voters:'/api/voters', neighborhoods:'/api/neighborhoods', log:'/api/log', call:'/api/call', whoami:'/api/whoami', 'auth/finish':'/api/auth/finish' };
+      const path = map[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
+      const url = new URL(base + path);
+      Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v));
+      return url.toString();
+    },
+    debug: (m,d) => { if (isLocal) console.log('[ENV-FALLBACK]', m, d??''); },
+    config: { environment: isLocal ? 'local' : 'production', isLocal }
+  };
+}
 
 // Environment-aware API client implementation
 function ensureAccessSession() {
@@ -350,13 +371,15 @@ function showBanner() {
 // Authentication helper functions
 function signIn() {
   const to = encodeURIComponent(location.href);
-  const apiOrigin = environmentConfig.getApiUrl('').replace('/api', '');
+  const apiUrl = new URL(environmentConfig.getApiUrl('ping'));
+  const apiOrigin = apiUrl.origin;
   location.href = `${apiOrigin}/whoami?nav=1&to=${to}`;
 }
 
 function signOut() {
   const to = encodeURIComponent(location.origin + "/");
-  const apiOrigin = environmentConfig.getApiUrl('').replace('/api', '');
+  const apiUrl = new URL(environmentConfig.getApiUrl('ping'));
+  const apiOrigin = apiUrl.origin;
   location.href = `${apiOrigin}/auth/logout?to=${to}`;
 }
 
@@ -436,7 +459,7 @@ async function refreshUserBadge() {
 
 // Initialize authentication on page load
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log(`🚀 GrassrootsMVT initializing in ${environmentConfig.config.environment} environment...`);
+  console.log(`🚀 GrassrootsMVT initializing in ${environmentConfig?.config?.environment || 'unknown'} environment...`);
   environmentConfig.debug('Environment configuration:', environmentConfig.config);
 
   // Refresh user badge to show current authentication status

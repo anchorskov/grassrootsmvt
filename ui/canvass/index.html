@@ -498,36 +498,6 @@
     }
   }
 
-  // Street autocomplete functionality
-  let streetCache = null;
-  async function loadStreetNames() {
-    if (streetCache) return streetCache;
-    try {
-      // Get a sample of addresses to build street list
-      const filters = fromQS();
-      console.log('🔍 Loading streets with filters:', filters);
-      console.log('🌐 Current URL:', location.href);
-      
-      const response = await jsonFetch(API('/canvass/nearby'), {
-        method: 'POST', 
-        body: JSON.stringify({ filters, limit: 500 })
-      });
-      
-      console.log('📡 API Response:', response);
-      
-      const streets = [...new Set((response.rows || []).map(r => {
-        // Extract street name from full address (remove house number)
-        return r.address.replace(/^\d+\s+/, '').toUpperCase();
-      }))].sort();
-      streetCache = streets;
-      console.log(`✅ Loaded ${streets.length} street names for autocomplete:`, streets);
-      return streets;
-    } catch (e) {
-      console.error('❌ Failed to load street names:', e);
-      return [];
-    }
-  }
-
   // Enable house number field
   function enableHouseField() {
     const houseInput = document.getElementById('house');
@@ -686,11 +656,43 @@
   });
 
   // Initialize reusable street autocomplete component
+  console.log('🏗️ Initializing StreetAutocomplete component...');
+  
+  const queryParams = fromQS();
+  console.log('🌍 Query params:', queryParams);
+  console.log('🌍 County/City check:', { county: queryParams.county, city: queryParams.city });
+  console.log('🔧 API client available:', { 
+    apiPost: !!window.apiPost,
+    type: typeof window.apiPost 
+  });
+  
   const streetAutocomplete = new StreetAutocomplete({
     streetInputId: 'street',
     suggestionsId: 'streetSuggestions',
-    getCounty: () => fromQS().county,
-    getCity: () => fromQS().city,
+    maxSuggestions: 100, // Show more streets for better scrolling
+    apiRequest: async (body) => {
+      console.log('🔗 StreetAutocomplete calling API with:', body);
+      // Use apiFetch which has proper auth bypass logic
+      const response = await fetch('http://localhost:8787/api/streets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      return response.json();
+    },
+    getCounty: () => {
+      const county = fromQS().county;
+      console.log('🏛️ getCounty() returning:', county);
+      return county;
+    },
+    getCity: () => {
+      const city = fromQS().city;
+      console.log('🏙️ getCity() returning:', city);
+      return city;
+    },
     onStreetSelected: (streetName) => {
       // Enable house number field
       enableHouseField();
