@@ -1,0 +1,25 @@
+# Cloudflare Pages headers configuration
+# https://developers.cloudflare.com/pages/platform/headers/
+
+# Serve JavaScript files with correct MIME type
+/config/*.js
+  Content-Type: application/javascript
+  Cache-Control: public, max-age=86400
+
+# Serve shared JavaScript modules
+/ui/shared/*.js
+  Content-Type: application/javascript
+  Cache-Control: public, max-age=3600
+
+# Serve src JavaScript modules  
+/ui/src/*.js
+  Content-Type: application/javascript
+  Cache-Control: public, max-age=3600
+
+# Default HTML caching
+/*.html
+  Cache-Control: public, max-age=300
+
+# API endpoints should not be cached
+/api/*
+  Cache-Control: no-cache, no-store, must-revalidate

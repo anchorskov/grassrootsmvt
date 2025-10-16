@@ -275,29 +275,31 @@
 })();
 </script>
 
+<script src="/config/environments.js"></script>
 <script type="module">
-// Load environment configuration with fallback
-let environmentConfig;
-try {
-  const mod = await import('/config/environments.js');
-  environmentConfig = mod.default || mod.environmentConfig;
-} catch (err) {
-  console.warn('environments.js failed to load, using fallback', err);
-  const isLocal = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
-  environmentConfig = {
-    shouldBypassAuth: () => isLocal,
-    getApiUrl: (endpoint, params = {}) => {
-      const base = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
-      const map = { ping:'/api/ping', voters:'/api/voters', neighborhoods:'/api/neighborhoods', log:'/api/log', call:'/api/call', whoami:'/api/whoami', 'auth/finish':'/api/auth/finish' };
-      const path = map[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
-      const url = new URL(base + path);
-      Object.entries(params).forEach(([k,v]) => url.searchParams.set(k, v));
-      return url.toString();
-    },
-    debug: (m,d) => { if (isLocal) console.log('[ENV-FALLBACK]', m, d??''); },
-    config: { environment: isLocal ? 'local' : 'production', isLocal }
-  };
-}
+// Use the centralized environment configuration
+const environmentConfig = {
+  shouldBypassAuth: () => window.GrassrootsEnv.shouldBypassAuth(),
+  getApiUrl: (endpoint, params = {}) => {
+    const map = { 
+      ping: '/api/ping', 
+      voters: '/api/voters', 
+      neighborhoods: '/api/neighborhoods', 
+      log: '/api/log', 
+      call: '/api/call', 
+      whoami: '/api/whoami', 
+      'auth/finish': '/api/auth/finish' 
+    };
+    const path = map[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
+    const url = new URL(window.GrassrootsEnv.getApiUrl(path));
+    Object.entries(params || {}).forEach(([k,v]) => url.searchParams.set(k, v));
+    return url.toString();
+  },
+  debug: (m, d) => { 
+    if (window.GrassrootsEnv.isLocal) console.log('[ENV]', m, d ?? ''); 
+  },
+  config: window.GrassrootsEnv.getEnvironmentInfo()
+};
 
 // Environment-aware API client implementation
 function ensureAccessSession() {

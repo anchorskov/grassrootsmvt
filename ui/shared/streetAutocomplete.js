@@ -30,7 +30,8 @@ class StreetAutocomplete {
     this.getCity = options.getCity || (() => null);
     this.onStreetSelected = options.onStreetSelected || (() => {});
     this.onHouseFieldChange = options.onHouseFieldChange || (() => {});
-    this.apiEndpoint = options.apiEndpoint || 'http://localhost:8787/api/streets';
+    this.apiEndpoint = options.apiEndpoint || (window.GrassrootsEnv ? 
+                      window.GrassrootsEnv.getApiUrl('/api/streets') : 'http://localhost:8787/api/streets');
     this.apiRequest = options.apiRequest || null; // Custom API request function
     this.maxSuggestions = options.maxSuggestions || 20;
     this.enableHouseAfterChars = options.enableHouseAfterChars || 3;

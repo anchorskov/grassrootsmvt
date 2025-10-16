@@ -4,51 +4,33 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Canvass</title>
+<script src="/config/environments.js"></script>
 <script>
-  // Load environment configuration globally for non-module context
-  async function loadEnvironmentConfig() {
-    try {
-      const module = await import('../config/environments.js');
-      window.environmentConfig = module.default || module.environmentConfig;
-    } catch (error) {
-      console.error('Failed to load environment config:', error);
-      // Fallback configuration
-      window.environmentConfig = {
-        shouldBypassAuth: () => location.hostname === 'localhost' || location.hostname === '127.0.0.1',
-        getApiUrl: (endpoint, params = {}) => {
-          const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-          const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
-          
-          // Handle endpoint mapping like the real environment config
-          const endpointMap = {
-            'ping': '/api/ping',
-            'voters': '/api/voters',
-            'neighborhoods': '/api/neighborhoods',
-            'log': '/api/log',
-            'call': '/api/call',
-            'contact/status': '/api/contact/status',
-            'whoami': '/api/whoami'
-          };
-          
-          const endpointPath = endpointMap[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
-          let url = `${baseUrl}${endpointPath}`;
-          
-          if (Object.keys(params).length > 0) {
-            const searchParams = new URLSearchParams(params);
-            url += `?${searchParams.toString()}`;
-          }
-          return url;
-        },
-        debug: (message, data) => {
-          const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-          if (isLocal) console.log(`[ENV-LOCAL] ${message}`, data || '');
-        },
-        config: {
-          environment: location.hostname === 'localhost' ? 'local' : 'production',
-          isLocal: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-        }
-      };
-    }
+  // Use centralized environment configuration
+  function loadEnvironmentConfig() {
+    window.environmentConfig = {
+      shouldBypassAuth: () => window.GrassrootsEnv.shouldBypassAuth(),
+      getApiUrl: (endpoint, params = {}) => {
+        const endpointMap = {
+          'ping': '/api/ping',
+          'voters': '/api/voters',
+          'neighborhoods': '/api/neighborhoods',
+          'log': '/api/log',
+          'call': '/api/call',
+          'contact/status': '/api/contact/status',
+          'whoami': '/api/whoami'
+        };
+        
+        const endpointPath = endpointMap[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
+        const url = new URL(window.GrassrootsEnv.getApiUrl(endpointPath));
+        Object.entries(params || {}).forEach(([k,v]) => url.searchParams.set(k, v));
+        return url.toString();
+      },
+      debug: (message, data) => {
+        if (window.GrassrootsEnv.isLocal) console.log(`[ENV-LOCAL] ${message}`, data || '');
+      },
+      config: window.GrassrootsEnv.getEnvironmentInfo()
+    };
   }
   loadEnvironmentConfig();
 </script>
@@ -237,7 +219,7 @@
     // Fallback: construct full URL to worker
     let fullUrl = url;
     if (url.startsWith('/api')) {
-      fullUrl = 'http://localhost:8787' + url;
+      fullUrl = window.GrassrootsEnv.getApiBaseUrl() + url;
       console.log('🔄 Fallback to worker URL:', fullUrl);
     }
     
@@ -529,7 +511,7 @@
       const filters = fromQS();
       
       // API call to get addresses on this specific street
-      const response = await fetch('http://localhost:8787/api/canvass/nearby', {
+      const response = await fetch(window.GrassrootsEnv.getApiUrl('/api/canvass/nearby'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filters, street: streetName, limit: 100 })
@@ -673,7 +655,7 @@
     apiRequest: async (body) => {
       console.log('🔗 StreetAutocomplete calling API with:', body);
       // Use apiFetch which has proper auth bypass logic
-      const response = await fetch('http://localhost:8787/api/streets', {
+      const response = await fetch(window.GrassrootsEnv.getApiUrl('/api/streets'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)

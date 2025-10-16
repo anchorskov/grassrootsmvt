@@ -2,7 +2,7 @@
  * GrassrootsMVT API Client with Enhanced Authentication Handling
  */
 
-// Environment configuration - try different ways to access it
+// Environment configuration using centralized helper
 let environmentConfig;
 
 // Wait for environment config to be available if needed
@@ -15,16 +15,17 @@ async function ensureEnvironmentConfig() {
     }
   }
   
-  // If still no environment config, make sure fallback is properly configured
+  // If still no environment config, use centralized environment helper
   if (!environmentConfig) {
     environmentConfig = {
       shouldBypassAuth: () => {
-        // Simple localhost detection fallback
-        return location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        return window.GrassrootsEnv ? window.GrassrootsEnv.shouldBypassAuth() : 
+               (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
       },
       getApiUrl: (endpoint, params = {}) => {
-        const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-        const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+        const baseUrl = window.GrassrootsEnv ? window.GrassrootsEnv.getApiBaseUrl() : 
+                        (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 
+                         'http://localhost:8787' : 'https://api.grassrootsmvt.org');
         
         // Handle endpoint mapping like the real environment config
         const endpointMap = {
@@ -46,12 +47,13 @@ async function ensureEnvironmentConfig() {
         return url;
       },
       debug: (message, data) => {
-        const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        const isLocal = window.GrassrootsEnv ? window.GrassrootsEnv.isLocal : 
+                        (location.hostname === 'localhost' || location.hostname === '127.0.0.1');
         if (isLocal) {
           console.log(`[ENV-LOCAL-FALLBACK] ${message}`, data || '');
         }
       },
-      config: {
+      config: window.GrassrootsEnv ? window.GrassrootsEnv.getEnvironmentInfo() : {
         environment: location.hostname === 'localhost' ? 'local' : 'production',
         isLocal: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
       }
@@ -62,8 +64,9 @@ async function ensureEnvironmentConfig() {
 }
 
 const API_ORIGIN = (() => {
-  const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-  return isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+  return window.GrassrootsEnv ? window.GrassrootsEnv.getApiBaseUrl() : 
+         (location.hostname === 'localhost' || location.hostname === '127.0.0.1' ? 
+          'http://localhost:8787' : 'https://api.grassrootsmvt.org');
 })();
 
 const API_BASE = `${API_ORIGIN}/api`;
