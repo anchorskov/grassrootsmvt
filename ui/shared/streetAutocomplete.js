@@ -33,9 +33,10 @@ class StreetAutocomplete {
     this.apiEndpoint = options.apiEndpoint || (() => {
       if (window.GrassrootsEnv) return window.GrassrootsEnv.getApiUrl('/api/streets');
       if (window.environmentConfig) return window.environmentConfig.getApiUrl('streets');
-      // Final fallback - avoid hard-coded origins
+      // Final fallback - use dynamic origin detection
       const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-      return (isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org') + '/api/streets';
+      const apiPort = isLocal ? ':8787' : '';
+      return location.protocol + '//' + location.hostname + apiPort + '/api/streets';
     })();
     this.apiRequest = options.apiRequest || null; // Custom API request function
     this.maxSuggestions = options.maxSuggestions || 20;
