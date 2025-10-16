@@ -233,35 +233,42 @@
     filtersBadge.textContent = 'Filters: ' + JSON.stringify(filters);
   }
 
-  async function jsonFetch(url, init = {}) {
-    console.log('📡 jsonFetch:', url, init.method || 'GET');
-    console.log('  window.apiFetch available?', !!window.apiFetch);
-    
-    // Wait for apiFetch to be available
-    if (!window.apiFetch) {
-      console.warn('⏳ Waiting for apiFetch to be available...');
-      let attempts = 0;
-      while (!window.apiFetch && attempts < 20) {
-        await new Promise(r => setTimeout(r, 100));
-        attempts++;
-      }
-      if (!window.apiFetch) {
-        throw new Error('apiFetch not available after waiting');
-      }
-      console.log('✅ apiFetch now available');
-    }
-    
-    // For API endpoints, use the environment-aware apiFetch
-    if (url.includes('/api/')) {
-      // Extract the endpoint from the full URL
-      const endpointMatch = url.match(/\/api\/(.+)/);
-      if (endpointMatch) {
-        const endpoint = endpointMatch[1];
-        console.log('  → Using apiFetch for endpoint:', endpoint);
-        const response = await window.apiFetch(endpoint, init);
-        console.log('  → Response status:', response.status);
-        const ct = response.headers.get("content-type") || "";
-        return ct.includes("application/json") ? response.json() : response.text();
+    // Loop prevention constants
+  const AUTH_RETRY_KEY = "call.auth_retry_count";
+  const MAX_AUTH_RETRIES = 2;
+  
+  function canRetryAuth() {
+    const count = parseInt(sessionStorage.getItem(AUTH_RETRY_KEY) || "0", 10);
+    return count < MAX_AUTH_RETRIES;
+  }
+  
+  function incrementAuthRetry() {
+    const count = parseInt(sessionStorage.getItem(AUTH_RETRY_KEY) || "0", 10);
+    sessionStorage.setItem(AUTH_RETRY_KEY, String(count + 1));
+  }
+  
+  function resetAuthRetry() {
+    sessionStorage.removeItem(AUTH_RETRY_KEY);
+  }
+
+  async function jsonFetch(url, init) {
+    console.log("jsonFetch:", url);
+    // attempt to resolve via window.apiFetch if present
+    if (typeof window.apiFetch === 'function') {
+      const trimmed = url.replace(/^https?:\/\/[^\/]+/, '');
+      console.log("Using window.apiFetch for:", trimmed);
+      try {
+        const resp = await window.apiFetch(trimmed, init);
+        console.log("apiFetch response status:", resp.status);
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        const ct = resp.headers.get("content-type") || "";
+        const result = ct.includes("application/json") ? await resp.json() : await resp.text();
+        // Success - reset auth retry counter
+        resetAuthRetry();
+        return result;
+      } catch (e) {
+        console.error("apiFetch failed:", e);
+        throw e;
       }
     }
     
@@ -271,10 +278,30 @@
       ...init,
       headers: { "content-type": "application/json", ...(init.headers || {}) },
     });
-    if (r.status === 401) throw new Error("Unauthorized");
+    if (r.status === 401) {
+      // Check loop prevention
+      if (!canRetryAuth()) {
+        console.error("⚠️ Too many auth retries - stopping to prevent loop");
+        const banner = document.createElement("div");
+        banner.style.cssText = "position:fixed;top:0;left:0;right:0;padding:12px;background:#fee;color:#c00;font-weight:600;z-index:99999;text-align:center;";
+        banner.innerHTML = `Authentication failed. <a href="#" onclick="sessionStorage.clear();location.reload();return false;" style="color:#00f;text-decoration:underline;">Clear session and retry</a>`;
+        document.body.appendChild(banner);
+        throw new Error("Authentication loop detected");
+      }
+      
+      // Trigger Cloudflare Access re-authentication
+      incrementAuthRetry();
+      if (window.getCurrentUserOrRedirect) {
+        await window.getCurrentUserOrRedirect();
+      }
+      throw new Error("Unauthorized");
+    }
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const ct = r.headers.get("content-type") || "";
-    return ct.includes("application/json") ? r.json() : r.text();
+    const result = ct.includes("application/json") ? await r.json() : await r.text();
+    // Success - reset auth retry counter
+    resetAuthRetry();
+    return result;
   }
 
   async function loadWho() {
