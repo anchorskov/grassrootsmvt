@@ -1,0 +1,62 @@
+name: CI Guardrails
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  lint-and-guardrails:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        
+    - name: Install dependencies
+      run: npm ci
+      
+    - name: Run lint (optional)
+      run: npm run lint || echo "Lint not configured, skipping"
+      continue-on-error: true
+      
+    - name: Regression Guardrails - Check forbidden patterns
+      run: |
+        echo "🔍 Checking for regression patterns..."
+        
+        # Check for forbidden /api/complete endpoint resurrection
+        if grep -r "/api/complete" ui/; then
+          echo "❌ FAIL: Found forbidden /api/complete endpoint in ui/"
+          exit 1
+        fi
+        
+        # Check for relative environment imports (should be absolute)
+        if grep -r "import.*['\"]\\./config/environments.js" ui/ worker/src/; then
+          echo "❌ FAIL: Found relative environment import - should use absolute '/config/environments.js'"
+          exit 1
+        fi
+        
+        # Check for hard-coded localhost/api URLs
+        if grep -r "http://localhost:" ui/ worker/src/ --exclude-dir=node_modules || \
+           grep -r "https://api\\." ui/ worker/src/ --exclude-dir=node_modules; then
+          echo "❌ FAIL: Found hard-coded localhost or api URLs - should use environment detection"
+          exit 1
+        fi
+        
+        # Check for infinite loops
+        if grep -r "while(true)" ui/; then
+          echo "❌ FAIL: Found infinite while(true) loop in ui/"
+          exit 1
+        fi
+        
+        echo "✅ All regression guardrails passed"
+        
+    - name: Validate API payload shapes
+      run: node scripts/validate-api-shapes.js
