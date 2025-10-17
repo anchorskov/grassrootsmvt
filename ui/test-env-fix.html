@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Environment Test</title>
+    <script type="module" src="/config/environments.js"></script>
+    <script type="module" src="/src/apiClient.js"></script>
+</head>
+<body>
+    <h1>Environment Test</h1>
+    <div id="results"></div>
+    
+    <script>
+        async function testEnvironment() {
+            const results = document.getElementById('results');
+            
+            try {
+                results.innerHTML += '<p>✅ Environment script loaded</p>';
+                
+                if (window.GrassrootsEnv) {
+                    results.innerHTML += '<p>✅ GrassrootsEnv available</p>';
+                    results.innerHTML += `<p>Environment: ${window.GrassrootsEnv.detectEnvironment()}</p>`;
+                    
+                    const apiUrl = window.GrassrootsEnv.getApiUrl('/api/ping');
+                    results.innerHTML += `<p>API URL: ${apiUrl}</p>`;
+                } else {
+                    results.innerHTML += '<p>❌ GrassrootsEnv not available</p>';
+                }
+                
+                if (window.apiGet) {
+                    results.innerHTML += '<p>✅ apiGet available</p>';
+                    try {
+                        const ping = await window.apiGet('ping');
+                        results.innerHTML += `<p>✅ Ping successful: ${JSON.stringify(ping)}</p>`;
+                    } catch (e) {
+                        results.innerHTML += `<p>❌ Ping failed: ${e.message}</p>`;
+                    }
+                } else {
+                    results.innerHTML += '<p>❌ apiGet not available</p>';
+                }
+                
+            } catch (e) {
+                results.innerHTML += `<p>❌ Test failed: ${e.message}</p>`;
+            }
+        }
+        
+        // Wait a moment for modules to load
+        setTimeout(testEnvironment, 100);
+    </script>
+</body>
+</html>

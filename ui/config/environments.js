@@ -7,12 +7,10 @@
 
 const isLocalHost = (h) => /^(localhost|127\.0\.0\.1|192\.168\.)/.test(h || '');
 const isLocal = typeof location !== 'undefined' ? isLocalHost(location.hostname) : false;
-
-// Optional local override (only honored on localhost/127.x)
+// Optional local override honored only on localhost
 const stored = isLocal ? (localStorage.getItem('GRMVT_API_BASE') || '') : '';
 const apiBaseOverride = (isLocal && /^https?:\/\//.test(stored)) ? stored : null;
-
-// Base origin for API building (override → current origin)
+// Always build API URLs relative to the current origin in prod; in dev allow override
 const baseOrigin = apiBaseOverride || (typeof location !== 'undefined' ? location.origin : '');
 
 // Minimal endpoint map for convenience (still accepts raw paths like "canvass/nearby")
@@ -40,7 +38,7 @@ function normalizePath(endpoint) {
 
 export function getApiUrl(endpoint, params = {}) {
   const path = normalizePath(endpoint);
-  const url = new URL(path, baseOrigin || 'http://localhost'); // fallback for SSR
+  const url = new URL(path, baseOrigin || 'http://localhost');
   Object.entries(params || {}).forEach(([k, v]) => {
     if (v !== undefined && v !== null) url.searchParams.set(k, String(v));
   });
@@ -58,7 +56,8 @@ export function debug(message, data) {
 
 export const config = {
   environment: isLocal ? 'local' : 'production',
-  isLocal
+  isLocal,
+  isProduction: !isLocal
 };
 
 // Default export (for `import env from '/config/environments.js'`)

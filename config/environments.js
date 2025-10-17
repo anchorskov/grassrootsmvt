@@ -34,7 +34,10 @@ function getApiBaseUrl() {
   if (env.isLocal) {
     return 'http://localhost:8787';
   } else {
-    return 'https://api.grassrootsmvt.org';
+    // Same-origin in prod — UI Worker proxies /api/* to API Worker
+    return (typeof window !== 'undefined')
+      ? window.location.origin
+      : 'https://volunteers.grassrootsmvt.org';
   }
 }
 

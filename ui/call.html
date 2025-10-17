@@ -110,7 +110,7 @@
     // Import env (optional) and the API client as a module – no window.* reliance
     let environmentConfig = null;
     try {
-      const envMod = await import('/static/config/environments.js');
+      const envMod = await import('/config/environments.js');
       environmentConfig = envMod.default || envMod.environmentConfig || envMod;
       // expose for other non-module scripts if needed
       window.environmentConfig = environmentConfig;
@@ -321,6 +321,10 @@
     console.log("✅ Ready, loading data...");
     try { await loadWho(); } catch {}
     await nextVoter();
+  </script>
+  <script>
+  // Fallback for non-module or failed ESM import: use browser global
+  window.environmentConfig = window.environmentConfig || (window.GrassrootsEnv || {});
   </script>
 </body>
 </html>

@@ -6,7 +6,7 @@
     // Load environment configuration globally
     async function loadEnvironmentConfig() {
       try {
-        const module = await import('./config/environments.js');
+        const module = await import('/config/environments.js');
         window.environmentConfig = module.default || module.environmentConfig;
         console.log('✅ Environment config loaded:', window.environmentConfig);
         console.log('✅ Config object:', window.environmentConfig.config);
@@ -59,7 +59,7 @@
     
     loadEnvironmentConfig();
   </script>
-  <script src="/src/apiClient.js"></script>
+  <script type="module" src="/src/apiClient.js"></script>
 </head>
 <body>
   <h1>🔍 URL Generation Debug</h1>

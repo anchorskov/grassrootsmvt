@@ -6,23 +6,37 @@
 <title>Canvass</title>
 <!-- Load env as a module and expose a back-compat shim for legacy GrassrootsEnv calls -->
 <script type="module">
-  const mod = await import('/config/environments.js');
-  const environmentConfig = mod.default || mod.environmentConfig || mod;
+  // Import environment configuration (absolute path for nested routes)
+  let environmentConfig;
+  try {
+    const mod = await import('/config/environments.js');
+    environmentConfig = mod.default || mod.environmentConfig || mod;
+  } catch (e) {
+    console.warn('ESM import failed, falling back to global:', e);
+  }
+  
   window.environmentConfig = environmentConfig;
+  
   // Shim: legacy pages sometimes call window.GrassrootsEnv.*
-  const originFrom = () => {
-    try { return new URL(environmentConfig.getApiUrl('ping')).origin; } catch { return location.origin; }
-  };
-  window.GrassrootsEnv = window.GrassrootsEnv || {
-    shouldBypassAuth: () => environmentConfig.shouldBypassAuth(),
-    getApiBaseUrl: () => originFrom(),
-    getApiUrl: (endpointOrPath, params = {}) => {
-      const path = String(endpointOrPath).replace(/^\/?(api\/)?/, '');
-      return environmentConfig.getApiUrl(path, params);
-    },
-    getEnvironmentInfo: () => environmentConfig.config,
-    isLocal: !!environmentConfig?.config?.isLocal
-  };
+  if (environmentConfig) {
+    const originFrom = () => {
+      try { return new URL(environmentConfig.getApiUrl('ping')).origin; } catch { return location.origin; }
+    };
+    window.GrassrootsEnv = window.GrassrootsEnv || {
+      shouldBypassAuth: () => environmentConfig.shouldBypassAuth(),
+      getApiBaseUrl: () => originFrom(),
+      getApiUrl: (endpointOrPath, params = {}) => {
+        const path = String(endpointOrPath).replace(/^\/?(api\/)?/, '');
+        return environmentConfig.getApiUrl(path, params);
+      },
+      getEnvironmentInfo: () => environmentConfig.config,
+      isLocal: !!environmentConfig?.config?.isLocal
+    };
+  }
+</script>
+<script>
+// Fallback for non-module or failed ESM import: use browser global
+window.environmentConfig = window.environmentConfig || (window.GrassrootsEnv || {});
 </script>
 <!-- apiClient must be loaded as a module so exports work -->
 <script type="module" src="/src/apiClient.js"></script>
@@ -655,8 +669,7 @@
     apiRequest: async (body) => {
       console.log('🔗 StreetAutocomplete calling API with:', body);
       // Prefer centralized client so auth+cookies+re-auth are consistent
-      if (window.apiPost) return window.apiPost('streets', body);
-      return jsonFetch('/api/streets', { method: 'POST', body: JSON.stringify(body) });
+      return window.apiPost('streets', body);
     },
     getCounty: () => {
       const county = fromQS().county;

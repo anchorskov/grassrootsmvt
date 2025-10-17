@@ -5,6 +5,40 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>GrassrootsMVT Volunteer Hub</title>
+
+<script type="module">
+  // Import environment configuration (absolute path for nested routes)
+  let environmentConfig;
+  try {
+    const mod = await import('/config/environments.js');
+    environmentConfig = mod.default || mod.environmentConfig || mod;
+  } catch (e) {
+    console.warn('ESM import failed, falling back to global:', e);
+  }
+  
+  // Make available to older inline scripts
+  window.environmentConfig = environmentConfig;
+
+  // Back-compat shim for legacy code that referenced window.GrassrootsEnv
+  // Map the old shape to the new helper so old calls don't crash.
+  if (environmentConfig) {
+    const originFrom = () => {
+      const ping = environmentConfig.getApiUrl('ping');
+      try { return new URL(ping).origin; } catch { return location.origin; }
+    };
+    window.GrassrootsEnv = window.GrassrootsEnv || {
+      shouldBypassAuth: () => environmentConfig.shouldBypassAuth(),
+      getApiBaseUrl: () => originFrom(),
+      getApiUrl: (endpoint, params = {}) => environmentConfig.getApiUrl(endpoint, params),
+      getEnvironmentInfo: () => environmentConfig.config,
+      isLocal: environmentConfig.config?.isLocal === true
+    };
+  }
+</script>
+<script>
+// Fallback for non-module or failed ESM import: use browser global
+window.environmentConfig = window.environmentConfig || (window.GrassrootsEnv || {});
+</script>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 1rem; max-width: 880px; position: relative; }
@@ -275,86 +309,79 @@
 })();
 </script>
 
-<script src="/config/environments.js"></script>
-<script type="module">
-// Use the centralized environment configuration
-const environmentConfig = {
-  shouldBypassAuth: () => window.GrassrootsEnv.shouldBypassAuth(),
-  getApiUrl: (endpoint, params = {}) => {
-    const map = { 
-      ping: '/api/ping', 
-      voters: '/api/voters', 
-      neighborhoods: '/api/neighborhoods', 
-      log: '/api/log', 
-      call: '/api/call', 
-      whoami: '/api/whoami', 
-      'auth/finish': '/api/auth/finish' 
+<script>
+// Use the environment config loaded by the module script above
+// Wait for it to be available since modules are async
+function waitForEnvironmentConfig() {
+  if (window.environmentConfig) {
+    return Promise.resolve(window.environmentConfig);
+  }
+  return new Promise(resolve => {
+    const check = () => {
+      if (window.environmentConfig) {
+        resolve(window.environmentConfig);
+      } else {
+        setTimeout(check, 10);
+      }
     };
-    const path = map[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
-    const url = new URL(window.GrassrootsEnv.getApiUrl(path));
-    Object.entries(params || {}).forEach(([k,v]) => url.searchParams.set(k, v));
-    return url.toString();
-  },
-  debug: (m, d) => { 
-    if (window.GrassrootsEnv.isLocal) console.log('[ENV]', m, d ?? ''); 
-  },
-  config: window.GrassrootsEnv.getEnvironmentInfo()
-};
+    check();
+  });
+}</script>
+<script type="module">
+// Use the centralized environment configuration (loaded by module script in head)
+const envConfig = await waitForEnvironmentConfig();
 
-// Environment-aware API client implementation
+function buildAccessKickUrl() {
+  const finish = envConfig.getApiUrl('auth/finish', { to: location.href });
+  return envConfig.getApiUrl('ping', { finish });
+}
+
+async function kickAccessIfNeeded() {
+  if (envConfig.shouldBypassAuth && envConfig.shouldBypassAuth()) return;
+  const kick = buildAccessKickUrl();
+  window.location.replace(kick); // top-level nav (NOT fetch)
+}
+
+// Authentication helper functions (top-level Access kick)
+function signIn() { kickAccessIfNeeded(); }
+
+function signOut() {
+  const to = encodeURIComponent(location.origin + "/");
+  const apiOrigin = new URL(envConfig.getApiUrl('ping')).origin;
+  location.href = `${apiOrigin}/auth/logout?to=${to}`;
+}
+
+// Ensure Access session (no-op in local)
 function ensureAccessSession() {
-  // Bypass authentication in local development
-  if (environmentConfig.shouldBypassAuth()) {
-    environmentConfig.debug('Bypassing authentication in local development');
+  if (envConfig.shouldBypassAuth()) {
+    envConfig.debug('Bypassing authentication in local development');
     sessionStorage.setItem('accessReady:v1', 'true');
     return Promise.resolve();
   }
-
   const ready = sessionStorage.getItem('accessReady:v1') === 'true';
   if (!ready) {
-    // Direct kick to protected endpoint - no interstitial needed
-    const returnTo = encodeURIComponent(location.href);
-    const apiUrl = environmentConfig.getApiUrl('ping', {
-      finish: environmentConfig.getApiUrl('auth/finish', { to: returnTo })
-    });
-    environmentConfig.debug('Redirecting to authentication:', apiUrl);
-    window.location.replace(apiUrl);
-    // Return a pending promise so callers don't proceed
-    return new Promise(() => {});
+    const kick = buildAuthKick(location.href);
+    envConfig.debug('Redirecting to authentication:', kick);
+    window.location.replace(kick);
+    return new Promise(() => {}); // halt
   }
   return Promise.resolve();
 }
 
-// Centralized API fetch with credentials
+// Centralized API fetch with credentials (uses env-aware URLs)
 async function apiFetch(path, options = {}) {
-  await ensureAccessSession(); // make sure we kicked, if needed
-  
-  const apiUrl = environmentConfig.getApiUrl(path);
-  environmentConfig.debug('API fetch:', apiUrl);
-  
-  const fetchOptions = {
+  await ensureAccessSession();
+  const apiUrl = envConfig.getApiUrl(path);
+  const res = await fetch(apiUrl, {
     credentials: 'include',
-    ...options,
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-  };
-
-  const res = await fetch(apiUrl, fetchOptions);
-  
-  // In local development, don't redirect on auth errors
-  if (environmentConfig.shouldBypassAuth()) {
-    return res;
-  }
-  
-  // If something still goes sideways (e.g., Access cookie expired), re-kick.
-  if (res.status === 401 || res.status === 403) {
+    ...options
+  });
+  if (!envConfig.shouldBypassAuth() && (res.status === 401 || res.status === 403)) {
     sessionStorage.removeItem('accessReady:v1');
-    // Direct kick to protected endpoint - no interstitial needed
-    const returnTo = encodeURIComponent(location.href);
-    const authUrl = environmentConfig.getApiUrl('ping', {
-      finish: environmentConfig.getApiUrl('auth/finish', { to: returnTo })
-    });
-    environmentConfig.debug('Re-authenticating due to 401/403:', authUrl);
-    window.location.replace(authUrl);
+    const kick = buildAuthKick(location.href);
+    envConfig.debug('401/403 → re-auth:', kick);
+    window.location.replace(kick);
     return new Promise(() => {});
   }
   return res;
@@ -363,35 +390,30 @@ async function apiFetch(path, options = {}) {
 function showBanner() {
   const banner = document.getElementById('api-session-banner');
   banner.style.display = '';
-  const link = banner.querySelector('[data-api-login]');
-  link.addEventListener('click', (e) => {
-    e.preventDefault();
-    signIn(); // Use the centralized sign-in function
+  banner.querySelector('[data-api-login]')?.addEventListener('click', (e) => {
+    e.preventDefault(); signIn();
   });
 }
 
-// Authentication helper functions
-function signIn() {
-  const to = encodeURIComponent(location.href);
-  const apiUrl = new URL(environmentConfig.getApiUrl('ping'));
-  const apiOrigin = apiUrl.origin;
-  location.href = `${apiOrigin}/whoami?nav=1&to=${to}`;
+// --- Optional: surface missing Access config for quick diagnosis ---
+async function warnIfAccessMisconfigured() {
+  try {
+    const r = await fetch(envConfig.getApiUrl('/auth/config'), { credentials: 'include' });
+    if (!r.ok) return;
+    const j = await r.json().catch(() => ({}));
+    if (!j?.TEAM_DOMAIN || !j?.POLICY_AUD) {
+      console.warn('[Access] TEAM_DOMAIN or POLICY_AUD not set on API Worker. /whoami may 401 instead of redirecting.');
+    }
+  } catch (_) {}
 }
 
-function signOut() {
-  const to = encodeURIComponent(location.origin + "/");
-  const apiUrl = new URL(environmentConfig.getApiUrl('ping'));
-  const apiOrigin = apiUrl.origin;
-  location.href = `${apiOrigin}/auth/logout?to=${to}`;
-}
-
-// Refresh user badge by calling the API
+// Refresh user badge by calling the API (only when same-origin)
 async function refreshUserBadge() {
   const indicator = document.querySelector('.online-indicator');
   if (!indicator) return;
 
   try {
-    // In local development, always show as authenticated
+    // Local dev: pretend authenticated
     if (environmentConfig.shouldBypassAuth()) {
       const envLabel = environmentConfig.config.isLocal ? ' (Local)' : '';
       indicator.textContent = `✅ Authenticated${envLabel}`;
@@ -400,14 +422,16 @@ async function refreshUserBadge() {
       return;
     }
 
-    // In production, check via direct API call (no redirects)
-    const apiUrl = environmentConfig.getApiUrl('whoami');
-    const response = await fetch(apiUrl, { 
+    // In production, check via direct API call with manual redirect handling
+    const apiUrl = envConfig.getApiUrl('whoami');
+    const response = await fetch(apiUrl, {
+      method: 'GET',
       credentials: 'include',
+      redirect: 'manual',           // <— DO NOT follow the Access redirect
       headers: { 'Accept': 'application/json' }
     });
 
-    if (response.ok) {
+    if (response.status === 200) {
       const data = await response.json();
       if (data.ok && data.email) {
         indicator.textContent = `✅ Signed in as: ${data.email}`;
@@ -432,10 +456,12 @@ async function refreshUserBadge() {
       }
     }
     
-    // If we get here, not authenticated
+    // Any 3xx or 401/403 means "not signed in" — don't follow redirect
     throw new Error('Not authenticated');
   } catch (err) {
-    // Not authenticated or API error - show sign-in state
+    // Network/CORS/etc -> kick Access in prod
+    if (!envConfig.shouldBypassAuth()) return kickAccessIfNeeded();
+    
     indicator.textContent = '⚠️ Not signed in';
     indicator.parentElement.style.background = '#fef3c7';
     indicator.parentElement.style.color = '#92400e';
@@ -461,8 +487,11 @@ async function refreshUserBadge() {
 
 // Initialize authentication on page load
 document.addEventListener('DOMContentLoaded', async () => {
-  console.log(`🚀 GrassrootsMVT initializing in ${environmentConfig?.config?.environment || 'unknown'} environment...`);
-  environmentConfig.debug('Environment configuration:', environmentConfig.config);
+  console.log(`🚀 GrassrootsMVT initializing in ${envConfig.config.environment} environment...`);
+  envConfig.debug('Environment configuration:', envConfig.config);
+
+  // Quick Access config sanity check (prod only)
+  if (!envConfig.shouldBypassAuth()) warnIfAccessMisconfigured();
 
   // Refresh user badge to show current authentication status
   await refreshUserBadge();

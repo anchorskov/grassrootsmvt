@@ -1,12 +1,43 @@
-# Cloudflare Pages configuration for GrassrootsMVT UI
+# ui/wrangler.toml
+name = "grassroots-ui"
+main = "worker/src/index.js"
+compatibility_date = "2024-05-29"
 
-# Project name set in Wrangler Pages dashboard
-project = "grassrootsmvt-ui"
+# ─────────────────────────────────────────────────────────────
+# Local dev: point the proxy at your local API (worker or service on 8787)
+# `npx wrangler dev` from /ui will use this.
+[vars]
+API_BASE = "http://127.0.0.1:8787"
 
-# Account ID (matches worker config)
-account_id = "8bfd3f60fbdcc89183e9e312fb03e86e"
+[observability]
+enabled = true
 
-# Specify this directory as the site bucket so all files (including /config) are published
-[site]
-bucket = "."
-entry-point = "."
+# ─────────────────────────────────────────────────────────────
+# Production: DO NOT set API_BASE here. Use a service binding to the API Worker.
+[env.production]
+# Route ONLY /api/* on volunteers domain to this UI Worker.
+routes = [
+  { pattern = "volunteers.grassrootsmvt.org/api/*", zone_name = "grassrootsmvt.org" }
+]
+
+# Bind to your API Worker (its name is "grassrootsmvt" per worker/wrangler.toml)
+[[env.production.services]]
+binding = "API"              # available in code as env.API
+service = "grassrootsmvt"    # API Worker name
+environment = "production"
+
+# ─────────────────────────────────────────────────────────────
+# Preview: optional, safe testing on *.workers.dev
+[env.preview]
+workers_dev = true
+
+# For preview, either:
+# 1) use the same binding if your API has a preview env:
+# [[env.preview.services]]
+# binding = "API"
+# service = "grassrootsmvt"
+# environment = "preview"
+#
+# or 2) hit a preview/remote API via an env var (only for preview):
+# [env.preview.vars]
+# API_BASE = "https://api.grassrootsmvt.org"

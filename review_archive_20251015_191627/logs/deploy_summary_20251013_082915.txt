@@ -1,5 +1,0 @@
-[0;34m[08:29:15] 📁 Working directory: /home/anchor/projects/grassrootsmvt/worker[0m
-[0;34m[08:29:15] 🔧 Starting deployment process...[0m
-[1;33m[08:29:15] 🚀 Deploying Cloudflare Worker (with retry)...[0m
-[0;36m[08:29:15] 🔍 Checking existing route assignments...[0m
-[0;36m[08:29:16] 📦 Attempt #1 to deploy...[0m

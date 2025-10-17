@@ -272,7 +272,16 @@
   
   <script type="module">
     // Progressive form logic with API integration
-    import environmentConfig from '../config/environments.js';
+    // Import environment configuration (absolute path for nested routes)
+    let environmentConfig;
+    try {
+      const mod = await import('/config/environments.js');
+      environmentConfig = mod.default || mod.environmentConfig || mod;
+    } catch (e) {
+      console.warn('ESM import failed, falling back to global:', e);
+    }
+    
+    window.environmentConfig = environmentConfig;
     
     let currentStep = 1;
     let formData = {};
@@ -482,7 +491,8 @@
         };
         
         // API call to get addresses on this specific street
-        const response = await fetch('http://localhost:8787/api/canvass/nearby', {
+        const apiUrl = window.environmentConfig?.getApiUrl('canvass/nearby') || '/api/canvass/nearby';
+        const response = await fetch(apiUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ filters, street: streetName, limit: 100 })
@@ -691,6 +701,10 @@
     
     // Initialize when page loads
     document.addEventListener('DOMContentLoaded', init);
+  </script>
+  <script>
+  // Fallback for non-module or failed ESM import: use browser global
+  window.environmentConfig = window.environmentConfig || (window.GrassrootsEnv || {});
   </script>
 </body>
 </html>

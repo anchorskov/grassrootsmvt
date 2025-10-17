@@ -15,7 +15,7 @@
     }
     loadEnvironmentConfig();
   </script>
-  <script src="/src/apiClient.js"></script>
+  <script type="module" src="/src/apiClient.js"></script>
   <style>
     body { font-family: system-ui, sans-serif; margin: 2rem; }
     .test { margin: 1rem 0; padding: 1rem; border: 2px solid #ccc; border-radius: 8px; }
@@ -78,7 +78,8 @@ unknown-endpoint: ${unknownUrl}`;
       
       try {
         // Test CORS by making an actual request
-        const response = await fetch('http://localhost:8787/api/ping', {
+        const apiUrl = window.environmentConfig?.getApiUrl('ping') || '/api/ping';
+        const response = await fetch(apiUrl, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
