@@ -1,17 +1,5 @@
 // ui/src/apiClient.js
-import environmentConfig from '/config/environments.js';
 
-function accessKick() {
-  if (environmentConfig.shouldBypassAuth && environmentConfig.shouldBypassAuth()) return;
-  const finish = environmentConfig.getApiUrl('auth/finish', { to: location.href });
-  const kick   = environmentConfig.getApiUrl('ping', { finish });
-  window.location.replace(kick);
-}
-
-// Load env helper (absolute path for production). If it fails, we'll fall back.
-async function loadEnvironmentConfig() {
-  return environmentConfig;
-}ient.js
 let environmentConfig;
 
 // Load env helper (absolute path for production). If it fails, we’ll fall back.
@@ -27,9 +15,17 @@ async function loadEnvironmentConfig() {
   return environmentConfig;
 }
 
-
+function accessKick() {
+  if (environmentConfig?.shouldBypassAuth && environmentConfig.shouldBypassAuth()) return;
+  const finish = environmentConfig.getApiUrl('auth/finish', { to: location.href });
+  const kick   = environmentConfig.getApiUrl('ping', { finish });
+  window.location.replace(kick);
+}
 
 export async function apiFetch(path, options = {}) {
+  if (!environmentConfig) {
+    await loadEnvironmentConfig();
+  }
   const url = environmentConfig.getApiUrl(path);
   const res = await fetch(url, {
     credentials: 'include',
