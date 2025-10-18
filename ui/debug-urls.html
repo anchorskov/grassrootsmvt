@@ -24,7 +24,7 @@
           shouldBypassAuth: () => location.hostname === 'localhost' || location.hostname === '127.0.0.1',
           getApiUrl: (endpoint, params = {}) => {
             const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-            const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+            const baseUrl = isLocal ? 'http://localhost:8787' : location.origin;
             
             const endpointMap = {
               'ping': '/api/ping',
@@ -126,7 +126,7 @@
           return window.environmentConfig.getApiUrl(cleanPath);
         }
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-        const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+        const baseUrl = isLocal ? 'http://localhost:8787' : location.origin;
         const cleanPath = path.replace(/^\/?(api\/)?/, '');
         return `${baseUrl}/api/${cleanPath}`;
       };

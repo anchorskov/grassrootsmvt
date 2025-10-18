@@ -4,6 +4,43 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Add New Voter Contact - GrassrootsMVT</title>
+
+  <!-- Auth bootstrap: FIRST in <head> -->
+  <script type="module">
+  import env from '/config/environments.js';
+
+  // For debugging: ensure whoami is SAME-ORIGIN
+  console.log('🔎 whoami URL:', env.getApiUrl('whoami')); // must be https://volunteers.../api/whoami
+
+  function buildKick() {
+    const finish = env.getApiUrl('auth/finish', { to: location.href });
+    return env.getApiUrl('ping', { finish }); // → /api/ping?finish=/api/auth/finish?to=...
+  }
+
+  // Ensure authentication using manual redirect handling to avoid CORS
+  await (async function ensureAccess(){
+    if (env.shouldBypassAuth && env.shouldBypassAuth()) return;
+
+    // prevent re-entrancy
+    if (sessionStorage.getItem('access:kicking') === '1') return new Promise(()=>{});
+
+    try {
+      const r = await fetch(env.getApiUrl('whoami'), {
+        credentials: 'include',
+        redirect: 'manual',
+        headers: { Accept: 'application/json' }
+      });
+      if (r.status === 200) return; // already authenticated
+    } catch (err) {
+      console.warn('Auth probe failed (still kicking Access):', err);
+    }
+
+    sessionStorage.setItem('access:kicking','1');
+    location.href = buildKick();
+    return new Promise(()=>{});
+  })();
+  </script>
+
   <style>
     /* Similar styling to existing forms */
     :root { color-scheme: light dark; }

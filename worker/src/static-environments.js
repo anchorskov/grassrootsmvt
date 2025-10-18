@@ -39,7 +39,8 @@ function getApiBaseUrl() {
   if (env.isLocal) {
     return 'http://localhost:8787';
   } else {
-    return 'https://api.grassrootsmvt.org';
+    // ✅ FIXED: Use same-origin instead of cross-origin
+    return location.origin;
   }
 }
 

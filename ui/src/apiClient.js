@@ -33,6 +33,7 @@ export async function apiFetch(path, options = {}) {
   const url = environmentConfig.getApiUrl(path);
   const res = await fetch(url, {
     credentials: 'include',
+    redirect: 'manual', // Prevent automatic Access redirects in XHR
     ...options,
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
   });

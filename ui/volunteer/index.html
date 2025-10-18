@@ -241,7 +241,7 @@
     // API Configuration with environment detection
     const API_BASE = window.location.hostname.includes('localhost') 
       ? 'http://localhost:8787' 
-      : 'https://api.grassrootsmvt.org';
+      : location.origin;
 
     // DOM Elements
     const elements = {

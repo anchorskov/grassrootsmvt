@@ -6,38 +6,40 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>GrassrootsMVT Volunteer Hub</title>
 
+<!-- Auth bootstrap: FIRST in <head> -->
 <script type="module">
-  // Import environment configuration (absolute path for nested routes)
-  let environmentConfig;
-  try {
-    const mod = await import('/config/environments.js');
-    environmentConfig = mod.default || mod.environmentConfig || mod;
-  } catch (e) {
-    console.warn('ESM import failed, falling back to global:', e);
-  }
-  
-  // Make available to older inline scripts
-  window.environmentConfig = environmentConfig;
+import env from '/config/environments.js';
 
-  // Back-compat shim for legacy code that referenced window.GrassrootsEnv
-  // Map the old shape to the new helper so old calls don't crash.
-  if (environmentConfig) {
-    const originFrom = () => {
-      const ping = environmentConfig.getApiUrl('ping');
-      try { return new URL(ping).origin; } catch { return location.origin; }
-    };
-    window.GrassrootsEnv = window.GrassrootsEnv || {
-      shouldBypassAuth: () => environmentConfig.shouldBypassAuth(),
-      getApiBaseUrl: () => originFrom(),
-      getApiUrl: (endpoint, params = {}) => environmentConfig.getApiUrl(endpoint, params),
-      getEnvironmentInfo: () => environmentConfig.config,
-      isLocal: environmentConfig.config?.isLocal === true
-    };
+// For debugging: ensure whoami is SAME-ORIGIN
+console.log('🔎 whoami URL:', env.getApiUrl('whoami')); // must be https://volunteers.../api/whoami
+
+function buildKick() {
+  const finish = env.getApiUrl('auth/finish', { to: location.href });
+  return env.getApiUrl('ping', { finish }); // → /api/ping?finish=/api/auth/finish?to=...
+}
+
+// Ensure authentication using manual redirect handling to avoid CORS
+await (async function ensureAccess(){
+  if (env.shouldBypassAuth && env.shouldBypassAuth()) return;
+
+  // prevent re-entrancy
+  if (sessionStorage.getItem('access:kicking') === '1') return new Promise(()=>{});
+
+  try {
+    const r = await fetch(env.getApiUrl('whoami'), {
+      credentials: 'include',
+      redirect: 'manual',
+      headers: { Accept: 'application/json' }
+    });
+    if (r.status === 200) return; // already authenticated
+  } catch (err) {
+    console.warn('Auth probe failed (still kicking Access):', err);
   }
-</script>
-<script>
-// Fallback for non-module or failed ESM import: use browser global
-window.environmentConfig = window.environmentConfig || (window.GrassrootsEnv || {});
+
+  sessionStorage.setItem('access:kicking','1');
+  location.href = buildKick();
+  return new Promise(()=>{});
+})();
 </script>
 <style>
   :root { color-scheme: light dark; }
@@ -305,116 +307,52 @@ window.environmentConfig = window.environmentConfig || (window.GrassrootsEnv || 
 })();
 </script>
 
-<script>
-// Use the environment config loaded by the module script above
-// Wait for it to be available since modules are async
-function waitForEnvironmentConfig() {
-  if (window.environmentConfig) {
-    return Promise.resolve(window.environmentConfig);
-  }
-  return new Promise(resolve => {
-    const check = () => {
-      if (window.environmentConfig) {
-        resolve(window.environmentConfig);
-      } else {
-        setTimeout(check, 10);
-      }
-    };
-    check();
-  });
-}</script>
+
 <script type="module">
 import env from '/config/environments.js';
 
-// Builds a same-origin kick that *always* triggers Access
-function buildAuthKick() {
-  const finish = env.getApiUrl('auth/finish', { to: location.href });
-  return env.getApiUrl('ping', { finish }); // → /api/ping?finish=/api/auth/finish?to=<return>
-}
-
-// Return a promise that only resolves when the user is authenticated.
-// If unauthenticated, it top-level navigates into Access (no button).
-async function ensureAccess() {
-  // Bypass authentication in local development
-  if (env.shouldBypassAuth && env.shouldBypassAuth()) {
-    env.debug('Bypassing authentication in local development');
-    return;
-  }
-
-  // loop guard to avoid re-kicking in rare race conditions
-  if (sessionStorage.getItem('access:kicking') === '1') return new Promise(() => {});
-  
-  // Check whoami *without following redirects*
-  const res = await fetch(env.getApiUrl('whoami'), {
-    credentials: 'include',
-    redirect: 'manual',
-    headers: { 'Accept': 'application/json' }
-  });
-
-  if (res.status === 200) return;          // already signed in
-  // Anything else (30x/401/403) -> kick Access now
-  sessionStorage.setItem('access:kicking', '1');
-  window.location.href = buildAuthKick();
-  return new Promise(() => {});             // stop further execution
-}
-
-// Optional: Show who's signed in (only runs if authenticated)
 async function showAuthenticatedUser() {
   const indicator = document.querySelector('.online-indicator');
   if (!indicator) return;
 
-  try {
-    if (env.shouldBypassAuth && env.shouldBypassAuth()) {
-      const envLabel = env.config?.isLocal ? ' (Local)' : '';
-      indicator.textContent = `✅ Authenticated${envLabel}`;
+  if (env.shouldBypassAuth && env.shouldBypassAuth()) {
+    const envLabel = env.config?.isLocal ? ' (Local)' : '';
+    indicator.textContent = `✅ Authenticated${envLabel}`;
+    indicator.parentElement.style.background = '#dcfce7';
+    indicator.parentElement.style.color = '#166534';
+    return;
+  }
+
+  const r = await fetch(env.getApiUrl('whoami'), {
+    credentials: 'include',
+    redirect: 'manual',
+    headers: { Accept: 'application/json' }
+  });
+  if (r.status === 200) {
+    const j = await r.json().catch(()=>({}));
+    if (j.ok && j.email) {
+      indicator.textContent = `✅ Signed in as: ${j.email}`;
       indicator.parentElement.style.background = '#dcfce7';
       indicator.parentElement.style.color = '#166534';
-      return;
-    }
 
-    const response = await fetch(env.getApiUrl('whoami'), {
-      credentials: 'include',
-      headers: { 'Accept': 'application/json' }
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.ok && data.email) {
-        indicator.textContent = `✅ Signed in as: ${data.email}`;
-        indicator.parentElement.style.background = '#dcfce7';
-        indicator.parentElement.style.color = '#166534';
-        
-        // Add sign-out button
-        let signOutBtn = document.querySelector('#sign-out-btn');
-        if (!signOutBtn) {
-          signOutBtn = document.createElement('button');
-          signOutBtn.id = 'sign-out-btn';
-          signOutBtn.textContent = 'Sign Out';
-          signOutBtn.onclick = () => {
-            const to = encodeURIComponent(location.origin + "/");
-            const apiOrigin = new URL(env.getApiUrl('ping')).origin;
-            location.href = `${apiOrigin}/auth/logout?to=${to}`;
-          };
-          signOutBtn.style.cssText = 'margin-left: 10px; padding: 4px 8px; font-size: 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer;';
-          indicator.parentElement.appendChild(signOutBtn);
-        }
+      let btn = document.querySelector('#sign-out-btn');
+      if (!btn) {
+        btn = document.createElement('button');
+        btn.id = 'sign-out-btn';
+        btn.textContent = 'Sign Out';
+        btn.onclick = () => {
+          const to = encodeURIComponent(location.origin + '/');
+          const apiOrigin = new URL(env.getApiUrl('ping')).origin;
+          location.href = `${apiOrigin}/auth/logout?to=${to}`;
+        };
+        btn.style.cssText = 'margin-left:10px;padding:4px 8px;font-size:12px;background:#ef4444;color:#fff;border:0;border-radius:4px;cursor:pointer';
+        indicator.parentElement.appendChild(btn);
       }
     }
-  } catch (err) {
-    console.warn('Could not fetch user info:', err);
   }
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
-  console.log(`🚀 GrassrootsMVT initializing in ${env.config?.environment || 'unknown'} environment...`);
-  
-  await ensureAccess();                     // ⟵ auto-kick if needed
-  
-  // Show authenticated user info
-  await showAuthenticatedUser();
-  
-  console.log('🔐 Authentication verified - proceeding with page initialization');
-});
+document.addEventListener('DOMContentLoaded', showAuthenticatedUser);
 </script>
 
 </body>

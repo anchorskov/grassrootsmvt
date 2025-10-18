@@ -5,6 +5,43 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex, nofollow" />
   <title>Volunteer Call</title>
+
+  <!-- Auth bootstrap: FIRST in <head> -->
+  <script type="module">
+  import env from '/config/environments.js';
+
+  // For debugging: ensure whoami is SAME-ORIGIN
+  console.log('🔎 whoami URL:', env.getApiUrl('whoami')); // must be https://volunteers.../api/whoami
+
+  function buildKick() {
+    const finish = env.getApiUrl('auth/finish', { to: location.href });
+    return env.getApiUrl('ping', { finish }); // → /api/ping?finish=/api/auth/finish?to=...
+  }
+
+  // Ensure authentication using manual redirect handling to avoid CORS
+  await (async function ensureAccess(){
+    if (env.shouldBypassAuth && env.shouldBypassAuth()) return;
+
+    // prevent re-entrancy
+    if (sessionStorage.getItem('access:kicking') === '1') return new Promise(()=>{});
+
+    try {
+      const r = await fetch(env.getApiUrl('whoami'), {
+        credentials: 'include',
+        redirect: 'manual',
+        headers: { Accept: 'application/json' }
+      });
+      if (r.status === 200) return; // already authenticated
+    } catch (err) {
+      console.warn('Auth probe failed (still kicking Access):', err);
+    }
+
+    sessionStorage.setItem('access:kicking','1');
+    location.href = buildKick();
+    return new Promise(()=>{});
+  })();
+  </script>
+
   <style>
     :root { color-scheme: light dark; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 1rem; max-width: 880px; }
@@ -36,7 +73,7 @@
     </span>
   </h1>
 
-  <div class="card" id="whoami">Checking login…</div>
+
   <div class="card muted" id="filtersBadge" style="display:none;"></div>
 
   <div class="card" id="voterCard" hidden>
@@ -121,7 +158,6 @@
     import { apiGet, apiPost } from '/src/apiClient.js';
 
     // ----- UI elements
-    const who        = document.getElementById('whoami');
     const voterCard  = document.getElementById('voterCard');
     const voterInfo  = document.getElementById('voterInfo');
     const empty      = document.getElementById('empty');
@@ -196,15 +232,6 @@
     }
 
     let inFlightNext = false;
-
-    async function loadWho() {
-      try {
-        const j = await apiGet('whoami');
-        who.textContent = (j && (j.email || j.user?.email)) ? `Signed in as: ${j.email || j.user.email}` : 'Not signed in';
-      } catch (e) {
-        who.innerHTML = `<span class="error">Unable to reach API: ${e.message}</span>`;
-      }
-    }
 
     async function nextVoter() {
       if (inFlightNext) return;
@@ -319,12 +346,7 @@
     const filters = getFilters();
     showFiltersBadge(filters);
     console.log("✅ Ready, loading data...");
-    try { await loadWho(); } catch {}
     await nextVoter();
-  </script>
-  <script>
-  // Fallback for non-module or failed ESM import: use browser global
-  window.environmentConfig = window.environmentConfig || (window.GrassrootsEnv || {});
   </script>
 </body>
 </html>
