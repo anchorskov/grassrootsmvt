@@ -1,11 +1,11 @@
 # 🏷️ worker/wrangler.toml
 # Cloudflare Worker configuration for grassrootsmvt-production (JWT-secured API)
 
-name = "grassrootsmvt-production"
+name = "grassrootsmvt"
 account_id = "8bfd3f60fbdcc89183e9e312fb03e86e"
 main = "src/index.js"
 compatibility_date = "2025-10-08"
-workers_dev = true  # temporarily enable for testing
+workers_dev = false  # production deploys use zone routes below
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 🧪 Local (wrangler dev) — used when you run `npx wrangler dev` inside /worker
@@ -26,10 +26,10 @@ migrations_dir = "db/migrations"
 # ──────────────────────────────────────────────────────────────────────────────
 # 🌐 Production Environment (unchanged)
 [env.production]
-# Temporarily deploy without routes to test configuration
-# routes = [
-#   { pattern = "grassrootsmvt.org/api/*", zone_name = "grassrootsmvt.org" }
-# ]
+routes = [
+  { pattern = "grassrootsmvt.org/api/*", zone_name = "grassrootsmvt.org" },
+  { pattern = "volunteers.grassrootsmvt.org/api/*", zone_name = "grassrootsmvt.org" }
+]
 
 [env.production.vars]
 ENVIRONMENT = "production"

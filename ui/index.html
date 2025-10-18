@@ -13,33 +13,43 @@ import env from '/config/environments.js';
 // For debugging: ensure whoami is SAME-ORIGIN
 console.log('🔎 whoami URL:', env.getApiUrl('whoami')); // must be https://volunteers.../api/whoami
 
-function buildKick() {
+// Build a same-origin "kick" that always triggers Access, and returns to the page
+function buildKickUrl() {
   const finish = env.getApiUrl('auth/finish', { to: location.href });
-  return env.getApiUrl('ping', { finish }); // → /api/ping?finish=/api/auth/finish?to=...
+  return env.getApiUrl('ping', { finish }); // => /api/ping?finish=/api/auth/finish?to=<return>
 }
 
-// Ensure authentication using manual redirect handling to avoid CORS
-await (async function ensureAccess(){
+// Expose for manual testing if you want
+window.ensureAccess = ensureAccess;
+
+// Call this once on page load before any API calls
+async function ensureAccess() {
+  // local dev bypass if you use it
   if (env.shouldBypassAuth && env.shouldBypassAuth()) return;
 
-  // prevent re-entrancy
-  if (sessionStorage.getItem('access:kicking') === '1') return new Promise(()=>{});
+  // Don't double-kick if a navigation is already in progress
+  if (sessionStorage.getItem('access:kicking') === '1') return new Promise(() => {});
 
+  // Ask whoami *without* following redirects; if we're not 200, kick
   try {
     const r = await fetch(env.getApiUrl('whoami'), {
       credentials: 'include',
       redirect: 'manual',
-      headers: { Accept: 'application/json' }
+      headers: { 'Accept': 'application/json' }
     });
-    if (r.status === 200) return; // already authenticated
-  } catch (err) {
-    console.warn('Auth probe failed (still kicking Access):', err);
+    if (r.status === 200) return; // authenticated
+  } catch (_) {
+    // network/other failure: treat as unauthenticated
   }
 
-  sessionStorage.setItem('access:kicking','1');
-  location.href = buildKick();
-  return new Promise(()=>{});
-})();
+  // Not authenticated ⇒ navigate into Access
+  sessionStorage.setItem('access:kicking', '1');
+  location.href = buildKickUrl();
+  return new Promise(() => {}); // halt further JS until we return
+}
+
+// Run on load (before your app does any fetches)
+document.addEventListener('DOMContentLoaded', ensureAccess);
 </script>
 <style>
   :root { color-scheme: light dark; }
