@@ -4,6 +4,18 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Canvass</title>
+<!-- Ensure environment is available before any other scripts -->
+<script type="module">
+  import env from '/config/environments.js';
+  // Make available to non-module scripts
+  window.environmentConfig = env;
+  // Legacy compatibility for older code paths
+  window.GrassrootsEnv = window.GrassrootsEnv || {
+    getApiUrl: (endpoint, params) => env.getApiUrl(endpoint, params),
+    shouldBypassAuth: () => env.shouldBypassAuth?.() || false,
+    config: env.config
+  };
+</script>
 
 <!-- Auth bootstrap: FIRST in <head> -->
 <script type="module">
@@ -21,8 +33,12 @@ function buildKick() {
 await (async function ensureAccess(){
   if (env.shouldBypassAuth && env.shouldBypassAuth()) return;
 
-  // prevent re-entrancy
-  if (sessionStorage.getItem('access:kicking') === '1') return new Promise(()=>{});
+  // Clear any stale authentication flags from previous attempts
+  // This prevents loops when returning from Cloudflare Access
+  const wasKicking = sessionStorage.getItem('access:kicking') === '1';
+  if (wasKicking) {
+    sessionStorage.removeItem('access:kicking');
+  }
 
   try {
     const r = await fetch(env.getApiUrl('whoami'), {
@@ -33,6 +49,14 @@ await (async function ensureAccess(){
     if (r.status === 200) return; // already authenticated
   } catch (err) {
     console.warn('Auth probe failed (still kicking Access):', err);
+  }
+
+  // If we just cleared a kicking flag but still aren't authenticated,
+  // it means we returned from Access but authentication failed
+  if (wasKicking) {
+    console.log('Authentication failed after Access redirect');
+    // Don't immediately re-kick; give user a chance to see any error
+    return;
   }
 
   sessionStorage.setItem('access:kicking','1');
@@ -857,4 +881,48 @@ window.environmentConfig = window.environmentConfig || (window.GrassrootsEnv || 
   
   const f = fromQS();
   showFiltersBadge(f);
+</script>
+
+<!-- Ensure the environment and auth load once per page -->
+<script type="module">
+  import env from '/config/environments.js';
+  import { ensureAccess, showUserBadge } from '/js/auth-bootstrap.js';
+  import { StreetAutocomplete } from '/js/streetAutocomplete.js';
+
+  document.addEventListener('DOMContentLoaded', async () => {
+    // One-time auth kick (no loops, same-origin)
+    await ensureAccess(env);
+
+    // Optional: show badge if present on page
+    const badge = document.querySelector('.online-indicator');
+    await showUserBadge(env, badge);
+
+    // Wire street autocomplete
+    const params = new URLSearchParams(location.search);
+    const county = params.get('county') || '';
+    const city   = params.get('city')   || '';
+    const input  = document.querySelector('#street');
+    const house  = document.querySelector('#house');
+    if (input) {
+      const ac = new StreetAutocomplete(input, {
+        minChars: 2,
+        onSelect(value) {
+          if (house) house.focus();
+        }
+      });
+      // Include county/city on the query sent to the Worker
+      ac.search = async function(q) {
+        const r = await fetch(env.getApiUrl('streets'), {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type':'application/json' },
+          body: JSON.stringify({ county, city, q })
+        });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        this.suggestions = (data.streets || []).map(s => s.name || s);
+        this.render();
+      };
+    }
+  });
 </script>

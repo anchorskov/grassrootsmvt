@@ -21,8 +21,12 @@
   await (async function ensureAccess(){
     if (env.shouldBypassAuth && env.shouldBypassAuth()) return;
 
-    // prevent re-entrancy
-    if (sessionStorage.getItem('access:kicking') === '1') return new Promise(()=>{});
+    // Clear any stale authentication flags from previous attempts
+    // This prevents loops when returning from Cloudflare Access
+    const wasKicking = sessionStorage.getItem('access:kicking') === '1';
+    if (wasKicking) {
+      sessionStorage.removeItem('access:kicking');
+    }
 
     try {
       const r = await fetch(env.getApiUrl('whoami'), {
@@ -33,6 +37,14 @@
       if (r.status === 200) return; // already authenticated
     } catch (err) {
       console.warn('Auth probe failed (still kicking Access):', err);
+    }
+
+    // If we just cleared a kicking flag but still aren't authenticated,
+    // it means we returned from Access but authentication failed
+    if (wasKicking) {
+      console.log('Authentication failed after Access redirect');
+      // Don't immediately re-kick; give user a chance to see any error
+      return;
     }
 
     sessionStorage.setItem('access:kicking','1');

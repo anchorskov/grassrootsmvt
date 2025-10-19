@@ -1,5 +1,5 @@
 // src/index.js — Cloudflare Zero Trust module Worker
-import { verifyAccessJWT } from "../functions/_utils/verifyAccessJWT.js";
+import whoami from './routes/whoami.js';
 import { serveEnvironmentsJs } from './static-environments.js';
 
 // --- Environment Detection ---------------------------------------------------
@@ -99,8 +99,8 @@ function getCookie(req, name) {
   return null;
 }
 
-// Authentication middleware with local development bypass
-async function authenticateRequest(request, env) {
+// Simple authentication using Access-injected headers
+function getAuthenticatedUser(request, env) {
   const config = getEnvironmentConfig(env);
   
   // Bypass authentication in local development
@@ -115,13 +115,25 @@ async function authenticateRequest(request, env) {
     };
   }
   
-  // Production authentication via Cloudflare Access JWT
-  return await verifyAccessJWT(request, env);
+  // Production: read Access-injected headers
+  const email = request.headers.get('CF-Access-Authenticated-User-Email');
+  const name = request.headers.get('CF-Access-Authenticated-User-Name') || email;
+  
+  if (!email) {
+    return null; // Not authenticated
+  }
+  
+  return { email, name, isLocal: false };
 }
 
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    
+    // Let Cloudflare handle Access endpoints - CRITICAL for authentication to work
+    if (url.pathname.startsWith('/api/cdn-cgi/')) {
+      return fetch(request); // Pass through to Cloudflare Access system
+    }
     
     // Serve environment configuration with correct MIME type
     if (url.pathname === '/config/environments.js') {
@@ -181,7 +193,7 @@ export default {
     // Logout: clear CF Access session and bounce back to UI
     if (normalizedPath === "/auth/logout") {
       const to = encodeURIComponent(url.searchParams.get("to") || config.allowedOrigins[0] + "/");
-      const target = `https://api.grassrootsmvt.org/cdn-cgi/access/logout?return_to=${to}`;
+      const target = `https://volunteers.grassrootsmvt.org/cdn-cgi/access/logout?return_to=${to}`;
       return Response.redirect(target, 302);
     }
 
@@ -201,14 +213,12 @@ export default {
         ? {
             environment: 'local',
             authRequired: false,
-            teamDomain: null,
-            policyAud: null
+            method: 'bypassed'
           }
         : {
             environment: 'production',
             authRequired: true,
-            teamDomain: env.TEAM_DOMAIN,
-            policyAud: env.POLICY_AUD
+            method: 'access_headers'
           };
       
       return new Response(JSON.stringify(authConfig), {
@@ -217,6 +227,8 @@ export default {
         }, allowedOrigin || null)
       });
     }
+
+
 
     // Tiny fast-path for the connecting probe
     if (normalizedPath === "/ping") {
@@ -313,69 +325,8 @@ export default {
     }
 
     if (normalizedPath === "/whoami") {
-      // Check for navigation parameter - this handles the unified auth flow
-      const nav = url.searchParams.get("nav");
-      const to = url.searchParams.get("to");
-      if (nav === "1" && to) {
-        // Top-level navigation path:
-        //  - If already authenticated, 302 back to the UI.
-        //  - If NOT authenticated, 302 to Cloudflare Access login (first-party),
-        //    with redirect back to /whoami?nav=1&to=...
-        try {
-          const authResult = await authenticateRequest(request, env);
-          if (authResult && authResult.email) {
-            const dest = (() => {
-              try {
-                const u = new URL(to);
-                // Only allow destinations whose origin is in our allowlist
-                const ok = parseAllowedOrigins(env).includes(u.origin);
-                return ok ? u.toString() : (parseAllowedOrigins(env)[0] + "/");
-              } catch {
-                return (parseAllowedOrigins(env)[0] + "/");
-              }
-            })();
-            return Response.redirect(dest, 302);
-          }
-        } catch {}
-        // Force an Access login challenge explicitly
-        const team = env.TEAM_DOMAIN;   // e.g. https://<team>.cloudflareaccess.com
-        const aud  = env.POLICY_AUD;    // your Access application AUD
-        const back = encodeURIComponent(`/whoami?nav=1&to=${encodeURIComponent(to)}`);
-        if (team && aud) {
-          const login = `${team.replace(/\/+$/,'')}/cdn-cgi/access/login/api.grassrootsmvt.org?kid=${aud}&redirect_url=${back}`;
-          return Response.redirect(login, 302);
-        }
-        // Fallback if env not set
-        return new Response("Unauthorized", { status: 401 });
-      }
-      
-      // Regular whoami API call (no navigation)
-      try {
-        const authResult = await authenticateRequest(request, env);
-        if (!authResult || !authResult.email) {
-          return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
-            status: 401,
-            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
-          });
-        }
-        return new Response(JSON.stringify({ 
-          ok: true, 
-          email: authResult.email,
-          isLocal: authResult.isLocal || false
-        }), {
-          headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
-        });
-      } catch (err) {
-        // In production: 401 so the UI can send the browser to /auth/finish
-        return new Response(JSON.stringify({ 
-          ok: false, 
-          error: "unauthorized", 
-          details: err.message 
-        }), {
-          status: 401,
-          headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
-        });
-      }
+      // Use the simple whoami route that reads Access headers
+      return whoami(request);
     }
 
     // � Volunteer & Call Logging API
@@ -522,7 +473,13 @@ export default {
 
     if (normalizedPath === '/call' && request.method === 'POST') {
       try {
-        const user = await authenticateRequest(request, env);
+        const user = getAuthenticatedUser(request, env);
+        if (!user) {
+          return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
+            status: 401,
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
+          });
+        }
         const email = user.email;
         const requestBody = await request.json();
 
@@ -637,7 +594,13 @@ export default {
     if (normalizedPath === '/canvass' && request.method === 'POST') {
       // Log canvassing activity from volunteer
       try {
-        const user = await authenticateRequest(request, env);
+        const user = getAuthenticatedUser(request, env);
+        if (!user) {
+          return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
+            status: 401,
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
+          });
+        }
         const email = user.email;
         const { 
           voter_id, 
@@ -694,7 +657,13 @@ export default {
     if (normalizedPath === '/streets' && request.method === 'POST') {
       // Get all unique streets for a county/city combination - optimized for autocomplete
       try {
-        const user = await authenticateRequest(request, env);
+        const user = getAuthenticatedUser(request, env);
+        if (!user) {
+          return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
+            status: 401,
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
+          });
+        }
         const { county, city } = await request.json();
 
         if (!county || !city) {
@@ -760,7 +729,13 @@ export default {
     if (normalizedPath === '/canvass/nearby' && request.method === 'POST') {
       // Find nearby addresses for door-to-door canvassing
       try {
-        const user = await authenticateRequest(request, env);
+        const user = getAuthenticatedUser(request, env);
+        if (!user) {
+          return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
+            status: 401,
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
+          });
+        }
         const { filters = {}, house, street, range = 20, limit = 20 } = await request.json();
 
         const db = env.d1;
@@ -850,7 +825,13 @@ export default {
     if (normalizedPath === '/complete' && request.method === 'POST') {
       // Enhanced call/canvass completion endpoint with email collection
       try {
-        const user = await authenticateRequest(request, env);
+        const user = getAuthenticatedUser(request, env);
+        if (!user) {
+          return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
+            status: 401,
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
+          });
+        }
         const email = user.email;
         const callData = await request.json();
         
@@ -951,7 +932,13 @@ export default {
     if (normalizedPath === '/contact-staging' && request.method === 'POST') {
       // NEW: Handle new voter contact submissions for staging system
       try {
-        const user = await authenticateRequest(request, env);
+        const user = getAuthenticatedUser(request, env);
+        if (!user) {
+          return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
+            status: 401,
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
+          });
+        }
         const volunteer_email = user.email;
         const contactData = await request.json();
         
@@ -1055,7 +1042,13 @@ export default {
     if (normalizedPath === '/contact' && request.method === 'POST') {
       // Enhanced contact recording with rich data collection (for existing voters)
       try {
-        const user = await authenticateRequest(request, env);
+        const user = getAuthenticatedUser(request, env);
+        if (!user) {
+          return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
+            status: 401,
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
+          });
+        }
         const volunteer_email = user.email;
         const contactData = await request.json();
         
@@ -1191,7 +1184,13 @@ export default {
     if (normalizedPath === '/contact/status' && request.method === 'GET') {
       // Get contact status for voters (for canvass page display)
       try {
-        const user = await authenticateRequest(request, env);
+        const user = getAuthenticatedUser(request, env);
+        if (!user) {
+          return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
+            status: 401,
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
+          });
+        }
         const voter_ids = url.searchParams.get('voter_ids')?.split(',') || [];
         
         if (!voter_ids.length || voter_ids.length > 50) {
@@ -1277,14 +1276,11 @@ export default {
         
         // Volunteer email is optional for this endpoint
         let volunteer_email = null;
-        try {
-          const user = await authenticateRequest(request, env);
+        const user = getAuthenticatedUser(request, env);
+        if (user) {
           volunteer_email = user.email;
-        } catch (authError) {
-          // Continue without volunteer email if auth fails (for public forms)
-          if (config.debug) {
-            console.log('No authentication provided for pulse opt-in, continuing without volunteer email');
-          }
+        } else if (config.debug) {
+          console.log('No authentication provided for pulse opt-in, continuing without volunteer email');
         }
 
         const db = env.d1;
@@ -1326,7 +1322,13 @@ export default {
     if (normalizedPath === '/activity') {
       // Return recent call activity by authenticated volunteer
       try {
-        const user = await authenticateRequest(request, env);
+        const user = getAuthenticatedUser(request, env);
+        if (!user) {
+          return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
+            status: 401,
+            headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
+          });
+        }
         const email = user.email;
 
         const db = env.d1;

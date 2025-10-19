@@ -1,55 +1,62 @@
 // worker/functions/_utils/verifyAccessJWT.js
-// ✅ Cloudflare Zero Trust JWT verification helper
+// ✅ Cloudflare Zero Trust JWT verification helper using jose library
+
+import { jwtVerify, createRemoteJWKSet } from 'jose';
 
 export async function verifyAccessJWT(request, env) {
-  const jwt =
+  // Verify required environment variables
+  if (!env.POLICY_AUD) {
+    throw new Error('Missing required POLICY_AUD environment variable');
+  }
+  
+  if (!env.TEAM_DOMAIN) {
+    throw new Error('Missing required TEAM_DOMAIN environment variable');
+  }
+
+  // Get JWT from header or cookie
+  const jwt = 
     request.headers.get(env.ACCESS_JWT_HEADER || 'Cf-Access-Jwt-Assertion') ||
     (request.headers.get('Cookie')?.match(/CF_Authorization=([^;]+)/)?.[1]);
 
+  console.log('[JWT DEBUG] Looking for JWT token...');
+  console.log('[JWT DEBUG] JWT found:', !!jwt, jwt ? jwt.substring(0, 50) + '...' : 'none');
+
   if (!jwt) {
-    throw new Error('Missing Access token');
+    throw new Error('Missing required CF Access JWT');
   }
 
-  // Decode payload
-  const [headerB64, payloadB64, signatureB64] = jwt.split('.');
-  const payload = JSON.parse(atob(payloadB64));
+  try {
+    // Create JWKS from team domain - handles key rotation automatically
+    const JWKS = createRemoteJWKSet(new URL(`${env.TEAM_DOMAIN}/cdn-cgi/access/certs`));
+    
+    console.log('[JWT DEBUG] Verifying JWT with:', {
+      issuer: env.TEAM_DOMAIN,
+      audience: env.POLICY_AUD,
+      jwks_url: `${env.TEAM_DOMAIN}/cdn-cgi/access/certs`
+    });
 
-  // Validate audience
-  if (!payload.aud || !payload.aud.includes(env.POLICY_AUD)) {
-    throw new Error('Invalid audience (AUD mismatch)');
+    // Verify the JWT with proper issuer and audience validation
+    const { payload } = await jwtVerify(jwt, JWKS, {
+      issuer: env.TEAM_DOMAIN,
+      audience: env.POLICY_AUD,
+    });
+
+    console.log('[JWT DEBUG] JWT verification successful for:', payload.email);
+    console.log('[JWT DEBUG] Payload:', {
+      email: payload.email,
+      aud: payload.aud,
+      iss: payload.iss,
+      exp: payload.exp
+    });
+
+    // Return payload with email as the main identifier
+    return {
+      email: payload.email,
+      ...payload
+    };
+
+  } catch (error) {
+    console.error('[JWT ERROR] Token verification failed:', error.message);
+    throw new Error(`Invalid token: ${error.message}`);
   }
-
-  // Fetch Cloudflare Access signing keys
-  const teamDomain = env.TEAM_DOMAIN?.replace(/^https?:\/\//, '');
-  const res = await fetch(`https://${teamDomain}/cdn-cgi/access/certs`);
-  const { keys } = await res.json();
-
-  // Verify signature
-  const encoder = new TextEncoder();
-  const data = encoder.encode(`${headerB64}.${payloadB64}`);
-  const signature = Uint8Array.from(
-    atob(signatureB64.replace(/-/g, '+').replace(/_/g, '/')),
-    c => c.charCodeAt(0)
-  );
-
-  const key = await crypto.subtle.importKey(
-    'jwk',
-    keys[0],
-    { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-    false,
-    ['verify']
-  );
-
-  const verified = await crypto.subtle.verify(
-    'RSASSA-PKCS1-v1_5',
-    key,
-    signature,
-    data
-  );
-
-  if (!verified) {
-    throw new Error('JWT signature invalid');
-  }
-
-  return payload; // { email, aud, exp, ... }
 }

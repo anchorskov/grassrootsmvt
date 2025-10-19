@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Streets API</title>
+    <script type="module">
+        import env from '/config/environments.js';
+        
+        async function testStreetsAPI() {
+            try {
+                const result = document.getElementById('result');
+                result.innerHTML = 'Testing streets API...';
+                
+                // Use the same authentication pattern as other pages
+                const apiUrl = env.getApiUrl('streets');
+                console.log('API URL:', apiUrl);
+                
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    credentials: 'include',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        county: 'ALBANY',
+                        city: 'LARAMIE'
+                    })
+                });
+                
+                console.log('Response status:', response.status);
+                console.log('Response headers:', [...response.headers.entries()]);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                console.log('Streets data:', data);
+                
+                result.innerHTML = `
+                    <h3>✅ Streets API Test Results</h3>
+                    <p><strong>Status:</strong> ${response.status} ${response.statusText}</p>
+                    <p><strong>County:</strong> ${data.county}</p>
+                    <p><strong>City:</strong> ${data.city}</p>
+                    <p><strong>Total Streets:</strong> ${data.total}</p>
+                    <p><strong>Sample Streets:</strong></p>
+                    <ul>
+                        ${data.streets.slice(0, 10).map(s => `<li>${s.name} (${s.count} voters)</li>`).join('')}
+                    </ul>
+                    <details>
+                        <summary>Full Response</summary>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    </details>
+                `;
+                
+            } catch (error) {
+                console.error('Streets API test error:', error);
+                document.getElementById('result').innerHTML = `
+                    <h3>❌ Streets API Test Failed</h3>
+                    <p><strong>Error:</strong> ${error.message}</p>
+                    <p>Check browser console for details.</p>
+                `;
+            }
+        }
+        
+        // Auto-run test when page loads
+        window.addEventListener('load', testStreetsAPI);
+        
+        // Also expose for manual testing
+        window.testStreetsAPI = testStreetsAPI;
+    </script>
+</head>
+<body>
+    <h1>Streets API Test</h1>
+    <p>Testing the <code>/api/streets</code> endpoint with ALBANY county and LARAMIE city...</p>
+    
+    <button onclick="testStreetsAPI()">Re-run Test</button>
+    
+    <div id="result" style="margin-top: 20px; padding: 20px; border: 1px solid #ccc; border-radius: 8px;">
+        Loading...
+    </div>
+    
+    <h2>Debug Info</h2>
+    <div id="debug">
+        <p><strong>Current URL:</strong> <span id="currentUrl"></span></p>
+        <p><strong>Environment Config:</strong> <span id="envConfig"></span></p>
+    </div>
+    
+    <script>
+        document.getElementById('currentUrl').textContent = window.location.href;
+        
+        // Show environment config info
+        setTimeout(() => {
+            const envInfo = window.environmentConfig ? 'Loaded' : 'Not loaded';
+            document.getElementById('envConfig').textContent = envInfo;
+        }, 100);
+    </script>
+</body>
+</html>

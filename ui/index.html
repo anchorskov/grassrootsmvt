@@ -27,8 +27,12 @@ async function ensureAccess() {
   // local dev bypass if you use it
   if (env.shouldBypassAuth && env.shouldBypassAuth()) return;
 
-  // Don't double-kick if a navigation is already in progress
-  if (sessionStorage.getItem('access:kicking') === '1') return new Promise(() => {});
+  // Clear any stale authentication flags from previous attempts
+  // This prevents loops when returning from Cloudflare Access
+  const wasKicking = sessionStorage.getItem('access:kicking') === '1';
+  if (wasKicking) {
+    sessionStorage.removeItem('access:kicking');
+  }
 
   // Ask whoami *without* following redirects; if we're not 200, kick
   try {
@@ -42,6 +46,14 @@ async function ensureAccess() {
     // network/other failure: treat as unauthenticated
   }
 
+  // If we just cleared a kicking flag but still aren't authenticated,
+  // it means we returned from Access but authentication failed
+  if (wasKicking) {
+    console.log('Authentication failed after Access redirect');
+    // Don't immediately re-kick; give user a chance to see any error
+    return;
+  }
+
   // Not authenticated ⇒ navigate into Access
   sessionStorage.setItem('access:kicking', '1');
   location.href = buildKickUrl();
@@ -49,7 +61,13 @@ async function ensureAccess() {
 }
 
 // Run on load (before your app does any fetches)
-document.addEventListener('DOMContentLoaded', ensureAccess);
+document.addEventListener('DOMContentLoaded', async () => {
+  await ensureAccess();
+  // After authentication is ensured, show the user status
+  if (window.showAuthenticatedUser) {
+    showAuthenticatedUser();
+  }
+});
 </script>
 <style>
   :root { color-scheme: light dark; }
@@ -362,7 +380,10 @@ async function showAuthenticatedUser() {
   }
 }
 
-document.addEventListener('DOMContentLoaded', showAuthenticatedUser);
+// Expose globally so it can be called from the authentication flow
+window.showAuthenticatedUser = showAuthenticatedUser;
+
+// showAuthenticatedUser is now called after ensureAccess
 </script>
 
 </body>
