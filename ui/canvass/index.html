@@ -1,928 +1,201 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Canvass</title>
-<!-- Ensure environment is available before any other scripts -->
-<script type="module">
-  import env from '/config/environments.js';
-  // Make available to non-module scripts
-  window.environmentConfig = env;
-  // Legacy compatibility for older code paths
-  window.GrassrootsEnv = window.GrassrootsEnv || {
-    getApiUrl: (endpoint, params) => env.getApiUrl(endpoint, params),
-    shouldBypassAuth: () => env.shouldBypassAuth?.() || false,
-    config: env.config
-  };
-</script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Canvass - GrassrootsMVT</title>
 
-<!-- Auth bootstrap: FIRST in <head> -->
-<script type="module">
-import env from '/config/environments.js';
+  <!-- ✅ Single environment + auth bootstrap -->
+  <script type="module">
+    import env from '/config/environments.js';
+    import { ensureAccess, showUserBadge } from '/js/auth-bootstrap.js';
 
-// For debugging: ensure whoami is SAME-ORIGIN
-console.log('🔎 whoami URL:', env.getApiUrl('whoami')); // must be https://volunteers.../api/whoami
+    // Make environment globally available for scripts and inline handlers
+    window.environmentConfig = env;
 
-function buildKick() {
-  const finish = env.getApiUrl('auth/finish', { to: location.href });
-  return env.getApiUrl('ping', { finish }); // → /api/ping?finish=/api/auth/finish?to=...
-}
+    document.addEventListener('DOMContentLoaded', async () => {
+      // 🔐 Cloudflare Access kick (skipped in local dev)
+      await ensureAccess(env);
 
-// Ensure authentication using manual redirect handling to avoid CORS
-await (async function ensureAccess(){
-  if (env.shouldBypassAuth && env.shouldBypassAuth()) return;
-
-  // Clear any stale authentication flags from previous attempts
-  // This prevents loops when returning from Cloudflare Access
-  const wasKicking = sessionStorage.getItem('access:kicking') === '1';
-  if (wasKicking) {
-    sessionStorage.removeItem('access:kicking');
-  }
-
-  try {
-    const r = await fetch(env.getApiUrl('whoami'), {
-      credentials: 'include',
-      redirect: 'manual',
-      headers: { Accept: 'application/json' }
+      // 🪪 Optional: show user info badge if available
+      const badge = document.querySelector('.online-indicator');
+      await showUserBadge(env, badge);
     });
-    if (r.status === 200) return; // already authenticated
-  } catch (err) {
-    console.warn('Auth probe failed (still kicking Access):', err);
-  }
+  </script>
 
-  // If we just cleared a kicking flag but still aren't authenticated,
-  // it means we returned from Access but authentication failed
-  if (wasKicking) {
-    console.log('Authentication failed after Access redirect');
-    // Don't immediately re-kick; give user a chance to see any error
-    return;
-  }
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 12px;
+      position: relative;
+      background: #f9fafb;
+      color: #111827;
+    }
+    h1 {
+      font-size: 1.4rem;
+      margin: 4px 0 12px;
+    }
 
-  sessionStorage.setItem('access:kicking','1');
-  location.href = buildKick();
-  return new Promise(()=>{});
-})();
-</script>
+    /* Small utility classes */
+    .muted { color: #64748b; font-size: 0.9rem; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+    .row > * { flex: 1 1 150px; }
 
-<!-- Load env as a module and expose a back-compat shim for legacy GrassrootsEnv calls -->
-<script type="module">
-  // Import environment configuration (absolute path for nested routes)
-  let environmentConfig;
-  try {
-    const mod = await import('/config/environments.js');
-    environmentConfig = mod.default || mod.environmentConfig || mod;
-  } catch (e) {
-    console.warn('ESM import failed, falling back to global:', e);
-  }
-  
-  window.environmentConfig = environmentConfig;
-  
-  // Shim: legacy pages sometimes call window.GrassrootsEnv.*
-  if (environmentConfig) {
-    const originFrom = () => {
-      try { return new URL(environmentConfig.getApiUrl('ping')).origin; } catch { return location.origin; }
-    };
-    window.GrassrootsEnv = window.GrassrootsEnv || {
-      shouldBypassAuth: () => environmentConfig.shouldBypassAuth(),
-      getApiBaseUrl: () => originFrom(),
-      getApiUrl: (endpointOrPath, params = {}) => {
-        const path = String(endpointOrPath).replace(/^\/?(api\/)?/, '');
-        return environmentConfig.getApiUrl(path, params);
-      },
-      getEnvironmentInfo: () => environmentConfig.config,
-      isLocal: !!environmentConfig?.config?.isLocal
-    };
-  }
-</script>
-<script>
-// Fallback for non-module or failed ESM import: use browser global
-window.environmentConfig = window.environmentConfig || (window.GrassrootsEnv || {});
-</script>
-<!-- apiClient must be loaded as a module so exports work -->
-<script type="module" src="/src/apiClient.js"></script>
-<script src="../shared/streetAutocomplete.js"></script>
-<style>
-  :root { --gap: 10px; }
-  body { font-family: system-ui, sans-serif; margin: 12px; position: relative; }
-  .auth-status { position: fixed; top: 8px; right: 8px; z-index: 100; font-size: 0.875rem; padding: 0.5rem 0.75rem; border-radius: 8px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
-  .card { border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin:12px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); }
-  h1 { font-size: 1.4rem; margin: 4px 0 12px; }
-  .row { display:flex; gap:var(--gap); flex-wrap:wrap; align-items:center; }
-  .row > * { flex:1 1 140px; }
-  label { font-size:.9rem; color:#334155; }
-  input[type=number], input[type=text], select, button {
-    width:100%; font-size:1rem; padding:.7rem .75rem; border:1px solid #cbd5e1; border-radius:10px;
-  }
-  input:disabled {
-    background-color: #f8fafc;
-    color: #64748b;
-    cursor: not-allowed;
-    border-color: #e2e8f0;
-  }
-  button.primary { background:#2563eb; color:white; border:0; font-weight:600; }
-  .muted { color:#64748b }
-  .autocomplete-container { position: relative; }
-  .autocomplete-suggestions { 
-    position: absolute; 
-    top: 100%; 
-    left: 0; 
-    right: 0; 
-    background: white; 
-    border: 2px solid #2563eb; 
-    border-top: none; 
-    border-radius: 0 0 10px 10px; 
-    max-height: 200px; 
-    overflow-y: auto; 
-    z-index: 9999; 
-    display: none; 
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  }
-  .autocomplete-suggestion { 
-    padding: 12px 16px; 
-    cursor: pointer; 
-    border-bottom: 1px solid #f1f5f9; 
-    font-weight: 500;
-    background: white;
-  }
-  .autocomplete-suggestion:hover { background: #f8fafc; border-color: #e2e8f0; }
-  .autocomplete-suggestion:last-child { border-bottom: none; }
-  .person-name { font-weight:700; font-size:1.1rem; color:#1e293b; margin-bottom:4px; }
-  .addr { font-weight:500; color:#475569; font-size:.95rem; }
-  .location-details { font-size:.85rem; color:#64748b; margin-top:2px; }
-  .chip { display:inline-block; border:1px solid #cbd5e1; border-radius:999px; padding:.15rem .5rem; font-size:.8rem; margin-left:6px; }
-  button[disabled] { opacity:.45; cursor:not-allowed; }
-  .muted-chip { border:1px solid #e5e7eb; color:#64748b; }
-  .list > div { padding:10px 0; border-bottom:1px solid #f1f5f9; }
-  .list > div:last-child { border-bottom:0; }
-  .toolbar { display:flex; gap:8px; }
-</style>
+    /* Layout and UI components */
+    .auth-status {
+      position: fixed;
+      top: 8px;
+      right: 8px;
+      z-index: 100;
+      font-size: 0.875rem;
+      padding: 0.5rem 0.75rem;
+      border-radius: 8px;
+      background: #f1f5f9;
+      color: #475569;
+      border: 1px solid #e2e8f0;
+    }
+    .card {
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 12px;
+      margin: 12px 0;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, .04);
+      background: white;
+    }
+    label {
+      display: block;
+      font-size: 0.9rem;
+      color: #334155;
+      margin-bottom: 4px;
+    }
+    input, select, button {
+      width: 100%;
+      font-size: 1rem;
+      padding: .7rem .75rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+      box-sizing: border-box;
+    }
+    button.primary {
+      background: #2563eb;
+      color: white;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .2s ease;
+    }
+    button.primary:hover:not([disabled]) { background: #1d4ed8; }
+    button[disabled] {
+      opacity: .45;
+      cursor: not-allowed;
+    }
+
+    /* Autocomplete styles */
+    .autocomplete-container { position: relative; }
+    .autocomplete-suggestions {
+      position: absolute;
+      top: 100%; left: 0; right: 0;
+      background: white;
+      border: 2px solid #2563eb;
+      border-top: none;
+      border-radius: 0 0 10px 10px;
+      max-height: 200px;
+      overflow-y: auto;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      display: none;
+      z-index: 9999;
+    }
+    .autocomplete-suggestion {
+      padding: 12px 16px;
+      cursor: pointer;
+      border-bottom: 1px solid #f1f5f9;
+      font-weight: 500;
+    }
+    .autocomplete-suggestion:hover {
+      background: #f8fafc;
+    }
+
+    .list > div {
+      padding: 10px 0;
+      border-bottom: 1px solid #f1f5f9;
+    }
+
+    /* Reset button styling */
+    #resetBtn {
+      background: #dc2626 !important;
+      border-color: #dc2626 !important;
+    }
+    #resetBtn:hover:not([disabled]) {
+      background: #b91c1c !important;
+    }
+  </style>
 </head>
 
 <body>
-<!-- Authentication status indicator -->
-<div id="auth-status" class="auth-status">
-  <span class="online-indicator">🔄 Checking connection...</span>
-</div>
-
-<h1>Canvass</h1>
-
-<div class="card">
-  <div class="muted" id="filtersBadge">Loading filters…</div>
-</div>
-
-<div class="card">
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-    <h3 style="margin: 0; color: #1e293b;">Address Lookup</h3>
-    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.9rem; color: #475569;">
-      <input type="checkbox" id="instructionsToggle" style="margin: 0;" checked>
-      Show step-by-step instructions
-    </label>
-  </div>
-  
-  <div id="instructionsPanel" style="background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-    <div id="instructionText" style="font-weight: 500; color: #0369a1;">
-      👋 Click on the Street field below to start
-    </div>
+  <!-- ✅ Auth Status -->
+  <div id="auth-status" class="auth-status">
+    <span class="online-indicator">🔄 Checking connection...</span>
   </div>
 
+  <h1>Canvass</h1>
+
+  <!-- Filters -->
+  <div class="card">
+    <div class="muted" id="filtersBadge">Loading filters…</div>
+  </div>
+
+  <!-- Address Search -->
   <div class="card">
     <div class="row">
       <div class="autocomplete-container">
         <label for="house">House #</label>
-        <input id="house" type="text" placeholder="Select street first" inputmode="numeric" autocomplete="off" disabled />
+        <input id="house" type="text" placeholder="Select street first" inputmode="numeric" disabled />
         <div id="houseSuggestions" class="autocomplete-suggestions"></div>
       </div>
+
       <div class="autocomplete-container">
         <label for="street">Street</label>
         <input id="street" type="text" placeholder="e.g. RAVEN ST" autocomplete="off" />
         <div id="streetSuggestions" class="autocomplete-suggestions"></div>
       </div>
     </div>
-  <div class="row" style="margin-top:8px;">
-    <div>
-      <label for="range">Number range (±)</label>
-      <select id="range">
-        <option>10</option><option selected>20</option><option>30</option><option>50</option>
-      </select>
+
+    <div class="row" style="margin-top:8px;">
+      <div>
+        <label for="range">Number range (±)</label>
+        <select id="range">
+          <option>50</option><option>100</option><option selected>200</option><option>300</option><option>500</option>
+        </select>
+      </div>
+      <div>
+        <label for="limit">Max addresses</label>
+        <select id="limit">
+          <option>5</option><option>20</option><option selected>150</option><option>200</option><option>300</option>
+        </select>
+      </div>
     </div>
-    <div>
-      <label for="limit">Max addresses</label>
-      <select id="limit">
-        <option>10</option><option selected>20</option><option>30</option><option>50</option>
-      </select>
+
+    <div class="row" style="margin-top:10px;">
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <button class="primary" id="btnFind" style="flex: 1; min-width: 120px;">Find nearby</button>
+      </div>
     </div>
+
+    <div id="msg" class="muted" style="margin-top:8px;"></div>
   </div>
-  <div class="row" style="margin-top:10px;">
-    <button class="primary" id="btnFind">Find nearby</button>
+
+  <!-- Results -->
+  <div class="card">
+    <div class="list" id="results"></div>
   </div>
-  <div id="msg" class="muted" style="margin-top:8px;"></div>
-</div>
 
-<div class="card">
-  <div class="list" id="results"></div>
-</div>
+  <!-- ✅ Toast -->
+  <div id="toast"
+       style="position:fixed;left:50%;transform:translateX(-50%);bottom:20px;background:#111827;color:white;padding:8px 12px;border-radius:8px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.2);">
+    Opening call...
+  </div>
 
-<div id="toast" style="position:fixed;left:50%;transform:translateX(-50%);bottom:20px;background:#111827;color:white;padding:8px 12px;border-radius:8px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.2);">Opening call...</div>
-
-<script>
-  // Load API shim (exposes window.apiFetch and API())
-  // Note: Deprecated api-shim.js injection removed - using direct apiClient.js instead
-
-  // Debug snippet: logs token presence and tests /api/ping connectivity
-  (function(){
-    const dbg = document.createElement('script');
-    dbg.textContent = `
-      (async () => {
-        const token = localStorage.getItem("access_token");
-        console.log("🔐 Access token present:", !!token);
-        if (!token) console.warn("No access_token in localStorage — /api/whoami will return 401");
-        
-        // Note: Removed automatic apiFetch call to prevent redirect loops
-        // API connectivity will be tested when user actually performs actions
-        console.log('🚪 Canvass page initialized - API calls will happen on user interaction');
-      })();
-    `;
-    document.head.appendChild(dbg);
-  })();
-  // Build API URLs via environmentConfig; falls back to same-origin /api/*
-  const API = (p) => {
-    const clean = String(p).replace(/^\/?(api\/)?/, '');
-    if (window.environmentConfig?.getApiUrl) return window.environmentConfig.getApiUrl(clean);
-    return '/api/' + clean;
-  };
-
-  function fromQS() {
-    const u = new URL(location.href);
-    const parties = u.searchParams.getAll('parties');
-    const f = {
-      county: (u.searchParams.get('county')||'').toUpperCase() || null,
-      city:   (u.searchParams.get('city')||'').toUpperCase() || null,
-      district_type: u.searchParams.get('district_type') || null,
-      district: u.searchParams.get('district') || null,
-      parties: parties.length ? parties : [],
-    };
-    return f;
-  }
-
-  function showFiltersBadge(f) {
-    const badge = document.getElementById('filtersBadge');
-    badge.textContent = 'Filters: ' + JSON.stringify(f);
-  }
-
-  async function jsonFetch(url, init={}) {
-    console.log('🔗 jsonFetch called with:', url, 'apiFetch available:', !!window.apiFetch);
-    
-    if (url.startsWith('/api') && window.apiFetch) {
-      console.log('📱 Using apiFetch with path:', url.replace('/api/',''));
-      // apiFetch expects just the path part without /api prefix
-      const response = await window.apiFetch(url.replace('/api/',''), init);
-      if (!response.ok) throw new Error('HTTP '+response.status);
-      const ct = response.headers.get('content-type')||'';
-      return ct.includes('application/json') ? response.json() : response.text();
-    }
-    
-    // Fallback: construct full URL to worker
-    let fullUrl = url;
-    if (url.startsWith('/api')) {
-      try {
-        const origin = new URL(window.environmentConfig.getApiUrl('ping')).origin;
-        fullUrl = origin + url;
-      } catch {
-        fullUrl = location.origin + url;
-      }
-      console.log('🔄 Fallback to API origin:', fullUrl);
-    }
-    
-    const r = await fetch(fullUrl, {
-      credentials: 'include',
-      ...init,
-      headers: { 'content-type': 'application/json', ...(init.headers||{}) }
-    });
-    if (!r.ok) throw new Error('HTTP '+r.status);
-    const ct = r.headers.get('content-type')||'';
-    return ct.includes('application/json') ? r.json() : r.text();
-  }
-
-  function setMsg(t) { document.getElementById('msg').textContent = t || ''; }
-
-  async function renderList(rows) {
-    console.log('🎨 renderList called with:', rows);
-    const el = document.getElementById('results');
-    console.log('🎨 Results element:', el);
-    
-    el.innerHTML = '';
-    if (!rows || !rows.length) { 
-      console.log('🎨 No rows to display');
-      el.innerHTML = '<div class="muted">No nearby addresses.</div>'; 
-      return; 
-    }
-    
-    console.log('🎨 Rendering', rows.length, 'rows');
-    
-    // Fetch contact status for all voters
-    let contactStatus = {};
-    try {
-      const voter_ids = rows.map(r => r.voter_id).join(',');
-      console.log('📞 Fetching contact status for voter IDs:', voter_ids);
-      
-      const response = await jsonFetch(`/api/contact/status?voter_ids=${voter_ids}`);
-      if (response.ok) {
-        contactStatus = response.contacts || {};
-        console.log('📞 Contact status loaded:', contactStatus);
-      }
-    } catch (error) {
-      console.warn('⚠️ Failed to load contact status:', error);
-    }
-    
-    for (const r of rows) {
-      const div = document.createElement('div');
-      div.className = 'voter-card'; // Add a class to identify voter cards
-      
-      // Get contact info for this voter
-      const contact = contactStatus[r.voter_id];
-      let contactInfo = '';
-      
-      if (contact) {
-        const contactDate = new Date(contact.created_at).toLocaleDateString();
-        const volunteer = contact.volunteer_email || 'Unknown';
-        const shortVolunteer = volunteer.split('@')[0]; // Show just the username part
-        
-        // Style based on contact outcome
-        let statusColor = '#6b7280'; // gray
-        let statusIcon = '📋';
-        
-        switch (contact.outcome?.toLowerCase()) {
-          case 'connected':
-          case 'contacted':
-          case 'brief':
-            statusColor = '#059669'; // green
-            statusIcon = '✅';
-            break;
-          case 'no_answer':
-          case 'not home':
-            statusColor = '#d97706'; // orange
-            statusIcon = '🚪';
-            break;
-          case 'refused':
-          case 'dnc':
-          case 'do not contact':
-            statusColor = '#dc2626'; // red
-            statusIcon = '🚫';
-            break;
-          case 'moved':
-          case 'wrong_address':
-            statusColor = '#7c3aed'; // purple
-            statusIcon = '📦';
-            break;
-        }
-        
-        contactInfo = `
-          <div class="contact-status" style="margin-top:4px; padding:4px 8px; background:#f8fafc; border-left:3px solid ${statusColor}; font-size:0.85rem;">
-            ${statusIcon} <strong>${contact.outcome}</strong> by ${shortVolunteer} on ${contactDate}
-            ${contact.method ? ` (${contact.method})` : ''}
-          </div>
-        `;
-      }
-      
-      div.innerHTML = `
-        <div class="person-name">${r.name || 'Name Unknown'} <span style="font-size:0.8rem;font-weight:400;color:#64748b;">(ID: ${r.voter_id})</span></div>
-        <div class="addr">${r.address}</div>
-        <div class="location-details">${r.city} ${r.zip}
-          <span class="chip">${r.party||'Unknown Party'}</span>
-          ${r.phone_e164
-            ? `<span class="chip">${r.phone_e164}${r.phone_confidence ? ' ('+r.phone_confidence+')' : ''}</span>`
-            : `<span class="chip muted-chip">no phone</span>`}
-        </div>
-        ${contactInfo}
-        <div class="toolbar" style="margin-top:8px;">
-          <button data-id="${r.voter_id}" data-a="contacted" style="background: #059669; color: white; font-weight: 500;">📋 Contact</button>
-          <button data-id="${r.voter_id}" data-a="no_answer">🚪 Not Home</button>
-          <button data-id="${r.voter_id}" data-a="note">📝 Note</button>
-    <button data-id="${r.voter_id}" data-a="call"
-      class="primary"
-      ${r.phone_e164 ? '' : 'disabled title="No phone on file" aria-disabled="true"'}
-    >Call</button>
-        </div>
-      `;
-      el.appendChild(div);
-    }
-    el.querySelectorAll('button[data-a]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const voter_id = btn.getAttribute('data-id');
-        let outcome = btn.getAttribute('data-a');
-        
-        if (outcome === 'call') {
-          // Prefill call UI and show toast then navigate there
-          try {
-            const pre = { voter_id, prefill: true };
-            sessionStorage.setItem('vol.call_prefill', JSON.stringify(pre));
-            const toast = document.getElementById('toast');
-            toast.style.display = 'block';
-            setTimeout(() => { toast.style.display = 'none'; location.href = '/call.html?voter_id=' + encodeURIComponent(voter_id); }, 700);
-          } catch (e) {
-            alert('Unable to open call UI: ' + e.message);
-          }
-          return;
-        }
-        
-        if (outcome === 'contacted') {
-          // Navigate to dedicated contact page with voter data
-          let voterCard = btn.closest('.voter-card'); // Use the specific class
-          console.log('🔍 Debug: voterCard found:', !!voterCard);
-          console.log('🔍 Debug: button element:', btn);
-          console.log('🔍 Debug: button parent:', btn.parentElement);
-          
-          if (!voterCard) {
-            console.error('🚨 Contact button error: Voter card not found');
-            console.log('🔍 Debug: Trying alternative selector...');
-            
-            // Fallback: try to find the voter card by traversing up
-            let testCard = btn.parentElement;
-            while (testCard && !testCard.querySelector('.person-name')) {
-              testCard = testCard.parentElement;
-              if (testCard === document.body) break; // Safety check
-            }
-            
-            if (testCard && testCard.querySelector('.person-name')) {
-              console.log('🔍 Debug: Found voter card via fallback method');
-              voterCard = testCard; // Assign to the voterCard variable
-            } else {
-              alert('Error: Could not find voter card. Please try again.');
-              return;
-            }
-          }
-          
-          const voterNameElement = voterCard.querySelector('.person-name');
-          const voterAddressElement = voterCard.querySelector('.addr');
-          const locationDetailsElement = voterCard.querySelector('.location-details');
-          
-          console.log('🔍 Debug elements found:', {
-            voterName: !!voterNameElement,
-            voterAddress: !!voterAddressElement, 
-            locationDetails: !!locationDetailsElement
-          });
-          
-          if (!voterNameElement || !voterAddressElement || !locationDetailsElement) {
-            console.error('🚨 Contact button error: Required voter elements not found');
-            console.log('🔍 Debug HTML structure:', voterCard?.innerHTML || 'voterCard is null');
-            alert('Error: Could not find voter information. Please try again.');
-            return;
-          }
-          
-          const voterName = voterNameElement.textContent.split(' (ID:')[0];
-          const voterAddress = voterAddressElement.textContent;
-          const locationDetails = locationDetailsElement.textContent;
-          
-          // Parse city, zip, and party from location details
-          const parts = locationDetails.split('•').map(p => p.trim());
-          const cityZip = parts[0] || '';
-          const [city, zip] = cityZip.split(' ').filter(p => p);
-          const party = parts.find(p => !p.includes('phone') && !cityZip.includes(p)) || '';
-          const phone = parts.find(p => p.includes('+1') || p.includes('phone')) || '';
-          
-          const contactUrl = `/contact?${new URLSearchParams({
-            voter_id: voter_id,
-            name: voterName,
-            address: voterAddress,
-            city: city || '',
-            zip: zip || '',
-            party: party.replace(/[^\w\s]/g, '').trim(),
-            phone: phone.replace('no phone', '')
-          }).toString()}`;
-          
-          window.location.href = contactUrl;
-          return;
-        }
-        
-        if (outcome === 'note') {
-          const t = prompt('Note for this address / voter?');
-          if (!t) return;
-          outcome = 'note';
-          comments = t;
-        }
-        
-        // Handle simple outcomes (no_answer, etc.)
-        let comments = null;
-        try {
-          await jsonFetch(API('/complete'), { method:'POST', body: JSON.stringify({ voter_id, outcome, comments }) });
-          btn.closest('div').querySelectorAll('button').forEach(b => b.disabled = true);
-        } catch (e) {
-          alert('Save failed: '+e.message);
-        }
-      });
-    });
-  }
-
-  async function findNearby() {
-    const house = Number(document.getElementById('house').value || 0);
-    const street = (document.getElementById('street').value || '').trim().toUpperCase();
-    const range  = Number(document.getElementById('range').value);
-    const limit  = Number(document.getElementById('limit').value);
-    
-    console.log('🔍 findNearby called with:', { house, street, range, limit });
-    
-    if (!house || !street) {
-      setMsg('Enter a house number and street.'); return;
-    }
-    setMsg('Searching…');
-    const filters = fromQS();
-    
-    console.log('🔍 Making API call with filters:', filters);
-    console.log('🔍 API URL will be:', API('/canvass/nearby'));
-    
-    try {
-      const requestBody = { filters, house, street, range, limit };
-      console.log('🔍 Request body:', requestBody);
-      
-      const j = await jsonFetch(API('/canvass/nearby'), {
-        method: 'POST',
-        body: JSON.stringify(requestBody)
-      });
-      
-      console.log('🔍 API response:', j);
-      console.log('🔍 Response rows:', j.rows);
-      
-      await renderList(j.rows || []);
-      setMsg(`Found ${j.rows?.length||0} nearby addresses.`);
-    } catch (e) {
-      console.error('🔍 Error in findNearby:', e);
-      setMsg('Error: '+e.message);
-    }
-  }
-
-  // Enable house number field
-  function enableHouseField() {
-    const houseInput = document.getElementById('house');
-    houseInput.disabled = false;
-    houseInput.placeholder = "e.g. 5201";
-    houseInput.style.backgroundColor = "";
-    houseInput.style.cursor = "";
-  }
-
-  // Disable house number field  
-  function disableHouseField() {
-    const houseInput = document.getElementById('house');
-    const houseSuggestions = document.getElementById('houseSuggestions');
-    
-    houseInput.disabled = true;
-    houseInput.value = "";
-    houseInput.placeholder = "Select street first";
-    houseSuggestions.style.display = 'none';
-  }
-
-  // Function to populate house numbers based on selected street
-  async function populateHouseNumbers(streetName) {
-    const houseInput = document.getElementById('house');
-    const houseSuggestions = document.getElementById('houseSuggestions');
-    
-    console.log('🏠 Loading house numbers for street:', streetName);
-    
-    try {
-      const filters = fromQS();
-      
-      // API call to get addresses on this specific street
-      const nearbyUrl = (window.environmentConfig
-        ? window.environmentConfig.getApiUrl('canvass/nearby')
-        : new URL('/api/canvass/nearby', location.origin).toString());
-      const response = await fetch(nearbyUrl, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filters, street: streetName, limit: 100 })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
-      const data = await response.json();
-      console.log('📡 House numbers API response:', data);
-      
-      if (data.rows && data.rows.length > 0) {
-        // Extract house numbers from addresses
-        const houseNumbers = [...new Set(data.rows.map(r => {
-          const match = r.address.match(/^(\d+)/);
-          return match ? match[1] : null;
-        }).filter(Boolean))].sort((a, b) => parseInt(a) - parseInt(b));
-        
-        console.log('🏠 Available house numbers:', houseNumbers);
-        
-        // Set up house number autocomplete
-        setupHouseAutocomplete(houseNumbers);
-      }
-    } catch (error) {
-      console.error('❌ Failed to load house numbers:', error);
-    }
-  }
-
-  // Function to set up house number autocomplete
-  function setupHouseAutocomplete(houseNumbers) {
-    const houseInput = document.getElementById('house');
-    const houseSuggestions = document.getElementById('houseSuggestions');
-    
-    console.log('🏠 Setting up house autocomplete with numbers:', houseNumbers);
-    
-    // Remove any existing event listeners (prevent duplicates)
-    const newHouseInput = houseInput.cloneNode(true);
-    houseInput.parentNode.replaceChild(newHouseInput, houseInput);
-    
-    // Show house numbers on focus (only if enabled)
-    newHouseInput.addEventListener('focus', function() {
-      if (!this.disabled && houseNumbers && houseNumbers.length > 0) {
-        houseSuggestions.innerHTML = houseNumbers.slice(0, 15).map(num => 
-          `<div class="autocomplete-suggestion" data-house="${num}">${num}</div>`
-        ).join('');
-        houseSuggestions.style.display = 'block';
-        houseSuggestions.style.backgroundColor = '#fef3c7'; // Light yellow highlight
-        console.log('✅ House numbers dropdown shown');
-      }
-    });
-    
-    // Filter house numbers as user types (only if enabled)
-    newHouseInput.addEventListener('input', function() {
-      if (this.disabled) return;
-      
-      const value = this.value;
-      if (houseNumbers && houseNumbers.length > 0) {
-        if (value.length === 0) {
-          // Show all house numbers
-          houseSuggestions.innerHTML = houseNumbers.slice(0, 15).map(num => 
-            `<div class="autocomplete-suggestion" data-house="${num}">${num}</div>`
-          ).join('');
-          houseSuggestions.style.display = 'block';
-        } else {
-          // Filter house numbers
-          const matches = houseNumbers.filter(num => num.startsWith(value)).slice(0, 15);
-          if (matches.length > 0) {
-            houseSuggestions.innerHTML = matches.map(num => 
-              `<div class="autocomplete-suggestion" data-house="${num}">${num}</div>`
-            ).join('');
-            houseSuggestions.style.display = 'block';
-          } else {
-            houseSuggestions.style.display = 'none';
-          }
-        }
-      }
-    });
-    
-    // Handle house number clicks
-    houseSuggestions.addEventListener('click', function(e) {
-      if (e.target.classList.contains('autocomplete-suggestion')) {
-        console.log('🖱️ Clicked house number:', e.target.dataset.house);
-        if (e.target.dataset.house) {
-          newHouseInput.value = e.target.dataset.house;
-          houseSuggestions.style.display = 'none';
-          
-          // Update instructions when house is selected
-          updateInstruction('houseSelected');
-          
-          newHouseInput.focus();
-        }
-      }
-    });
-    
-    // Hide house suggestions when clicking outside
-    document.addEventListener('click', function(e) {
-      if (!newHouseInput.contains(e.target) && !houseSuggestions.contains(e.target)) {
-        houseSuggestions.style.display = 'none';
-      }
-    });
-    
-    // Prevent interaction when disabled
-    newHouseInput.addEventListener('click', function(e) {
-      if (this.disabled) {
-        e.preventDefault();
-        console.log('🚫 House field is disabled - select street first');
-      }
-    });
-  }
-
-  document.getElementById('btnFind').addEventListener('click', findNearby);
-  
-  // QoL: Enter on street field triggers search
-  const streetEl = document.getElementById('street');
-  document.getElementById('street').addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); findNearby(); }
-  });
-  // Auto-uppercase input to reduce mismatches
-  streetEl.addEventListener('input', () => {
-    const pos = streetEl.selectionStart;
-    streetEl.value = (streetEl.value || '').toUpperCase();
-    streetEl.selectionStart = streetEl.selectionEnd = pos;
-  });
-
-  // Initialize reusable street autocomplete component
-  console.log('🏗️ Initializing StreetAutocomplete component...');
-  
-  const queryParams = fromQS();
-  console.log('🌍 Query params:', queryParams);
-  console.log('🌍 County/City check:', { county: queryParams.county, city: queryParams.city });
-  console.log('🔧 API client available:', { 
-    apiPost: !!window.apiPost,
-    type: typeof window.apiPost 
-  });
-  
-  const streetAutocomplete = new StreetAutocomplete({
-    streetInputId: 'street',
-    suggestionsId: 'streetSuggestions',
-    maxSuggestions: 100, // Show more streets for better scrolling
-    apiRequest: async (body) => {
-      console.log('🔗 StreetAutocomplete calling API with:', body);
-      // Prefer centralized client so auth+cookies+re-auth are consistent
-      return window.apiPost('streets', body);
-    },
-    getCounty: () => {
-      const county = fromQS().county;
-      console.log('🏛️ getCounty() returning:', county);
-      return county;
-    },
-    getCity: () => {
-      const city = fromQS().city;
-      console.log('🏙️ getCity() returning:', city);
-      return city;
-    },
-    onStreetSelected: (streetName) => {
-      // Enable house number field
-      enableHouseField();
-      
-      // Update instructions when street is selected
-      updateInstruction('streetSelected');
-      
-      // Load house numbers for this street
-      setTimeout(() => {
-        populateHouseNumbers(streetName);
-      }, 100);
-    },
-    onHouseFieldChange: (enabled) => {
-      if (enabled) {
-        enableHouseField();
-      } else {
-        disableHouseField();
-      }
-    }
-  });
-  
-  // Instructions system
-  const instructionsToggle = document.getElementById('instructionsToggle');
-  const instructionsPanel = document.getElementById('instructionsPanel');
-  const instructionText = document.getElementById('instructionText');
-  
-  console.log('🎛️ Instructions elements found:', {
-    toggle: !!instructionsToggle,
-    panel: !!instructionsPanel, 
-    text: !!instructionText
-  });
-  
-  // Instructions state management
-  let currentStep = 'street';
-  const instructions = {
-    street: '👋 Click on the Street field below to start',
-    streetFocused: '📝 Type or select a street name from the blue dropdown',
-    streetSelected: '🏠 Great! Now select a house number from the yellow dropdown above',
-    houseSelected: '🔍 Perfect! Click "Find nearby" to search for voters',
-    searching: '⏳ Searching for nearby voters...',
-    results: '✅ Found results! Review the voters below and take action',
-    noResults: '❌ No voters found. Try adjusting the address or range'
-  };
-  
-  function updateInstruction(step) {
-    if (!instructionsToggle.checked) return;
-    currentStep = step;
-    instructionText.textContent = instructions[step] || instructions.street;
-    console.log('📋 Instruction updated to:', step, '→', instructions[step]);
-  }
-  
-  // Toggle instructions panel
-  instructionsToggle.addEventListener('change', () => {
-    console.log('🎛️ Instructions toggle changed to:', instructionsToggle.checked);
-    if (instructionsToggle.checked) {
-      instructionsPanel.style.display = 'block';
-      updateInstruction(currentStep);
-      console.log('✅ Instructions panel shown');
-    } else {
-      instructionsPanel.style.display = 'none';
-      console.log('❌ Instructions panel hidden');
-    }
-  });
-  
-  // Initialize with instructions enabled
-  updateInstruction('street');
-  
-  // Add instruction event listeners to existing elements
-  const streetInput = document.getElementById('street');
-  const houseInput = document.getElementById('house');
-  const btnFind = document.getElementById('btnFind');
-  
-  // Street field events
-  streetInput.addEventListener('focus', () => {
-    // Only update to streetFocused if we're at the initial street step
-    // Don't revert if user has already selected a street
-    if (currentStep === 'street' || (currentStep === 'streetFocused' && !streetInput.value.trim())) {
-      updateInstruction('streetFocused');
-    }
-  });
-  
-  // We'll handle street selection in the dropdown click handler above
-  // Only update instructions for manual typing if it's a reasonable length
-  streetInput.addEventListener('input', () => {
-    const value = streetInput.value.trim();
-    if (value.length > 3) {
-      // Only update if they've typed a substantial street name
-      // This helps differentiate from dropdown selections
-      setTimeout(() => {
-        if (streetInput.value.trim() === value && value.length > 3) {
-          updateInstruction('streetSelected');
-        }
-      }, 500); // Small delay to see if they're still typing
-    }
-  });
-  
-  // House field events  
-  houseInput.addEventListener('focus', () => {
-    if (!houseInput.disabled) {
-      // Don't change instruction on focus, keep current state
-    }
-  });
-  
-  // We'll handle house selection in the dropdown click handler above
-  // Only update for manual typing
-  houseInput.addEventListener('input', () => {
-    const value = houseInput.value.trim();
-    if (value.length > 0) {
-      setTimeout(() => {
-        if (houseInput.value.trim() === value && value.length > 0) {
-          updateInstruction('houseSelected');
-        }
-      }, 300);
-    }
-  });
-  
-  // Find button click
-  btnFind.addEventListener('click', () => {
-    updateInstruction('searching');
-    // Results will be updated by monitoring the results div
-  });
-  
-  // Monitor results div for changes
-  const resultsDiv = document.getElementById('results');
-  const observer = new MutationObserver(() => {
-    if (instructionsToggle.checked) {
-      const hasResults = resultsDiv.children.length > 0 && 
-                        !resultsDiv.textContent.includes('No nearby addresses');
-      if (hasResults) {
-        updateInstruction('results');
-      } else if (resultsDiv.textContent.includes('No nearby addresses')) {
-        updateInstruction('noResults');
-      }
-    }
-  });
-  observer.observe(resultsDiv, { childList: true, subtree: true });
-  
-  const f = fromQS();
-  showFiltersBadge(f);
-</script>
-
-<!-- Ensure the environment and auth load once per page -->
-<script type="module">
-  import env from '/config/environments.js';
-  import { ensureAccess, showUserBadge } from '/js/auth-bootstrap.js';
-  import { StreetAutocomplete } from '/js/streetAutocomplete.js';
-
-  document.addEventListener('DOMContentLoaded', async () => {
-    // One-time auth kick (no loops, same-origin)
-    await ensureAccess(env);
-
-    // Optional: show badge if present on page
-    const badge = document.querySelector('.online-indicator');
-    await showUserBadge(env, badge);
-
-    // Wire street autocomplete
-    const params = new URLSearchParams(location.search);
-    const county = params.get('county') || '';
-    const city   = params.get('city')   || '';
-    const input  = document.querySelector('#street');
-    const house  = document.querySelector('#house');
-    if (input) {
-      const ac = new StreetAutocomplete(input, {
-        minChars: 2,
-        onSelect(value) {
-          if (house) house.focus();
-        }
-      });
-      // Include county/city on the query sent to the Worker
-      ac.search = async function(q) {
-        const r = await fetch(env.getApiUrl('streets'), {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type':'application/json' },
-          body: JSON.stringify({ county, city, q })
-        });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const data = await r.json();
-        this.suggestions = (data.streets || []).map(s => s.name || s);
-        this.render();
-      };
-    }
-  });
-</script>
+  <!-- ✅ Main canvass logic -->
+  <script type="module" src="/canvass/canvass.js"></script>
+</body>
+</html>
