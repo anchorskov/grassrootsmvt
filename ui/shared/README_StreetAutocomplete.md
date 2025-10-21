@@ -7,13 +7,16 @@ The `StreetAutocomplete` component provides intelligent street name autocomplete
 - **Complete Coverage**: Loads ALL streets for a county/city (e.g., 2,757 streets for Casper vs 88 from limited API)
 - **Smart Caching**: One API call per county/city, then instant client-side filtering
 - **Progressive Enhancement**: House field management, error handling, accessible UI
+- **On-Focus Loading**: Click empty field to show all available streets for browsing
+- **Type-to-Filter**: As you type, suggestions filter in real-time ("zoom to street name")
+- **Scrollable Results**: Navigate through street list with scroll or keyboard
 - **Reusable**: Works across all forms (contact, canvass, staging, etc.)
 
 ## Quick Start
 
 ### 1. Include the Script
 ```html
-<script src="../shared/streetAutocomplete.js"></script>
+<script src="/shared/streetAutocomplete.js"></script>
 ```
 
 ### 2. HTML Structure

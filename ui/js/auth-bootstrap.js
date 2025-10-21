@@ -1,56 +1,98 @@
-// ui/js/auth-bootstrap.js
-// One-login bootstrap using same-origin Access (Cloudflare Zero Trust).
-// Usage (per page):
-//   import env from '/config/environments.js';
-//   import { ensureAccess, showUserBadge } from '/js/auth-bootstrap.js';
-//   await ensureAccess(env);
-//   await showUserBadge(env, document.querySelector('.online-indicator'));
+// /ui/js/auth-bootstrap.js
+//
+// Provides simple authentication bootstrap for Cloudflare Access integration
+// Works in both local dev (bypass) and production environments.
+//
 
-export async function ensureAccess(env) {
-  try {
-    if (env.shouldBypassAuth && env.shouldBypassAuth()) return;
-    const r = await fetch(env.getApiUrl('whoami'), {
-      credentials: 'include',
-      redirect: 'manual',
-      headers: { 'Accept': 'application/json' }
-    });
-    if (r.status === 200) return; // already authenticated
-  } catch (_) {
-    // ignore; fall through to kick
-  }
-  // Kick into Access with a same-origin finish
-  const finish = env.getApiUrl('auth/finish', { to: location.href });
-  const kick = env.getApiUrl('ping', { finish });
-  location.href = kick;
-  // Halt further JS on this page load
-  await new Promise(() => {});
+/**
+ * Check if we're running in local dev mode.
+ * Local overrides can also be set via localStorage.GRMVT_DEV = "1"
+ */
+export function isLocalDev(env) {
+  const isDevEnv =
+    env?.config?.isLocal ||
+    env?.config?.ENVIRONMENT === 'development' ||
+    location.hostname.includes('localhost') ||
+    location.hostname.startsWith('127.') ||
+    localStorage.getItem('GRMVT_DEV') === '1';
+  return !!isDevEnv;
 }
 
-export async function showUserBadge(env, indicatorEl) {
-  if (!indicatorEl) return;
+/**
+ * Ensure user is authenticated through Cloudflare Access.
+ * In dev mode: returns immediately (no redirect)
+ * In production: calls /api/ping → /api/auth/finish as needed
+ */
+export async function ensureAccess(env) {
+  if (isLocalDev(env)) {
+    console.log('🧰 [Auth] Local dev detected — bypassing Access');
+    return;
+  }
+
+  console.log('🔐 [Auth] Checking Cloudflare Access authentication…');
+
+  const pingUrl = env.getApiUrl('ping');
+  const whoamiUrl = env.getApiUrl('whoami');
+  const finishUrl = env.getApiUrl('auth/finish', { to: location.href });
+
   try {
-    if (env.shouldBypassAuth && env.shouldBypassAuth()) {
-      const envLabel = env.config?.isLocal ? ' (Local)' : '';
-      indicatorEl.textContent = `✅ Authenticated${envLabel}`;
-      indicatorEl.parentElement.style.background = '#dcfce7';
-      indicatorEl.parentElement.style.color = '#166534';
+    const res = await fetch(whoamiUrl, {
+      credentials: 'include',
+      redirect: 'manual',
+      headers: { Accept: 'application/json' },
+    });
+
+    if (res.status === 200) {
+      console.log('✅ [Auth] Already authenticated');
       return;
     }
-    const r = await fetch(env.getApiUrl('whoami'), {
-      credentials: 'include',
-      headers: { 'Accept': 'application/json' }
-    });
-    if (r.ok) {
-      const data = await r.json();
-      if (data?.ok && data.email) {
-        indicatorEl.textContent = `✅ Signed in as: ${data.email}`;
-        indicatorEl.parentElement.style.background = '#dcfce7';
-        indicatorEl.parentElement.style.color = '#166534';
-        return;
-      }
+
+    if (res.status === 401 || res.type === 'opaqueredirect') {
+      console.log('🚪 [Auth] Not authenticated — redirecting to Access');
+      sessionStorage.setItem('access:kicking', '1');
+      location.href = `${pingUrl}?finish=${encodeURIComponent(finishUrl)}`;
+      return new Promise(() => {}); // pause execution until redirected
     }
-  } catch (_) {}
-  indicatorEl.textContent = '⚠️ Not signed in';
-  indicatorEl.parentElement.style.background = '#fef3c7';
-  indicatorEl.parentElement.style.color = '#92400e';
+  } catch (err) {
+    console.warn('⚠️ [Auth] Auth check failed:', err);
+  }
+}
+
+/**
+ * Display authenticated user’s email or dev mode label.
+ * @param {object} env - Environment config object
+ * @param {HTMLElement} el - Target element to update (e.g., .online-indicator)
+ */
+export async function showUserBadge(env, el) {
+  if (!el) return;
+  if (isLocalDev(env)) {
+    el.textContent = '🧰 Dev Mode (Access bypassed)';
+    el.style.color = '#475569';
+    return;
+  }
+
+  try {
+    const res = await fetch(env.getApiUrl('whoami'), {
+      credentials: 'include',
+      headers: { Accept: 'application/json' },
+    });
+
+    if (res.ok) {
+      const j = await res.json();
+      if (j && j.email) {
+        el.textContent = `👤 ${j.email}`;
+        el.style.color = '#065f46';
+      } else {
+        el.textContent = '⚠️ Unknown user';
+        el.style.color = '#92400e';
+      }
+    } else {
+      el.textContent = '🚫 Not authenticated';
+      el.style.color = '#991b1b';
+    }
+  } catch (err) {
+    el.textContent = '⚠️ Error loading identity';
+    el.style.color = '#9a3412';
+    console.warn('[Auth] showUserBadge failed:', err);
+  }
 }

@@ -1,65 +1,86 @@
 // ui/src/apiClient.js
+// Unified API client for GrassrootsMVT
+// Handles credentials, dev bypass, Access redirects, and consistent JSON parsing
 
-let environmentConfig;
+import * as env from '../config/environments.js'; // keep ESM consistency
+const { getApiUrl, shouldBypassAuth } = env;
 
-// Load env helper (absolute path for production). If it fails, we’ll fall back.
-async function loadEnvironmentConfig() {
-  if (environmentConfig) return environmentConfig;
-  try {
-    const mod = await import('/config/environments.js');
-    environmentConfig = mod.default || mod.environmentConfig || mod;
-  } catch (e) {
-    console.warn('ENV import failed, using fallback', e);
-    environmentConfig = null;
-  }
-  return environmentConfig;
-}
+/**
+ * Generic fetch wrapper with proper credentials and error normalization.
+ */
+export async function apiFetch(endpoint, options = {}) {
+  const url = getApiUrl(endpoint, options.params);
+  const creds = shouldBypassAuth() ? 'omit' : 'include';
 
-function accessKick() {
-  if (environmentConfig?.shouldBypassAuth && environmentConfig.shouldBypassAuth()) return;
-  const finish = environmentConfig.getApiUrl('auth/finish', { to: location.href });
-  const kick   = environmentConfig.getApiUrl('ping', { finish });
-  window.location.replace(kick);
-}
-
-export async function apiFetch(path, options = {}) {
-  if (!environmentConfig) {
-    await loadEnvironmentConfig();
-  }
-  const url = environmentConfig.getApiUrl(path);
   const res = await fetch(url, {
-    credentials: 'include',
-    redirect: 'manual', // Prevent automatic Access redirects in XHR
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) }
+    method: options.method || 'GET',
+    credentials: creds,
+    headers: {
+      Accept: 'application/json',
+      ...(options.json ? { 'Content-Type': 'application/json' } : {}),
+      ...(options.headers || {})
+    },
+    body: options.json ? JSON.stringify(options.json) : options.body
   });
-  if (res.status === 401 || res.status === 403) accessKick();
-  return res;
-}
 
-export async function apiGet(endpoint, params) {
-  const res = await apiFetch(endpoint, { params });
-  if (!res.ok) throw new Error(`GET ${endpoint} ${res.status}`);
-  const ct = res.headers.get('content-type') || '';
-  return ct.includes('application/json') ? res.json() : res.text();
-}
-
-export async function apiPost(endpoint, body) {
-  const res = await apiFetch(endpoint, { method: 'POST', body: JSON.stringify(body || {}) });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    const err = new Error(`POST ${endpoint} ${res.status}`);
-    err.body = text;
-    throw err;
+  // Handle Access re-auth in production
+  if ((res.status === 401 || res.status === 403) && !shouldBypassAuth()) {
+    const finish = encodeURIComponent('/api/auth/finish?to=' + location.href);
+    window.location.href = getApiUrl('ping', { finish });
+    return new Promise(() => {}); // suspend navigation
   }
-  const ct = res.headers.get('content-type') || '';
-  return ct.includes('application/json') ? res.json() : res.text();
+
+  // Return JSON or text fallback
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
 }
 
-// Export and expose globals for non-module pages
-if (typeof window !== 'undefined') {
-  window.loadEnvironmentConfig = loadEnvironmentConfig;
-  window.apiFetch = apiFetch;
-  window.apiGet = apiGet;
-  window.apiPost = apiPost;
+/**
+ * Convenience POST shortcut.
+ */
+export async function apiPost(endpoint, data) {
+  return apiFetch(endpoint, { method: 'POST', json: data });
 }
+
+/**
+ * Retrieve current authenticated (or dev) user.
+ */
+export async function whoami() {
+  const res = await apiFetch('whoami');
+  return res?.user || null;
+}
+
+/**
+ * Dev-safe bootstrap: ensure Access cookie or bypass for local.
+ */
+export async function kickAccessThenWhoami() {
+  const apiBase = getApiUrl('').replace(/\/$/, '');
+  const isLocal = apiBase.includes('localhost') || apiBase.includes('127.0.0.1');
+
+  // Bypass Cloudflare Access when local
+  if (isLocal || shouldBypassAuth()) {
+    console.log('🧩 Dev mode: skipping Access redirect');
+    return whoami();
+  }
+
+  try {
+    const finish = encodeURIComponent('/api/auth/finish?to=' + location.href);
+    await fetch(`${apiBase}/ping?finish=${finish}`, { credentials: 'include' });
+  } catch (e) {
+    console.warn('⚠️ Access kick failed:', e);
+  }
+
+  return whoami();
+}
+
+// Default export for legacy imports
+export default {
+  apiFetch,
+  apiPost,
+  whoami,
+  kickAccessThenWhoami
+};

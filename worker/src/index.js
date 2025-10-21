@@ -9,10 +9,12 @@ import devAuthRoutes from './routes/dev-auth.js';
 import testD1 from './routes/test-d1.js';
 import canvassNearby from './routes/canvass-nearby.js';
 import contactStatus from './routes/contact-status.js';
+import next from './routes/next.js';
+import complete from './routes/complete.js';
 import { handleWithCors } from './utils/cors.js';
 
 // Collect all route definitions
-const routes = [whoami, streets, devCall, testD1, canvassNearby, contactStatus, ...devAuthRoutes];
+const routes = [whoami, streets, devCall, testD1, canvassNearby, contactStatus, next, complete, ...devAuthRoutes];
 
 /**
  * Central router for all API requests.
@@ -30,10 +32,26 @@ export default {
     return handleWithCors(async (req, environment) => {
       // --- Route matching ---
       for (const route of routes) {
-        if (url.pathname.startsWith(route.path)) {
-          const res = await route.handler(req, environment);
-          // Each route handler returns a valid Response
-          return res;
+        if (url.pathname === route.path || url.pathname.startsWith(route.path + '/')) {
+          // Check if method is allowed
+          const allowedMethods = Array.isArray(route.method) ? route.method : [route.method];
+          if (allowedMethods.includes(req.method)) {
+            const res = await route.handler(req, environment);
+            // Each route handler returns a valid Response
+            return res;
+          } else {
+            // Method not allowed for this route
+            return new Response(JSON.stringify({ 
+              error: 'Method Not Allowed',
+              allowed: allowedMethods 
+            }), {
+              status: 405,
+              headers: { 
+                'Content-Type': 'application/json',
+                'Allow': allowedMethods.join(', ')
+              },
+            });
+          }
         }
       }
 

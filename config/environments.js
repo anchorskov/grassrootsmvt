@@ -77,3 +77,23 @@ window.GrassrootsEnv = {
 // Also support direct property access for backwards compatibility
 window.GrassrootsEnv.isLocal = detectEnvironment().isLocal;
 window.GrassrootsEnv.apiBaseUrl = getApiBaseUrl();
+
+// ES6 module exports for modern import syntax
+export {
+  detectEnvironment,
+  getApiBaseUrl,
+  getApiUrl,
+  shouldBypassAuth,
+  getEnvironmentInfo
+};
+
+// Default export for convenience
+export default {
+  detectEnvironment,
+  getApiBaseUrl,
+  getApiUrl,
+  shouldBypassAuth,
+  getEnvironmentInfo,
+  isLocal: detectEnvironment().isLocal,
+  apiBaseUrl: getApiBaseUrl()
+};

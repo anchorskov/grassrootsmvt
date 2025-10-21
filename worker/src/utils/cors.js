@@ -54,7 +54,7 @@ export function getCorsHeaders(req, env) {
 
   headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS';
   headers['Access-Control-Allow-Headers'] =
-    'Origin, X-Requested-With, Content-Type, Accept, Authorization';
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization, Pragma, Cache-Control';
   headers['Access-Control-Allow-Credentials'] = 'true';
   headers['Access-Control-Max-Age'] = '600';
   headers['Vary'] = 'Origin';

@@ -1,190 +1,55 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="robots" content="noindex, nofollow" />
-  <title>Volunteer Call</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Volunteer Call</title>
 
-  <!-- Auth bootstrap: FIRST in <head> -->
-  <script type="module">
+<!-- ✅ Single environment + auth bootstrap -->
+<script type="module">
   import env from '/config/environments.js';
+  import { ensureAccess, showUserBadge } from '/js/auth-bootstrap.js';
 
-  // For debugging: ensure whoami is SAME-ORIGIN
-  console.log('🔎 whoami URL:', env.getApiUrl('whoami')); // must be https://volunteers.../api/whoami
+  // Make environment globally available for scripts and inline handlers
+  window.environmentConfig = env;
 
-  function buildKick() {
-    const finish = env.getApiUrl('auth/finish', { to: location.href });
-    return env.getApiUrl('ping', { finish }); // → /api/ping?finish=/api/auth/finish?to=...
-  }
+  document.addEventListener('DOMContentLoaded', async () => {
+    // 🔐 Cloudflare Access kick (skipped in local dev)
+    await ensureAccess(env);
 
-  // Ensure authentication using manual redirect handling to avoid CORS
-  await (async function ensureAccess(){
-    if (env.shouldBypassAuth && env.shouldBypassAuth()) return;
-
-    // Clear any stale authentication flags from previous attempts
-    // This prevents loops when returning from Cloudflare Access
-    const wasKicking = sessionStorage.getItem('access:kicking') === '1';
-    if (wasKicking) {
-      sessionStorage.removeItem('access:kicking');
-    }
-
-    try {
-      const r = await fetch(env.getApiUrl('whoami'), {
-        credentials: 'include',
-        redirect: 'manual',
-        headers: { Accept: 'application/json' }
-      });
-      if (r.status === 200) return; // already authenticated
-    } catch (err) {
-      console.warn('Auth probe failed (still kicking Access):', err);
-    }
-
-    // If we just cleared a kicking flag but still aren't authenticated,
-    // it means we returned from Access but authentication failed
-    if (wasKicking) {
-      console.log('Authentication failed after Access redirect');
-      // Don't immediately re-kick; give user a chance to see any error
-      return;
-    }
-
-    sessionStorage.setItem('access:kicking','1');
-    location.href = buildKick();
-    return new Promise(()=>{});
-  })();
-  </script>
-
-  <style>
-    :root { color-scheme: light dark; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 1rem; max-width: 880px; }
-    .card { border:1px solid #e5e7eb; border-radius: 12px; padding: 1rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
-    .row { display:flex; gap:.75rem; flex-wrap: wrap; }
-    .row > * { flex:1 1 220px; }
-    label { display:block; margin:.4rem 0 .25rem; font-weight:600; }
-    select, input[type=text], textarea { width:100%; padding:.6rem; border:1px solid #cbd5e1; border-radius:8px; }
-    textarea { min-height: 90px; }
-    .muted { color:#64748b; }
-    .btns { display:flex; gap:.75rem; flex-wrap: wrap; margin-top:.75rem; align-items:center; }
-    button { padding:.7rem 1.1rem; border-radius:10px; border:0; font-weight:700; cursor:pointer; }
-    button.primary { background:#0ea5e9; color:white; }
-    button.secondary { background:#e2e8f0; color:#0f172a; }
-    button[disabled] { opacity:.5; cursor:not-allowed; }
-    a { color:#0ea5e9; text-decoration: none; }
-    #voterCard[hidden], #empty[hidden] { display:none; }
-    h1 { display:flex; justify-content:space-between; align-items:center; margin:.25rem 0 1rem; }
-    .toolbar { display:flex; gap:.5rem; align-items:center; }
-    #filtersBadge { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
-  </style>
-</head>
-
-<body>
-  <h1>
-    <span>Volunteer Call</span>
-    <span class="toolbar">
-      <button id="getNextBtn" class="primary">Get Next</button>
-    </span>
-  </h1>
-
-
-  <div class="card muted" id="filtersBadge" style="display:none;"></div>
-
-  <div class="card" id="voterCard" hidden>
-    <div id="voterInfo" class="muted"></div>
-
-    <h3>Call outcome</h3>
-
-    <label for="outcome">Outcome</label>
-    <select id="outcome">
-      <option value="">— choose —</option>
-      <option>connected</option><option>vm</option><option>no_answer</option>
-      <option>wrong_number</option><option>refused</option><option>follow_up</option>
-    </select>
-
-    <div class="row">
-      <label><input type="checkbox" id="ok_callback"> OK to call back</label>
-      <label><input type="checkbox" id="requested_info"> Requested info</label>
-      <label><input type="checkbox" id="dnc"> Do not call</label>
-    </div>
-
-    <div class="row">
-      <div>
-        <label for="best_day">Best day</label>
-        <select id="best_day">
-          <option value="">—</option>
-          <option>Mon</option><option>Tue</option><option>Wed</option>
-          <option>Thu</option><option>Fri</option><option>Sat</option><option>Sun</option>
-        </select>
-      </div>
-      <div>
-        <label for="best_time_window">Best time</label>
-        <select id="best_time_window">
-          <option value="">—</option>
-          <option>Morning</option><option>Afternoon</option><option>Evening</option>
-          <option>6–8pm</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="row">
-      <label><input type="checkbox" id="optin_sms"> Opt-in SMS</label>
-      <label><input type="checkbox" id="optin_email"> Opt-in Email</label>
-    </div>
-
-    <label for="email">Email address (if provided)</label>
-    <input type="text" id="email" placeholder="name@example.com"/>
-
-    <div class="row">
-      <label><input type="checkbox" id="wants_volunteer"> Wants to volunteer</label>
-      <label><input type="checkbox" id="share_insights_ok"> OK to share insights</label>
-    </div>
-    <div class="row">
-      <label><input type="checkbox" id="for_term_limits"> For term limits</label>
-      <label><input type="checkbox" id="issue_public_lands"> Interested: public land sales</label>
-    </div>
-
-    <label for="comments">Comments</label>
-    <textarea id="comments" rows="3"></textarea>
-
-    <div class="btns">
-      <button id="saveBtn" class="primary">Save & Next</button>
-      <button id="skipBtn" class="secondary" type="button">Skip</button>
-      <span id="msg" class="muted"></span>
-    </div>
-  </div>
-
-  <div class="card" id="empty" hidden>No eligible voters (or not logged in).</div>
-
-  <!-- Main app logic as an ES module so imports are guaranteed -->
-  <script type="module">
-    // Import env (optional) and the API client as a module – no window.* reliance
-    let environmentConfig = null;
-    try {
-      const envMod = await import('/config/environments.js');
-      environmentConfig = envMod.default || envMod.environmentConfig || envMod;
-      // expose for other non-module scripts if needed
-      window.environmentConfig = environmentConfig;
-    } catch (e) {
-      console.warn('env import failed, proceeding with apiClient fallbacks', e);
-    }
-
-    import { apiGet, apiPost } from '/src/apiClient.js';
-
-    // ----- UI elements
-    const voterCard  = document.getElementById('voterCard');
-    const voterInfo  = document.getElementById('voterInfo');
-    const empty      = document.getElementById('empty');
-    const msg        = document.getElementById('msg');
+    // 🪪 Optional: show user info badge if available
+    const badge = document.querySelector('#whoami');
+    await showUserBadge(env, badge);
+    
+    // Initialize call page after auth
+    initializeCallPage(env);
+  });
+  
+  // Main call page initialization
+  async function initializeCallPage(env) {
+    // API helper function
+    const API = (p) => env.getApiUrl(p.replace(/^\/?(api\/)?/, 'api/'));
+    
+    console.log('🔍 Debug - API function set up, testing:', API('whoami'));
+    
+    const who = document.getElementById("whoami");
+    const voterCard = document.getElementById("voterCard");
+    const voterInfo = document.getElementById("voterInfo");
+    const empty = document.getElementById("empty");
+    const msg = document.getElementById("msg");
     const getNextBtn = document.getElementById('getNextBtn');
-    const saveBtn    = document.getElementById('saveBtn');
-    const skipBtn    = document.getElementById('skipBtn');
+    const saveBtn = document.getElementById('saveBtn');
+    const skipBtn = document.getElementById('skipBtn');
     const filtersBadge = document.getElementById('filtersBadge');
-
+    
+    // Set up message helper
     function setMsg(text, kind="muted") {
       msg.className = kind;
       msg.textContent = text || "";
     }
 
-    // ----- Filters from URL
+    // Get filters from URL parameters or session storage
     function getUrlFilters() {
       const u = new URL(location.href);
       const parties = u.searchParams.getAll('parties');
@@ -199,18 +64,33 @@
       };
       return f;
     }
+
     function getFilters() {
       const fromUrl = getUrlFilters();
       if (fromUrl.county || fromUrl.district_type || fromUrl.parties.length) return fromUrl;
       try { return { ...JSON.parse(sessionStorage.getItem('vol.filters')||'{}'), require_phone:true }; }
       catch { return { require_phone:true }; }
     }
+
     function showFiltersBadge(filters) {
       filtersBadge.style.display = 'block';
       filtersBadge.textContent = 'Filters: ' + JSON.stringify(filters);
     }
 
-    // ----- Seen IDs cache
+    // JSON fetch helper
+    async function jsonFetch(url, init = {}) {
+      const r = await fetch(url, {
+        credentials: "include",
+        ...init,
+        headers: { "content-type": "application/json", ...(init.headers || {}) },
+      });
+      if (r.status === 401) throw new Error("Unauthorized");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const ct = r.headers.get("content-type") || "";
+      return ct.includes("application/json") ? r.json() : r.text();
+    }
+
+    // Track seen voters
     const SEEN_KEY = 'vol.seen_ids';
     function getSeen() {
       try { return JSON.parse(sessionStorage.getItem(SEEN_KEY) || '[]'); } catch { return []; }
@@ -222,29 +102,9 @@
       sessionStorage.setItem(SEEN_KEY, JSON.stringify(seen.slice(0, 12)));
     }
 
-    // ----- Render & actions
-    function renderVoter(v) {
-      if (!v) {
-        voterCard.hidden = true;
-        empty.hidden = false;
-        setMsg("");
-        return;
-      }
-      empty.hidden = true;
-      voterCard.hidden = false;
-      voterCard.dataset.voter = v.voter_id;
-
-      const name = [v.first_name, v.last_name].filter(Boolean).join(" ");
-      const party = v.political_party ? (' • Party: ' + v.political_party) : '';
-      const phone = v.phone_1 ? ('Phone: ' + v.phone_1) : 'Phone: —';
-      voterInfo.innerHTML =
-        `<strong>${name || "—"}</strong><br/>${(v.city||'')} ${(v.county||'')}${party}<br/>${phone}`;
-
-      setMsg("");
-    }
-
     let inFlightNext = false;
 
+    // Load next voter
     async function nextVoter() {
       if (inFlightNext) return;
       inFlightNext = true;
@@ -255,22 +115,43 @@
       try {
         const filters = getFilters();
         const exclude_ids = getSeen();
-        console.log('📋 Filters:', filters, 'Excluding:', exclude_ids);
+        console.log('🔍 Debug - filters:', filters);
+        console.log('🔍 Debug - exclude_ids:', exclude_ids);
+        console.log('🔍 Debug - API URL:', API('next'));
+        
+        const v = await jsonFetch(API('next'), {
+          method: 'POST',
+          cache: 'no-store',
+          headers: { 'pragma': 'no-cache' },
+          body: JSON.stringify({ filters, exclude_ids })
+        });
 
-        const v = await apiPost('call', { filters, exclude_ids });
-        console.log('📨 Received voter data:', v);
+        console.log('🔍 Debug - API response:', v);
 
         if (!v || v.empty || !v.voter_id) {
-          console.warn('⚠️ No voter data:', {hasData: !!v, isEmpty: v?.empty, hasVoterId: !!v?.voter_id});
-          renderVoter(null);
+          console.log('🔍 Debug - No voter found, showing empty state');
+          voterCard.hidden = true; 
+          empty.hidden = false; 
+          setMsg("");
           return;
         }
 
-        renderVoter(v);
+        // Show voter
+        empty.hidden = true; 
+        voterCard.hidden = false;
+        voterCard.dataset.voter = v.voter_id;
+        const name = [v.first_name, v.last_name].filter(Boolean).join(" ");
+        const party = v.party ? (' • Party: ' + v.party) : '';
+        const phone = v.phone_e164 ? ('Phone: ' + v.phone_e164) : 'Phone: —';
+        voterInfo.innerHTML =
+          `<strong>${name || "—"}</strong><br/>${(v.ra_city||'')} ${(v.ra_zip||'')}${party}<br/>${phone}`;
+
+        // Remember to avoid immediate repeats
         pushSeen(v.voter_id);
+        setMsg("");
       } catch (e) {
-        console.error('❌ nextVoter error:', e);
-        renderVoter(null);
+        voterCard.hidden = true; 
+        empty.hidden = false;
         setMsg(`Error: ${e.message}`, "error");
       } finally {
         inFlightNext = false;
@@ -279,6 +160,7 @@
       }
     }
 
+    // Save and get next voter
     async function saveAndNext() {
       const payload = {
         voter_id: voterCard.dataset.voter || "",
@@ -297,31 +179,15 @@
         issue_public_lands: +document.getElementById("issue_public_lands").checked,
         comments: document.getElementById("comments").value || null
       };
+      
       if (!payload.voter_id) { alert("No voter selected."); return; }
       if (!payload.outcome) { alert("Choose an outcome."); return; }
 
       try {
         setMsg("Saving...");
-        const saveBody = {
-          voter_id: payload.voter_id,
-          result: payload.outcome,           // API expects 'result'
-          notes: payload.comments || null,
-          ok_callback: payload.ok_callback,
-          requested_info: payload.requested_info,
-          dnc: payload.dnc,
-          best_day: payload.best_day || null,
-          best_time_window: payload.best_time_window || null,
-          optin_sms: payload.optin_sms,
-          optin_email: payload.optin_email,
-          email: payload.email || null,
-          wants_volunteer: payload.wants_volunteer,
-          share_insights_ok: payload.share_insights_ok,
-          for_term_limits: payload.for_term_limits,
-          issue_public_lands: payload.issue_public_lands
-        };
-        await apiPost('call', saveBody);
-
-        // reset a few fields
+        await jsonFetch(API("complete"), { method: "POST", body: JSON.stringify(payload) });
+        
+        // Reset form fields
         document.getElementById("outcome").value = "";
         document.getElementById("best_day").value = "";
         document.getElementById("best_time_window").value = "";
@@ -330,8 +196,10 @@
         ["ok_callback","requested_info","dnc","optin_sms","optin_email",
          "wants_volunteer","share_insights_ok","for_term_limits","issue_public_lands"]
          .forEach(id => document.getElementById(id).checked = false);
-
+        
         setMsg("Saved.");
+        
+        // Remember and fetch next
         const vid = voterCard.dataset.voter;
         if (vid) pushSeen(vid);
         nextVoter();
@@ -340,7 +208,7 @@
       }
     }
 
-    // Wire events
+    // Set up event listeners
     getNextBtn.addEventListener("click", nextVoter);
     saveBtn.addEventListener("click", saveAndNext);
     skipBtn.addEventListener("click", () => {
@@ -348,17 +216,118 @@
       if (vid) pushSeen(vid);
       nextVoter();
     });
+
+    // Keyboard shortcut: N = Get Next
     window.addEventListener("keydown", (e) => {
       if (e.key.toLowerCase() === "n" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        e.preventDefault(); nextVoter();
+        e.preventDefault(); 
+        nextVoter();
       }
     });
 
-    // Init
+    // Initialize the page
     const filters = getFilters();
     showFiltersBadge(filters);
-    console.log("✅ Ready, loading data...");
-    await nextVoter();
-  </script>
+    
+    console.log('🔍 Debug - Starting initialization');
+    await nextVoter(); // Load first voter
+  }
+</script>
+
+<style>
+  body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 720px; }
+  .card { border: 1px solid #ddd; border-radius: 12px; padding: 1rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
+  label { display:block; margin:.5rem 0 .25rem; }
+  input[type=text], select, textarea { width: 100%; padding:.6rem; border:1px solid #ccc; border-radius:8px; }
+  button { padding:.6rem 1rem; border-radius:8px; border:0; background:#0ea5e9; color:white; font-weight:600; cursor:pointer; }
+  button.secondary { background:#e2e8f0; color:#0f172a; }
+  .row { display:flex; gap:.75rem; flex-wrap: wrap; }
+  .row > * { flex:1 1 200px; }
+  .muted { color:#64748b; }
+  .error { color:#b91c1c; }
+  .toolbar { display:flex; gap:.5rem; align-items:center; }
+  #voterCard[hidden], #empty[hidden] { display:none; }
+  h1 { display:flex; justify-content:space-between; align-items:center; margin:.25rem 0 1rem; }
+</style>
+</head>
+
+<body>
+
+<h1>
+  <span>Volunteer Call</span>
+  <span class="toolbar">
+    <button id="getNextBtn" style="padding:8px 12px;border-radius:6px;background:#6aa9ff;color:#fff;border:none;">Get Next</button>
+  </span>
+</h1>
+
+<div class="card" id="whoami">Checking login…</div>
+<div class="card muted" id="filtersBadge" style="display:none;"></div>
+
+<div class="card" id="voterCard" hidden>
+  <div id="voterInfo" class="muted"></div>
+
+  <h3>Call outcome</h3>
+
+  <label for="outcome">Outcome</label>
+  <select id="outcome">
+    <option value="">— choose —</option>
+    <option>connected</option><option>vm</option><option>no_answer</option>
+    <option>wrong_number</option><option>refused</option><option>follow_up</option>
+  </select>
+
+  <div class="row">
+    <label><input type="checkbox" id="ok_callback"> OK to call back</label>
+    <label><input type="checkbox" id="requested_info"> Requested info</label>
+    <label><input type="checkbox" id="dnc"> Do not call</label>
+  </div>
+
+  <div class="row">
+    <div>
+      <label for="best_day">Best day</label>
+      <select id="best_day">
+        <option value="">—</option>
+        <option>Mon</option><option>Tue</option><option>Wed</option>
+        <option>Thu</option><option>Fri</option><option>Sat</option><option>Sun</option>
+      </select>
+    </div>
+    <div>
+      <label for="best_time_window">Best time</label>
+      <select id="best_time_window">
+        <option value="">—</option>
+        <option>Morning</option><option>Afternoon</option><option>Evening</option>
+        <option>6–8pm</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="row">
+    <label><input type="checkbox" id="optin_sms"> Opt-in SMS</label>
+    <label><input type="checkbox" id="optin_email"> Opt-in Email</label>
+  </div>
+
+  <label for="email">Email address (if provided)</label>
+  <input type="text" id="email" placeholder="name@example.com"/>
+
+  <div class="row">
+    <label><input type="checkbox" id="wants_volunteer"> Wants to volunteer</label>
+    <label><input type="checkbox" id="share_insights_ok"> OK to share insights</label>
+  </div>
+  <div class="row">
+    <label><input type="checkbox" id="for_term_limits"> For term limits</label>
+    <label><input type="checkbox" id="issue_public_lands"> Interested: public land sales</label>
+  </div>
+
+  <label for="comments">Comments</label>
+  <textarea id="comments" rows="3"></textarea>
+
+  <div class="row" style="margin-top:.75rem;">
+    <button id="saveBtn">Save & Next</button>
+    <button class="secondary" id="skipBtn" type="button">Skip</button>
+  </div>
+  <div id="msg" class="muted" style="margin-top:.5rem;"></div>
+</div>
+
+<div class="card" id="empty" hidden>No eligible voters (or not logged in).</div>
+
 </body>
 </html>

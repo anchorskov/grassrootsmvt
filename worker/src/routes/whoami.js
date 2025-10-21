@@ -1,13 +1,36 @@
 // worker/src/routes/whoami.js
-// Relative path: worker/src/routes/whoami.js
-export default async function whoami(request) {
-  // Access runs before this Worker and sets these headers for authenticated users.
-  const email = request.headers.get('CF-Access-Authenticated-User-Email');
-  const name  = request.headers.get('CF-Access-Authenticated-User-Name') || email;
+// Returns user identity: Access headers in prod, mock user in dev/local.
 
-  if (!email) {
-    // User is not authenticated at the edge, or the route is not covered by Access.
-    return Response.json({ user: null }, { status: 200 });
-  }
-  return Response.json({ user: { email, name } }, { status: 200 });
-}
+export default {
+  path: '/api/whoami',
+  method: ['GET'],
+  async handler(request, env) {
+    const { ENVIRONMENT } = env;
+
+    // Development mode → bypass Cloudflare Access
+    if (ENVIRONMENT !== 'production') {
+      return new Response(
+        JSON.stringify({ user: { email: 'dev@localhost', name: 'Local Developer' } }),
+        { headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Production → extract identity from Cloudflare Access headers
+    const email = request.headers.get('CF-Access-Authenticated-User-Email');
+    const name =
+      request.headers.get('CF-Access-Authenticated-User-Name') || email || null;
+
+    if (!email) {
+      // When Access is missing, explicitly return null identity
+      return new Response(JSON.stringify({ user: null }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    return new Response(
+      JSON.stringify({ user: { email, name } }),
+      { headers: { 'Content-Type': 'application/json' } }
+    );
+  },
+};

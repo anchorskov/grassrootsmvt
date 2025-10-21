@@ -65,13 +65,21 @@ export class StreetAutocomplete {
   }
 
   async search(q) {
-    // Default search uses POST /api/streets with only q; page can override to include county/city.
+    // Default search uses POST /api/streets; include county/city if present on the page.
     const url = this.env.getApiUrl('streets');
+    const countyEl = document.querySelector('[data-county], #county, #County');
+    const cityEl   = document.querySelector('[data-city], #city, #City');
+    const payload = {
+      q,
+      county: countyEl?.value?.trim() || countyEl?.textContent?.trim() || undefined,
+      city:   cityEl?.value?.trim()   || cityEl?.textContent?.trim()   || undefined,
+      limit:  10
+    };
     const r = await fetch(url, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ q })
+      body: JSON.stringify(payload)
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     const data = await r.json();
