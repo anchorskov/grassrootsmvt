@@ -336,13 +336,14 @@ export default {
       try {
         const authResult = await authenticateRequest(request, env);
         if (!authResult || !authResult.email) {
-          return new Response(JSON.stringify({ ok: false, error: "unauthorized" }), {
+          return new Response(JSON.stringify({ ok: false, authenticated: false, error: "unauthorized" }), {
             status: 401,
             headers: withCorsHeaders({ "Content-Type": "application/json" }, allowedOrigin || null)
           });
         }
         return new Response(JSON.stringify({ 
           ok: true, 
+          authenticated: true,
           email: authResult.email,
           isLocal: authResult.isLocal || false
         }), {
@@ -352,6 +353,7 @@ export default {
         // In production: 401 so the UI can send the browser to /auth/finish
         return new Response(JSON.stringify({ 
           ok: false, 
+          authenticated: false,
           error: "unauthorized", 
           details: err.message 
         }), {
@@ -516,19 +518,19 @@ export default {
           // Get next voter request
           const { filters = {}, exclude_ids = [] } = requestBody;
           
-          // Build query to get next available voter using proper table joins
-          let query = `SELECT v.voter_id, 
-                              COALESCE(va.fn, '') as first_name, 
-                              COALESCE(va.ln, '') as last_name, 
-                              COALESCE(bp.phone_e164, '') as phone_1,
-                              '' as phone_2,
-                              v.county, 
-                              COALESCE(va.city, '') as city, 
-                              v.political_party
-                       FROM voters v
-                       LEFT JOIN voters_addr_norm va ON v.voter_id = va.voter_id
-                       LEFT JOIN best_phone bp ON v.voter_id = bp.voter_id
-                       WHERE 1=1`;
+     // Build query to get next available voter using proper table joins
+     let query = `SELECT v.voter_id, 
+          COALESCE(va.fn, '') as first_name, 
+          COALESCE(va.ln, '') as last_name, 
+          COALESCE(vp.phone_e164, '') as phone_1,
+          '' as phone_2,
+          v.county, 
+          COALESCE(va.city, '') as city, 
+          v.political_party
+        FROM voters v
+        LEFT JOIN voters_addr_norm va ON v.voter_id = va.voter_id
+        LEFT JOIN voter_phones vp ON v.voter_id = vp.voter_id
+        WHERE 1=1`;
           const params = [];
           let paramIndex = 1;
 
@@ -549,7 +551,7 @@ export default {
             params.push(...filters.parties);
           }
           if (filters.require_phone) {
-            query += ` AND (bp.phone_e164 IS NOT NULL AND bp.phone_e164 != '')`;
+            query += ` AND (vp.phone_e164 IS NOT NULL AND vp.phone_e164 != '')`;
           }
 
           // Exclude already seen voters
