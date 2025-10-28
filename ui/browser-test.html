@@ -64,7 +64,8 @@
   <h1>Browser Compatibility Test</h1>
   
   <div class="test pending" id="moduleTest">
-    <h3>✋ Module Loading Test</h3>
+    <!-- Loads global authentication context (window.currentUser) -->
+    <script src="../shared/authGlobal.js"></script>
     <p>Testing if JavaScript modules load without errors...</p>
     <div id="moduleResult"></div>
   </div>

@@ -65,6 +65,8 @@
   .toolbar { display:flex; gap:.5rem; align-items:center; }
   #voterCard[hidden], #empty[hidden] { display:none; }
   h1 { display:flex; justify-content:space-between; align-items:center; margin:.25rem 0 1rem; }
+  .auth-status { display: flex; align-items: center; margin-bottom: 1rem; }
+  .online-indicator { color: #4caf50; }
 </style>
 
 <h1>
@@ -142,6 +144,11 @@
 </div>
 
 <div class="card" id="empty" hidden>No eligible voters (or not logged in).</div>
+
+<div id="auth-status" class="auth-status">
+  <span class="online-indicator">🔄 Checking connection...</span>
+  <span id="user-email-badge" style="display:none; margin-left:8px; color:#2563eb; font-weight:600;"></span>
+</div>
 
 <script>
   // Load the API shim which exposes window.apiFetch and API()
@@ -414,4 +421,31 @@
     await loadWho();     // don’t block if this fails; loadWho() already swallows errors
     await nextVoter();   // show a voter immediately
   })();
+</script>
+<script src="/shared/authGlobal.js"></script>
+<script>
+  // Update user email badge on authentication change
+  function updateUserEmailBadge() {
+    const badge = document.getElementById('user-email-badge');
+    if (window.authGlobal && window.authGlobal.user && window.authGlobal.user.email) {
+      badge.textContent = window.authGlobal.user.email;
+      badge.style.display = '';
+    } else {
+      badge.textContent = '';
+      badge.style.display = 'none';
+    }
+  }
+  if (window.authGlobal) {
+    window.authGlobal.onAuthChange(updateUserEmailBadge);
+    updateUserEmailBadge();
+  } else {
+    window.addEventListener('authGlobalReady', function() {
+      window.authGlobal.onAuthChange(updateUserEmailBadge);
+      updateUserEmailBadge();
+    });
+  }
+</script>
+<script type="module">
+  import { showUserBadge } from '../shared/userBadge.js';
+  showUserBadge();
 </script>

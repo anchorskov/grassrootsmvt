@@ -53,6 +53,22 @@
   <script src="/src/apiClient.js"></script>
 </head>
 <body>
+  <!-- Shows current authenticated user (set by authGlobal.js) -->
+  <div id="user-email-badge" style="
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      background: rgba(37, 99, 235, 0.1);
+      color: #1e3a8a;
+      font-size: 0.85rem;
+      padding: 6px 10px;
+      border-radius: 8px;
+      border: 1px solid rgba(37, 99, 235, 0.3);
+      z-index: 9999;
+      font-family: system-ui, sans-serif;
+    ">
+    👤 Loading user…
+  </div>
   <h1>Quick API Test</h1>
   <div id="results"></div>
   
@@ -131,5 +147,31 @@
     // Run tests when page loads
     window.addEventListener('load', runTests);
   </script>
+    <!-- Loads global authentication context (window.currentUser) -->
+    <script src="../shared/authGlobal.js"></script>
+    <script>
+      // Update user email badge when window.currentUser is ready
+      document.addEventListener("DOMContentLoaded", () => {
+        const badge = document.getElementById("user-email-badge");
+        const updateBadge = () => {
+          if (!badge || !window.currentUser?.loaded) return;
+          if (window.currentUser.authenticated) {
+            badge.textContent = `👤 ${window.currentUser.email}`;
+          } else {
+            badge.textContent = "🔒 Not logged in";
+          }
+        };
+        if (window.currentUser?.loaded) {
+          updateBadge();
+        } else {
+          const timer = setInterval(() => {
+            if (window.currentUser?.loaded) {
+              updateBadge();
+              clearInterval(timer);
+            }
+          }, 200);
+        }
+      });
+    </script>
 </body>
 </html>

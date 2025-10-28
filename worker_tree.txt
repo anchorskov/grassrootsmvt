@@ -1,0 +1,22 @@
+worker
+├── .dev.vars
+├── README-cors-access.md
+├── cfdiag.sh
+├── deployments.json
+├── functions
+│   ├── _utils
+│   │   └── verifyAccessJWT.js
+│   └── api
+│       └── whoami.js
+├── logs
+├── package.json
+├── src
+│   ├── api
+│   │   └── contact-form.js
+│   └── index.js
+├── tmp
+├── wrangler.bak.102725a
+├── wrangler.toml
+└── wrangler.toml.bak.1761594597
+
+7 directories, 12 files

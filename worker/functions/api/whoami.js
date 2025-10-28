@@ -1,47 +1,71 @@
-// functions/_utils/verifyAccessJWT.js
-export async function verifyAccessJWT(request, env) {
-  const jwt = request.headers.get(env.ACCESS_JWT_HEADER || "Cf-Access-Jwt-Assertion");
-  if (!jwt) {
-    throw new Error("Missing Cf-Access-Jwt-Assertion header or CF_Authorization cookie");
-  }
+// worker/functions/api/whoami.js
+// Simplified /api/whoami endpoint that trusts Cloudflare Access
+// Works locally (fake identity) and in production (Access-provided JWT)
 
-  const teamDomain = env.TEAM_DOMAIN?.replace(/^https?:\/\//, "");
-  if (!teamDomain) throw new Error("Missing TEAM_DOMAIN in environment");
+export default {
+  async fetch(request, env) {
+    const isLocal = env.ENVIRONMENT === "local";
 
-  // Fetch Cloudflare Access public keys
-  const keyResponse = await fetch(`https://${teamDomain}/cdn-cgi/access/certs`);
-  if (!keyResponse.ok) throw new Error("Failed to fetch Access public keys");
-  const { keys } = await keyResponse.json();
+    // 🧠 Local development fallback
+    if (isLocal) {
+      const response = {
+        authenticated: true,
+        email: "devuser@localhost",
+        environment: "local",
+      };
+      console.log(`[whoami] local mode -> ${response.email}`);
+      return new Response(JSON.stringify(response), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
 
-  // Decode JWT
-  const [headerB64, payloadB64, signatureB64] = jwt.split(".");
-  const payload = JSON.parse(atob(payloadB64));
+    // 🧩 Production mode — rely on Cloudflare Access
+    const jwt = request.headers.get("Cf-Access-Jwt-Assertion");
+    if (!jwt) {
+      return new Response(
+        JSON.stringify({
+          authenticated: false,
+          error: "Access token missing",
+        }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
 
-  // Validate Audience (AUD)
-  if (!payload.aud || payload.aud !== env.POLICY_AUD) {
-    throw new Error("Invalid audience (AUD mismatch)");
-  }
+    try {
+      // Decode the JWT payload (header.payload.signature)
+      const [, payloadB64] = jwt.split(".");
+      const payload = JSON.parse(atob(payloadB64));
+      const email = payload.email || payload.identity?.email || "unknown@user";
 
-  // Validate Signature
-  const data = new TextEncoder().encode(`${headerB64}.${payloadB64}`);
-  const signature = Uint8Array.from(
-    atob(signatureB64.replace(/-/g, "+").replace(/_/g, "/")),
-    (c) => c.charCodeAt(0)
-  );
+      console.log(`[whoami] user: ${email}, env: production`);
 
-  const keyData = keys.find((k) => k.kid === JSON.parse(atob(headerB64)).kid) || keys[0];
-  const key = await crypto.subtle.importKey(
-    "jwk",
-    keyData,
-    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-    false,
-    ["verify"]
-  );
-
-  const verified = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, signature, data);
-  if (!verified) {
-    throw new Error("JWT signature invalid");
-  }
-
-  return payload;
-}
+      return new Response(
+        JSON.stringify({
+          authenticated: true,
+          email,
+          environment: "production",
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    } catch (err) {
+      console.error("❌ Failed to parse Access JWT:", err.message);
+      return new Response(
+        JSON.stringify({
+          authenticated: false,
+          error: "Invalid Access token",
+        }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }
+      );
+    }
+  },
+};

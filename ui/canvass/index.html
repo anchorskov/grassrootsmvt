@@ -54,6 +54,11 @@
 </script>
 <script src="/src/apiClient.js"></script>
 <script src="../shared/streetAutocomplete.js"></script>
+<script src="/shared/authGlobal.js"></script>
+<script type="module">
+  import { showUserBadge } from '../shared/userBadge.js';
+  showUserBadge();
+</script>
 <style>
   :root { --gap: 10px; }
   body { font-family: system-ui, sans-serif; margin: 12px; position: relative; }
@@ -112,10 +117,7 @@
 </head>
 
 <body>
-<!-- Authentication status indicator -->
-<div id="auth-status" class="auth-status">
-  <span class="online-indicator">🔄 Checking connection...</span>
-</div>
+<!-- Authentication status indicator (badge injected by userBadge.js) -->
 
 <h1>Canvass</h1>
 
@@ -186,22 +188,7 @@
     document.head.appendChild(s);
   })();
 
-  // Debug snippet: logs token presence and tests /api/ping connectivity
-  (function(){
-    const dbg = document.createElement('script');
-    dbg.textContent = `
-      (async () => {
-        const token = localStorage.getItem("access_token");
-        console.log("🔐 Access token present:", !!token);
-        if (!token) console.warn("No access_token in localStorage — /api/whoami will return 401");
-        
-        // Note: Removed automatic apiFetch call to prevent redirect loops
-        // API connectivity will be tested when user actually performs actions
-        console.log('🚪 Canvass page initialized - API calls will happen on user interaction');
-      })();
-    `;
-    document.head.appendChild(dbg);
-  })();
+  // Debug snippet: Cloudflare Access now manages authentication. Manual token storage removed.
   const API = (p) => '/api' + p;
 
   function fromQS() {
@@ -830,4 +817,6 @@
   
   const f = fromQS();
   showFiltersBadge(f);
+  
+  // ...existing code...
 </script>

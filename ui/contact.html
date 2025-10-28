@@ -86,7 +86,10 @@
 <body>
 
 <div class="auth-status">
+</div>
+<div id="auth-status" class="auth-status">
   <span class="online-indicator">🔄 Checking connection...</span>
+  <span id="user-email-badge" style="display:none; margin-left:8px; color:#2563eb; font-weight:600;"></span>
 </div>
 
 <h1>Contact Voter</h1>
@@ -189,6 +192,29 @@
   </div>
 </div>
 
+<script src="/shared/authGlobal.js"></script>
+<script>
+  // Update user email badge on authentication change
+  function updateUserEmailBadge() {
+    const badge = document.getElementById('user-email-badge');
+    if (window.authGlobal && window.authGlobal.user && window.authGlobal.user.email) {
+      badge.textContent = window.authGlobal.user.email;
+      badge.style.display = '';
+    } else {
+      badge.textContent = '';
+      badge.style.display = 'none';
+    }
+  }
+  if (window.authGlobal) {
+    window.authGlobal.onAuthChange(updateUserEmailBadge);
+    updateUserEmailBadge();
+  } else {
+    window.addEventListener('authGlobalReady', function() {
+      window.authGlobal.onAuthChange(updateUserEmailBadge);
+      updateUserEmailBadge();
+    });
+  }
+</script>
 <script>
   // API helper functions
   const API = (p) => '/api' + p;
@@ -331,6 +357,10 @@
 
   // Initialize when page loads
   document.addEventListener('DOMContentLoaded', initPage);
+</script>
+<script type="module">
+  import { showUserBadge } from '../shared/userBadge.js';
+  showUserBadge();
 </script>
 
 </body>

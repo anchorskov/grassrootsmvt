@@ -1,5 +1,5 @@
 // src/index.js — Cloudflare Zero Trust module Worker
-import { verifyAccessJWT } from "../functions/_utils/verifyAccessJWT.js";
+// Manual JWT validation removed. Trust Cloudflare Access headers directly.
 
 // --- Environment Detection ---------------------------------------------------
 function isLocalDevelopment(env) {
@@ -101,7 +101,6 @@ function getCookie(req, name) {
 // Authentication middleware with local development bypass
 async function authenticateRequest(request, env) {
   const config = getEnvironmentConfig(env);
-  
   // Bypass authentication in local development
   if (config.auth.bypassAuthentication) {
     if (config.debug) {
@@ -113,9 +112,18 @@ async function authenticateRequest(request, env) {
       isLocal: true
     };
   }
-  
-  // Production authentication via Cloudflare Access JWT
-  return await verifyAccessJWT(request, env);
+  // Production: Trust Cloudflare Access JWT header
+  const jwt = request.headers.get("Cf-Access-Jwt-Assertion");
+  if (!jwt) {
+    throw new Error("Missing Access token");
+  }
+  try {
+    const payload = JSON.parse(atob(jwt.split(".")[1]));
+    const email = payload.email || payload.identity?.email || "unknown@user";
+    return { email, payload };
+  } catch (err) {
+    throw new Error("Invalid Access token");
+  }
 }
 
 export default {
@@ -127,25 +135,7 @@ export default {
     // ---- helpers ----------------------------------------------------------
     const getOrigin = () => request.headers.get("Origin") || "";
 
-    // Read Access JWT from cookie first, then header as fallback
-    function getAccessJwt(req) {
-      const cookie = req.headers.get("Cookie") || "";
-      const fromCookie = cookie.split(/;\s*/).find(x => x.startsWith("CF_Authorization="));
-      if (fromCookie) {
-        return decodeURIComponent(fromCookie.split("=", 2)[1] || "");
-      }
-      return req.headers.get("Cf-Access-Jwt-Assertion") || "";
-    }
-
-    async function verifyAccessJWTOrFail(req, env) {
-      const jwt = getAccessJwt(req);
-      if (!jwt) {
-        throw new Error("Missing Access token");
-      }
-      // Use existing verifyAccessJWT utility
-      const result = await verifyAccessJWT(req, env);
-      return { ok: true, email: result.email, details: result };
-    }
+    // Manual JWT helpers removed. Trust Cf-Access-Jwt-Assertion header only.
 
     const config = getEnvironmentConfig(env);
     const allowedOrigin = pickAllowedOrigin(request, env);

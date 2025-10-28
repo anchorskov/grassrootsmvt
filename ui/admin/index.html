@@ -16,6 +16,10 @@
 <body>
   <h1>Admin Dashboard</h1>
   <div class="muted" id="whoami">…</div>
+  <div id="auth-status" class="auth-status" style="position:fixed;top:8px;right:8px;z-index:100;font-size:.875rem;padding:.5rem .75rem;border-radius:8px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;">
+    <span class="online-indicator">🔄 Checking connection...</span>
+    <span id="user-email-badge" style="display:none; margin-left:8px; color:#2563eb; font-weight:600;"></span>
+  </div>
 
   <div class="card">
     <h2>Health</h2>
@@ -32,6 +36,7 @@
     <div id="contacts">Loading…</div>
   </div>
 
+  <script src="/shared/authGlobal.js"></script>
   <script>
   const api = (p, opts) => fetch('https://grassrootsmvt-functions.anchorskov.workers.dev' + p, opts).then(r => {
       if (!r.ok) throw new Error("HTTP " + r.status);
@@ -64,6 +69,31 @@
       }
     }
     load();
+
+    // Update user email badge on authentication change
+    function updateUserEmailBadge() {
+      const badge = document.getElementById('user-email-badge');
+      if (window.authGlobal && window.authGlobal.user && window.authGlobal.user.email) {
+        badge.textContent = window.authGlobal.user.email;
+        badge.style.display = '';
+      } else {
+        badge.textContent = '';
+        badge.style.display = 'none';
+      }
+    }
+    if (window.authGlobal) {
+      window.authGlobal.onAuthChange(updateUserEmailBadge);
+      updateUserEmailBadge();
+    } else {
+      window.addEventListener('authGlobalReady', function() {
+        window.authGlobal.onAuthChange(updateUserEmailBadge);
+        updateUserEmailBadge();
+      });
+    }
+  </script>
+  <script type="module">
+    import { showUserBadge } from '../shared/userBadge.js';
+    showUserBadge();
   </script>
 </body>
 </html>
