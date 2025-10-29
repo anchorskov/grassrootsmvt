@@ -63,7 +63,8 @@ export function showUserBadge(options = {}) {
     const pos = getBadgePositionStyles(position);
     Object.assign(styles, pos);
     Object.assign(badgeInstance.style, styles);
-    document.body.appendChild(badgeInstance);
+    const container = document.getElementById('user-badge-container') || document.body;
+    container.appendChild(badgeInstance);
     if (!logInit) {
       logInit = true;
       console.log('[userBadge] Initialized user badge module');
