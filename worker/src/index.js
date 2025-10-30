@@ -1,7 +1,7 @@
 // Path: worker/src/index.js
 import { router } from './router.js';
 import { getEnvironmentConfig } from './utils/env.js';
-import { pickAllowedOrigin, preflightResponse } from './utils/cors.js';
+import { pickAllowedOrigin, preflightResponse, parseAllowedOrigins } from './utils/cors.js';
 import { requireAuth } from './auth.js';
 
 const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
@@ -196,8 +196,52 @@ router.get('/ping', async (request, env, ctx) => {
 });
 
 router.get('/whoami', async (request, env, ctx) => {
+  const url = new URL(request.url);
+  const nav = url.searchParams.get('nav');
+  const to = url.searchParams.get('to');
+
+  if (nav === '1' && to) {
+    try {
+      const auth = await ensureAuth(request, env, ctx.config);
+      if (auth?.email) {
+        const allowedOrigins = parseAllowedOrigins(env);
+        const fallbackOrigin = allowedOrigins[0] || url.origin || 'https://volunteers.grassrootsmvt.org';
+        const dest = (() => {
+          try {
+            const target = new URL(to);
+            return allowedOrigins.includes(target.origin)
+              ? target.toString()
+              : `${fallbackOrigin.replace(/\/+$/, '')}/`;
+          } catch {
+            return `${fallbackOrigin.replace(/\/+$/, '')}/`;
+          }
+        })();
+        return Response.redirect(dest, 302);
+      }
+    } catch {
+      // fall through to login redirect
+    }
+
+    const team = env.TEAM_DOMAIN;
+    const aud = env.POLICY_AUD;
+    if (team && aud) {
+      const loginBase = team.replace(/\/+$/, '');
+      const back = encodeURIComponent(`/whoami?nav=1&to=${encodeURIComponent(to)}`);
+      const login = `${loginBase}/cdn-cgi/access/login/api.grassrootsmvt.org?kid=${aud}&redirect_url=${back}`;
+      return Response.redirect(login, 302);
+    }
+    return new Response('Unauthorized', { status: 401 });
+  }
+
   try {
     const auth = await ensureAuth(request, env, ctx.config);
+    if (!auth.email) {
+      return ctx.jsonResponse(
+        { ok: false, authenticated: false, error: 'unauthorized' },
+        401,
+        ctx.allowedOrigin
+      );
+    }
     return ctx.jsonResponse(
       {
         ok: true,
