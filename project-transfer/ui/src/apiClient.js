@@ -5,7 +5,7 @@
   'use strict';
   
   const LOCAL_API = "http://localhost:8787";
-  const PROD_API = "https://api.grassrootsmvt.org";
+  const PROD_API = "https://volunteers.grassrootsmvt.org/api";
   const API_BASE = window.location.hostname === "localhost" ? LOCAL_API : PROD_API;
   
   /**

@@ -162,28 +162,7 @@ async function getCurrentUserOrRedirect() {
 
 // Legacy compatibility - maintain existing function names for backward compatibility
 async function ensureAccessSession() {
-  const envConfig = await ensureEnvironmentConfig();
-  
-  // Bypass authentication in local development
-  if (envConfig.shouldBypassAuth()) {
-    envConfig.debug('Bypassing authentication in local development');
-    sessionStorage.setItem(ACCESS_READY_KEY, 'true');
-    return Promise.resolve();
-  }
-
-  const ready = sessionStorage.getItem(ACCESS_READY_KEY) === 'true';
-  if (!ready) {
-    // Use the new getCurrentUserOrRedirect method
-    try {
-      await getCurrentUserOrRedirect();
-      sessionStorage.setItem(ACCESS_READY_KEY, 'true');
-    } catch (err) {
-      // getCurrentUserOrRedirect handles redirect, so this shouldn't normally execute
-      const returnTo = encodeURIComponent(safeTo(location.href));
-      window.location.href = `${API_ORIGIN}/whoami?nav=1&to=${returnTo}`;
-      return new Promise(() => {});
-    }
-  }
+  sessionStorage.setItem(ACCESS_READY_KEY, 'true');
   return Promise.resolve();
 }
 

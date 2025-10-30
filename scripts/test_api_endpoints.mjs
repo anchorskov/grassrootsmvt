@@ -2,6 +2,8 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import http from 'http';
+import https from 'https';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -19,7 +21,15 @@ const OUT_MD = path.join(ROOT, 'api-verification.md');
 let wranglerProc = null;
 let started = false;
 
+// If SKIP_WRANGLER env var is set, skip starting wrangler
+const SKIP_WRANGLER = process.env.SKIP_WRANGLER === 'true';
+
 function startWrangler() {
+  if (SKIP_WRANGLER) {
+    console.log('Skipping wrangler dev server (SKIP_WRANGLER=true)');
+    started = true;
+    return;
+  }
   console.log('Starting wrangler pages dev...');
   wranglerProc = spawn(WRANGLER, WRANGLER_ARGS, { stdio: ['ignore', 'pipe', 'pipe'] });
 
@@ -61,6 +71,7 @@ let resolveStart, rejectStart;
 const startPromise = new Promise((res, rej) => { resolveStart = res; rejectStart = rej; });
 
 function waitForStart(timeoutMs = START_TIMEOUT_MS) {
+  if (SKIP_WRANGLER) return;
   startWrangler();
   return Promise.race([
     startPromise,
@@ -68,82 +79,16 @@ function waitForStart(timeoutMs = START_TIMEOUT_MS) {
   ]);
 }
 
-function findApiFiles(dir) {
-  const files = [];
-  const items = fs.readdirSync(dir, { withFileTypes: true });
-  for (const it of items) {
-    const full = path.join(dir, it.name);
-    if (it.isDirectory()) {
-      files.push(...findApiFiles(full));
-    } else if (it.isFile() && it.name.endsWith('.js')) {
-      files.push(full);
-    }
-  }
-  return files;
-}
-
-async function probeEndpoint(urlPath) {
-  const results = { endpoint: urlPath, triedMethod: null, status: null, origin: null, ok: false, diagnostic: null };
-  for (const method of PROBE_METHODS) {
-    results.triedMethod = method;
-    try {
-      const res = await httpRequest(method, `http://127.0.0.1:${PORT}${urlPath}`, { Origin: ORIGIN });
-      results.status = res.statusCode;
-      results.origin = res.headers['access-control-allow-origin'] || null;
-      if (res.statusCode === 200) {
-        results.ok = true;
-        break;
-      }
-      // if non-200, keep last response for diagnostic if all methods fail
-      results.diagnostic = { headers: res.headers, bodyPreview: (res.body || '').toString().slice(0, 200) };
-    } catch (err) {
-      results.diagnostic = { error: String(err) };
-    }
-  }
-  return results;
-}
-
-function httpRequest(method, urlStr, headers = {}) {
-  return new Promise((resolve, reject) => {
-    const urlObj = new URL(urlStr);
-    const opts = {
-      method,
-      hostname: urlObj.hostname,
-      port: urlObj.port,
-      path: urlObj.pathname + urlObj.search,
-      headers,
-    };
-    const lib = urlObj.protocol === 'https:' ? awaitImport('https') : awaitImport('http');
-    lib.then(({ http, https }) => {
-      const httpLib = urlObj.protocol === 'https:' ? https : http;
-      const req = httpLib.request(opts, (res) => {
-        const chunks = [];
-        res.on('data', (c) => chunks.push(c));
-        res.on('end', () => {
-          res.body = Buffer.concat(chunks);
-          resolve(res);
-        });
-      });
-      req.on('error', (e) => reject(e));
-      if (method === 'POST') req.write('{}');
-      req.end();
-    }).catch(reject);
-  });
-}
-
-// helper to import http/https when needed
-function awaitImport(name) {
-  return new Promise((res, rej) => {
-    try {
-      if (name === 'https' || name === 'http') {
-        // dynamic import to satisfy ESM top-level
-        import(name).then((m) => res({ [name]: m.default || m })).catch(rej);
-      } else {
-        import(name).then(res).catch(rej);
-      }
-    } catch (e) { rej(e); }
-  });
-}
+// PATCH: Directly define worker route endpoints for testing
+const WORKER_ENDPOINTS = [
+  { method: 'GET', path: '/whoami' },
+  { method: 'POST', path: '/canvass' },
+  { method: 'POST', path: '/canvass/nearby' },
+  { method: 'POST', path: '/contact' },
+  { method: 'POST', path: '/contact-staging' },
+  { method: 'POST', path: '/pulse' },
+  { method: 'GET', path: '/contact/status' },
+];
 
 async function main() {
   process.on('SIGINT', cleanupAndExit);
@@ -157,19 +102,12 @@ async function main() {
     return;
   }
 
-  const files = findApiFiles(API_DIR);
-  console.log('Discovered', files.length, 'API files');
-
-  const endpoints = files.map((f) => {
-    const rel = path.relative(path.join(ROOT, 'ui', 'functions', 'api'), f);
-    const urlPath = '/' + rel.replace(/\\\\/g, '/').replace(/\.js$/, '');
-    return { file: f, path: urlPath };
-  });
-
+  // Use WORKER_ENDPOINTS instead of UI API files
+  const endpoints = WORKER_ENDPOINTS;
   const results = [];
   for (const ep of endpoints) {
-    console.log(`Testing ${ep.path}...`);
-    const r = await probeEndpoint(ep.path);
+    console.log(`Testing ${ep.method} ${ep.path}...`);
+    const r = await probeEndpoint(ep.path, ep.method);
     if (r.ok) console.log(`OK ${ep.path} (${r.status})`);
     else console.log(`FAIL ${ep.path} (last status ${r.status})`);
     results.push(r);
@@ -226,6 +164,55 @@ function cleanupAndExit(codeOrEvent = 0) {
     try { wranglerProc.kill(); } catch (e) { /* ignore */ }
   }
   process.exit(code);
+}
+
+// Treat 400 as WARN (expected on missing params), 401 as WARN (unauth), 500 as FAIL
+const warnCodes = new Set([400, 401]);
+function grade(code) {
+  if (code >= 200 && code < 300) return 'PASS';
+  if (warnCodes.has(code)) return 'WARN';
+  return 'FAIL';
+}
+
+// Minimal probeEndpoint for worker route testing
+async function probeEndpoint(path, method = 'GET') {
+  const url = `http://localhost:8788${path}`;
+  const opts = { method, headers: { 'Origin': 'http://localhost:8788', 'Content-Type': 'application/json' } };
+  let res, body = '', status = 0, origin = '', headers = {};
+  try {
+    await new Promise((resolve, reject) => {
+      const req = http.request(url, opts, (response) => {
+        status = response.statusCode;
+        headers = response.headers;
+        origin = response.headers['access-control-allow-origin'] || '';
+        response.setEncoding('utf8');
+        response.on('data', chunk => { body += chunk; });
+        response.on('end', resolve);
+      });
+      req.on('error', reject);
+      if (method === 'POST' || method === 'PUT' || method === 'PATCH') {
+        req.write('{}'); // send empty JSON body for POST/PUT/PATCH
+      }
+      req.end();
+    });
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      endpoint: path,
+      triedMethod: method,
+      origin,
+      diagnostic: { headers, bodyPreview: body.slice(0, 200) }
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status,
+      endpoint: path,
+      triedMethod: method,
+      origin,
+      diagnostic: { error: String(error), headers, bodyPreview: body.slice(0, 200) }
+    };
+  }
 }
 
 // run
