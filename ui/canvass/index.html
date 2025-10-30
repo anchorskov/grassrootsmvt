@@ -4,57 +4,10 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Canvass</title>
-<script>
-  // Load environment configuration globally for non-module context
-  async function loadEnvironmentConfig() {
-    try {
-      const module = await import('../config/environments.js');
-      window.environmentConfig = module.default || module.environmentConfig;
-    } catch (error) {
-      console.error('Failed to load environment config:', error);
-      // Fallback configuration
-      window.environmentConfig = {
-        shouldBypassAuth: () => location.hostname === 'localhost' || location.hostname === '127.0.0.1',
-        getApiUrl: (endpoint, params = {}) => {
-          const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-          const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
-          
-          // Handle endpoint mapping like the real environment config
-          const endpointMap = {
-            'ping': '/api/ping',
-            'voters': '/api/voters',
-            'neighborhoods': '/api/neighborhoods',
-            'log': '/api/log',
-            'call': '/api/call',
-            'contact/status': '/api/contact/status',
-            'whoami': '/api/whoami'
-          };
-          
-          const endpointPath = endpointMap[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
-          let url = `${baseUrl}${endpointPath}`;
-          
-          if (Object.keys(params).length > 0) {
-            const searchParams = new URLSearchParams(params);
-            url += `?${searchParams.toString()}`;
-          }
-          return url;
-        },
-        debug: (message, data) => {
-          const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-          if (isLocal) console.log(`[ENV-LOCAL] ${message}`, data || '');
-        },
-        config: {
-          environment: location.hostname === 'localhost' ? 'local' : 'production',
-          isLocal: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-        }
-      };
-    }
-  }
-  loadEnvironmentConfig();
-</script>
+<script src="/config/environments.js"></script>
 <script src="/src/apiClient.js"></script>
-<script src="../shared/streetAutocomplete.js"></script>
 <script src="/shared/authGlobal.js"></script>
+<script src="../shared/streetAutocomplete.js"></script>
 <script type="module">
   import { showUserBadge } from '../shared/userBadge.js';
   showUserBadge();
@@ -181,16 +134,10 @@
 <div id="toast" style="position:fixed;left:50%;transform:translateX(-50%);bottom:20px;background:#111827;color:white;padding:8px 12px;border-radius:8px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.2);">Opening call...</div>
 
 <script>
-  // Load API shim (exposes window.apiFetch and API())
-  (function(){
-    const s = document.createElement('script');
-    s.type = 'module';
-    s.src = '/src/api-shim.js';
-    document.head.appendChild(s);
-  })();
 
   // Debug snippet: Cloudflare Access now manages authentication. Manual token storage removed.
-  const API = (p) => '/api' + p;
+  const API = (p = '', params = {}) =>
+    window.environmentConfig.getApiUrl(String(p).replace(/^\/+/, ''), params);
 
   function fromQS() {
     const u = new URL(location.href);
@@ -210,33 +157,25 @@
     badge.textContent = 'Filters: ' + JSON.stringify(f);
   }
 
-  async function jsonFetch(url, init={}) {
-    console.log('🔗 jsonFetch called with:', url, 'apiFetch available:', !!window.apiFetch);
-    
-    if (url.startsWith('/api') && window.apiFetch) {
-      console.log('📱 Using apiFetch with path:', url.replace('/api/',''));
-      // apiFetch expects just the path part without /api prefix
-      const response = await window.apiFetch(url.replace('/api/',''), init);
-      if (!response.ok) throw new Error('HTTP '+response.status);
-      const ct = response.headers.get('content-type')||'';
-      return ct.includes('application/json') ? response.json() : response.text();
+  async function jsonFetch(url, init = {}) {
+    if (typeof window.apiFetch !== 'function') {
+      throw new Error('API client not ready');
     }
-    
-    // Fallback: construct full URL to worker
-    let fullUrl = url;
-    if (url.startsWith('/api')) {
-      fullUrl = 'http://localhost:8787' + url;
-      console.log('🔄 Fallback to worker URL:', fullUrl);
+    const path = String(url).replace(/^\/?api\/?/, '');
+    const response = await window.apiFetch(path, init);
+    const text = await response.text().catch(() => '');
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      error.status = response.status;
+      error.body = text;
+      throw error;
     }
-    
-    const r = await fetch(fullUrl, {
-      credentials: 'include',
-      ...init,
-      headers: { 'content-type': 'application/json', ...(init.headers||{}) }
-    });
-    if (!r.ok) throw new Error('HTTP '+r.status);
-    const ct = r.headers.get('content-type')||'';
-    return ct.includes('application/json') ? r.json() : r.text();
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
   }
 
   function setMsg(t) { document.getElementById('msg').textContent = t || ''; }
@@ -547,17 +486,10 @@
       const filters = fromQS();
       
       // API call to get addresses on this specific street
-      const response = await fetch('http://localhost:8787/api/canvass/nearby', {
+      const data = await jsonFetch(API('canvass/nearby'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filters, street: streetName, limit: 100 })
       });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
-      const data = await response.json();
       console.log('📡 House numbers API response:', data);
       
       if (data.rows && data.rows.length > 0) {

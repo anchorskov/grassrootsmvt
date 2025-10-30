@@ -144,8 +144,9 @@
     
   </div>
 
-  <!-- JavaScript -->
-  <script type="module" src="/src/api-shim.js"></script>
+  <script src="/config/environments.js"></script>
+  <script src="/src/apiClient.js"></script>
+  <script src="/shared/authGlobal.js"></script>
   <script type="module">
     // Import API client with offline support and authentication
     import { 
@@ -157,7 +158,7 @@
       showToast,
       getAuthStatus,
       authenticatedFetch
-    } from '../src/apiClient.js';
+    } from '../src/apiClient.module.js';
     
     let currentVoter = null;
     let voters = [];

@@ -31,8 +31,11 @@
 <body>
 <!-- Sign in to API banner -->
 <div id="api-session-banner" style="display:none; padding:12px; background:#fff3cd; color:#3d3a00; border:1px solid #ffe69c; border-radius:8px; margin:12px 0;">
-  <strong>Action needed:</strong>
-  Please <a data-api-login href="#" style="text-decoration:underline;">sign in to the API</a> to continue.
+  <strong data-banner-title>Action needed:</strong>
+  <span data-banner-content>
+    Please <a data-api-login href="#" style="text-decoration:underline;">sign in to the API</a> to continue.
+  </span>
+  <span data-user-email style="font-weight:600; margin-left:4px;"></span>
 </div>
 
 <!-- Authentication status indicator -->
@@ -270,208 +273,134 @@
   });
 })();
 </script>
-
-<script type="module">
-// Import environment configuration
-import environmentConfig from './config/environments.js';
-
-// Environment-aware API client implementation
-function ensureAccessSession() {
-  // Bypass authentication in local development
-  if (environmentConfig.shouldBypassAuth()) {
-    environmentConfig.debug('Bypassing authentication in local development');
-    sessionStorage.setItem('accessReady:v1', 'true');
-    return Promise.resolve();
-  }
-
-  const ready = sessionStorage.getItem('accessReady:v1') === 'true';
-  if (!ready) {
-    // Direct kick to protected endpoint - no interstitial needed
-    const returnTo = encodeURIComponent(location.href);
-    const apiUrl = environmentConfig.getApiUrl('ping', {
-      finish: environmentConfig.getApiUrl('auth/finish', { to: returnTo })
-    });
-    environmentConfig.debug('Redirecting to authentication:', apiUrl);
-    window.location.replace(apiUrl);
-    // Return a pending promise so callers don't proceed
-    return new Promise(() => {});
-  }
-  return Promise.resolve();
-}
-
-// Centralized API fetch with credentials
-async function apiFetch(path, options = {}) {
-  await ensureAccessSession(); // make sure we kicked, if needed
-  
-  const apiUrl = environmentConfig.getApiUrl(path);
-  environmentConfig.debug('API fetch:', apiUrl);
-  
-  const fetchOptions = {
-    credentials: 'include',
-    ...options,
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-  };
-
-  const res = await fetch(apiUrl, fetchOptions);
-  
-  // In local development, don't redirect on auth errors
-  if (environmentConfig.shouldBypassAuth()) {
-    return res;
-  }
-  
-  // If something still goes sideways (e.g., Access cookie expired), re-kick.
-  if (res.status === 401 || res.status === 403) {
-    sessionStorage.removeItem('accessReady:v1');
-    // Direct kick to protected endpoint - no interstitial needed
-    const returnTo = encodeURIComponent(location.href);
-    const authUrl = environmentConfig.getApiUrl('ping', {
-      finish: environmentConfig.getApiUrl('auth/finish', { to: returnTo })
-    });
-    environmentConfig.debug('Re-authenticating due to 401/403:', authUrl);
-    window.location.replace(authUrl);
-    return new Promise(() => {});
-  }
-  return res;
-}
-
-function showBanner() {
-  const banner = document.getElementById('api-session-banner');
-  banner.style.display = '';
-  const link = banner.querySelector('[data-api-login]');
-  link.addEventListener('click', (e) => {
-    e.preventDefault();
-    signIn(); // Use the centralized sign-in function
-  });
-}
-
-// Authentication helper functions
-function signIn() {
-  const to = encodeURIComponent(location.href);
-  const apiOrigin = environmentConfig.getApiUrl('').replace('/api', '');
-  location.href = `${apiOrigin}/whoami?nav=1&to=${to}`;
-}
-
-function signOut() {
-  const to = encodeURIComponent(location.origin + "/");
-  const apiOrigin = environmentConfig.getApiUrl('').replace('/api', '');
-  location.href = `${apiOrigin}/auth/logout?to=${to}`;
-}
-
-// Refresh user badge by calling the API
-async function refreshUserBadge() {
-  const indicator = document.querySelector('.online-indicator');
-  if (!indicator) return;
-
-  try {
-    // In local development, always show as authenticated
-    if (environmentConfig.shouldBypassAuth()) {
-      const envLabel = environmentConfig.config.isLocal ? ' (Local)' : '';
-      indicator.textContent = `✅ Authenticated${envLabel}`;
-      indicator.parentElement.style.background = '#dcfce7';
-      indicator.parentElement.style.color = '#166534';
-      return;
-    }
-
-    // In production, check via direct API call (no redirects)
-    const apiUrl = environmentConfig.getApiUrl('whoami');
-    const response = await fetch(apiUrl, { 
-      credentials: 'include',
-      headers: { 'Accept': 'application/json' }
-    });
-
-    if (response.ok) {
-      const data = await response.json();
-      if (data.ok && data.email) {
-        indicator.textContent = `✅ Signed in as: ${data.email}`;
-        indicator.parentElement.style.background = '#dcfce7';
-        indicator.parentElement.style.color = '#166534';
-        
-        // Remove sign-in button if present
-        const signInBtn = document.querySelector('#sign-in-btn');
-        if (signInBtn) signInBtn.remove();
-        
-        // Add sign-out button if not present
-        let signOutBtn = document.querySelector('#sign-out-btn');
-        if (!signOutBtn) {
-          signOutBtn = document.createElement('button');
-          signOutBtn.id = 'sign-out-btn';
-          signOutBtn.textContent = 'Sign Out';
-          signOutBtn.onclick = signOut;
-          signOutBtn.style.cssText = 'margin-left: 10px; padding: 4px 8px; font-size: 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer;';
-          indicator.parentElement.appendChild(signOutBtn);
-        }
-        return; // Successfully authenticated
-      }
-    }
-    
-    // If we get here, not authenticated
-    throw new Error('Not authenticated');
-  } catch (err) {
-    // Not authenticated or API error - show sign-in state
-    indicator.textContent = '⚠️ Not signed in';
-    indicator.parentElement.style.background = '#fef3c7';
-    indicator.parentElement.style.color = '#92400e';
-    
-    // Remove sign-out button if present
-    const signOutBtn = document.querySelector('#sign-out-btn');
-    if (signOutBtn) signOutBtn.remove();
-    
-    // Add sign-in button if not present
-    let signInBtn = document.querySelector('#sign-in-btn');
-    if (!signInBtn) {
-      signInBtn = document.createElement('button');
-      signInBtn.id = 'sign-in-btn';
-      signInBtn.textContent = 'Sign In';
-      signInBtn.onclick = signIn;
-      signInBtn.style.cssText = 'margin-left: 10px; padding: 4px 8px; font-size: 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer;';
-      indicator.parentElement.appendChild(signInBtn);
-    }
-    
-    console.log('Authentication check:', err.message || 'Not authenticated');
-  }
-}
-
-// Initialize authentication on page load
-document.addEventListener('DOMContentLoaded', async () => {
-  console.log(`🚀 GrassrootsMVT initializing in ${environmentConfig.config.environment} environment...`);
-  environmentConfig.debug('Environment configuration:', environmentConfig.config);
-
-  // Refresh user badge to show current authentication status
-  await refreshUserBadge();
-
-  // Note: Authentication status is now checked via refreshUserBadge()
-  // No need for additional API calls that might trigger redirects
-  console.log('🔐 Authentication status check completed via user badge');
-});
-</script>
-
-<script type="module">
-  import { showUserBadge } from './shared/userBadge.js';
-  showUserBadge();
-</script>
-
+<script src="/config/environments.js"></script>
+<script src="/src/apiClient.js"></script>
 <script src="/shared/authGlobal.js"></script>
 <script>
-  // Update user email badge on authentication change
-  function updateUserEmailBadge() {
-    const badge = document.getElementById('user-email-badge');
-    if (window.authGlobal && window.authGlobal.user && window.authGlobal.user.email) {
-      badge.textContent = window.authGlobal.user.email;
-      badge.style.display = '';
-    } else {
-      badge.textContent = '';
-      badge.style.display = 'none';
+  document.addEventListener('DOMContentLoaded', () => {
+    const envConfig = window.environmentConfig;
+    if (envConfig) {
+      console.log(`🚀 GrassrootsMVT initializing in ${envConfig.config.environment} environment...`);
+      envConfig.debug('Environment configuration', envConfig.config);
     }
-  }
-  if (window.authGlobal) {
-    window.authGlobal.onAuthChange(updateUserEmailBadge);
-    updateUserEmailBadge();
-  } else {
-    window.addEventListener('authGlobalReady', function() {
-      window.authGlobal.onAuthChange(updateUserEmailBadge);
-      updateUserEmailBadge();
-    });
-  }
+
+    const banner = document.getElementById('api-session-banner');
+    const indicator = document.querySelector('.online-indicator');
+    const badge = document.getElementById('user-email-badge');
+
+    function attachLoginHandler() {
+      if (!banner) return;
+      banner.querySelectorAll('[data-api-login]').forEach(anchor => {
+        if (anchor.dataset.bound === '1') return;
+        anchor.dataset.bound = '1';
+        anchor.addEventListener('click', event => {
+          event.preventDefault();
+          if (typeof window.getCurrentUserOrRedirect === 'function') {
+            window.getCurrentUserOrRedirect().catch(() => {});
+          }
+        });
+      });
+    }
+    attachLoginHandler();
+
+    function showBanner() {
+      if (banner) banner.style.display = '';
+    }
+
+    function hideBanner() {
+      if (banner) banner.style.display = 'none';
+    }
+
+    function updateIndicator(state) {
+      if (!indicator) return;
+      const email = state?.user?.email || null;
+      if (state?.authenticated && email) {
+        indicator.textContent = `✅ Signed in as: ${email}`;
+        if (indicator.parentElement) {
+          indicator.parentElement.style.background = '#dcfce7';
+          indicator.parentElement.style.color = '#166534';
+        }
+      } else {
+        const isLocal = envConfig?.config?.isLocal;
+        indicator.textContent = isLocal ? '⚠️ Sign in may be required (local mode)' : '⚠️ Not signed in';
+        if (indicator.parentElement) {
+          indicator.parentElement.style.background = '#fef3c7';
+          indicator.parentElement.style.color = '#92400e';
+        }
+      }
+    }
+
+    function updateUserBadge(state) {
+      if (!badge) return;
+      const email = state?.user?.email || null;
+      if (state?.authenticated && email) {
+        badge.textContent = email;
+        badge.style.display = '';
+      } else {
+        badge.textContent = '';
+        badge.style.display = 'none';
+      }
+    }
+
+    function applyState(state) {
+      updateIndicator(state);
+      updateUserBadge(state);
+
+      if (!banner) return;
+
+      const title = banner.querySelector('[data-banner-title]');
+      const content = banner.querySelector('[data-banner-content]');
+      const emailSpan = banner.querySelector('[data-user-email]');
+      const email = state?.user?.email || (envConfig?.config?.isLocal ? 'dev@localhost' : '');
+
+      if (state?.authenticated || envConfig?.config?.isLocal) {
+        if (title) title.textContent = 'Signed in as:';
+        if (content) {
+          content.textContent = '';
+          content.style.display = 'none';
+        }
+        if (emailSpan) {
+          emailSpan.textContent = email;
+          emailSpan.style.display = email ? '' : 'none';
+        }
+        if (!envConfig?.config?.isLocal) {
+          hideBanner();
+        } else {
+          banner.style.display = '';
+        }
+      } else {
+        if (title) title.textContent = 'Action needed:';
+        if (content) {
+          content.innerHTML = 'Please <a data-api-login href="#" style="text-decoration:underline;">sign in to the API</a> to continue.';
+          content.style.display = '';
+        }
+        attachLoginHandler();
+        if (emailSpan) {
+          emailSpan.textContent = '';
+          emailSpan.style.display = 'none';
+        }
+        showBanner();
+      }
+    }
+
+    function initAuthState() {
+      if (!window.authGlobal) return;
+      window.authGlobal.onAuthChange(applyState);
+      if (window.authGlobal.ready) {
+        applyState(window.authGlobal);
+      } else {
+        window.authGlobal.refresh();
+      }
+    }
+
+    if (window.authGlobal) {
+      initAuthState();
+    } else {
+      window.addEventListener('authGlobalReady', () => {
+        initAuthState();
+      }, { once: true });
+    }
+  });
 </script>
 
 </body>

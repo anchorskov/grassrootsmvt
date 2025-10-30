@@ -1,5 +1,5 @@
 // Main application initialization
-import { apiFetch, getCurrentUserOrRedirect } from './apiClient.js';
+import { apiFetch, getCurrentUserOrRedirect } from '../js/common/apiClient.mjs';
 
 // Initialize authentication on page load
 document.addEventListener('DOMContentLoaded', async () => {
