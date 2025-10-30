@@ -267,12 +267,16 @@
 
   <button class="btn-primary" onclick="location.href='/ui/contact-form/index.html'">New Contact</button>
 
+  <!-- Shared scripts -->
+  <script src="/config/environments.js"></script>
+  <script src="/src/apiClient.js"></script>
+  <script src="/shared/authGlobal.js"></script>
   <!-- Import the reusable street autocomplete component -->
   <script src="../shared/streetAutocomplete.js"></script>
   
   <script type="module">
     // Progressive form logic with API integration
-    import environmentConfig from '../config/environments.js';
+    const environmentConfig = window.environmentConfig;
     
     let currentStep = 1;
     let formData = {};
@@ -474,36 +478,25 @@
     // Function to populate house numbers based on selected street
     async function populateHouseNumbers(streetName) {
       console.log('🏠 Loading house numbers for street:', streetName);
-      
       try {
         const filters = {
           county: formData.county,
           city: formData.city
         };
-        
         // API call to get addresses on this specific street
-        const response = await fetch('http://localhost:8787/api/canvass/nearby', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ filters, street: streetName, limit: 100 })
+        const data = await window.apiPost('canvass/nearby', {
+          filters,
+          street: streetName,
+          limit: 100
         });
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-        
-        const data = await response.json();
         console.log('📡 House numbers API response:', data);
-        
         if (data.rows && data.rows.length > 0) {
           // Extract house numbers from addresses
           const houseNumbers = [...new Set(data.rows.map(r => {
             const match = r.address.match(/^(\d+)/);
             return match ? match[1] : null;
           }).filter(Boolean))].sort((a, b) => parseInt(a) - parseInt(b));
-          
           console.log('🏠 Available house numbers:', houseNumbers);
-          
           // For contact form, we don't need a dropdown - just enable the field
           // The house numbers are available for validation if needed
         }
@@ -636,14 +629,7 @@
       };
       
       try {
-        const response = await fetch(environmentConfig.getApiUrl('contact-staging'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(contactData)
-        });
-        
-        const result = await response.json();
-        
+        const result = await window.apiPost('contact-staging', contactData);
         if (result.ok) {
           // Hide form, show success
           document.querySelector('.step.active').style.display = 'none';

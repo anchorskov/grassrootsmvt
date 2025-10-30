@@ -23,37 +23,24 @@ if [[ ! -f "package.json" ]] || [[ ! -d "worker" ]] || [[ ! -d "ui" ]]; then
     exit 1
 fi
 
-# --- Deploy Worker API ---
+# --- Deploy Worker ---
 echo ""
-echo "📦 Step 1: Deploying Worker API to PRODUCTION..."
+echo "📦 Step 1: Deploying Worker (API + Assets) to PRODUCTION..."
 cd worker
 echo "   Using: npx wrangler deploy --env production"
 npx wrangler deploy --env production
 if [[ $? -eq 0 ]]; then
     echo "✅ Worker deployed successfully to PRODUCTION"
-    echo "   Routes: volunteers.grassrootsmvt.org/api/*"
+    echo "   Routes include: volunteers.grassrootsmvt.org/api/* (plus static assets via ASSETS binding)"
 else
     echo "❌ Worker deployment failed"
     exit 1
 fi
-
-# --- Deploy UI (Pages) ---
-echo ""
-echo "🌐 Step 2: Deploying Pages UI to PRODUCTION..."
 cd "$PROJECT_ROOT"
-echo "   Using: npx wrangler pages deploy ./ui --project-name grassrootsmvt-production"
-npx wrangler pages deploy ./ui --project-name grassrootsmvt-production --commit-dirty=true
-if [[ $? -eq 0 ]]; then
-    echo "✅ Pages deployed successfully to PRODUCTION"
-    echo "   Domain: volunteers.grassrootsmvt.org"
-else
-    echo "❌ Pages deployment failed"
-    exit 1
-fi
 
 # --- Verify Deployments ---
 echo ""
-echo "🔍 Step 3: Verifying PRODUCTION deployments..."
+echo "🔍 Step 2: Verifying PRODUCTION deployment..."
 
 # Test API (expect 302 for Access, 401 or 200 for valid responses)
 echo "Testing PRODUCTION API endpoint..."
@@ -90,9 +77,9 @@ echo "Testing PRODUCTION Pages..."
 PAGES_URL="https://volunteers.grassrootsmvt.org"
 PAGES_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$PAGES_URL")
 if [[ "$PAGES_STATUS" == "200" ]]; then
-    echo "✅ PRODUCTION Pages responding (200)"
+    echo "✅ Root responding (200)"
 else
-    echo "⚠️  PRODUCTION Pages returned status: $PAGES_STATUS"
+    echo "⚠️  Root returned status: $PAGES_STATUS"
 fi
 
 # --- Summary ---

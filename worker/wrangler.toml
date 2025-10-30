@@ -3,12 +3,16 @@
 # grassrootsmvt-api
 # ============================
 
-name = "grassrootsmvt-api"
+name = "grassrootsmvt"
 main = "src/index.js"
 account_id = "8bfd3f60fbdcc89183e9e312fb03e86e"
 compatibility_date = "2024-12-01"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
+
+[assets]
+directory = "../ui"
+binding   = "ASSETS"
 
 # ===== LOCAL (default) =====
 [[d1_databases]]
@@ -24,8 +28,6 @@ ALLOW_ORIGIN_DEV = "http://127.0.0.1:8788,http://localhost:8788,http://localhost
 
 # ===== PREVIEW =====
 [env.preview]
-name = "grassrootsmvt-api-preview"
-
 [env.preview.vars]
 ENVIRONMENT = "preview"
 DATA_BACKEND = "d1"
@@ -39,9 +41,6 @@ migrations_dir = "db/migrations"
 
 # ===== PRODUCTION =====
 [env.production]
-name = "grassrootsmvt-api"
-main = "src/index.js"
-
 [env.production.vars]
 ENVIRONMENT = "production"
 DATA_BACKEND = "d1"
@@ -57,4 +56,3 @@ binding = "d1"
 database_name = "wy"
 database_id = "4b4227f1-bf30-4fcf-8a08-6967b536a5ab"
 migrations_dir = "db/migrations"
-

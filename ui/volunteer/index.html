@@ -225,15 +225,16 @@
 
   </div>
 
-  <!-- JavaScript -->
-  <script type="module" src="../src/api-shim.js"></script>
+  <script src="/config/environments.js"></script>
+  <script src="/src/apiClient.js"></script>
+  <script src="/shared/authGlobal.js"></script>
   <script type="module">
     // Import authentication-enabled API client
     import { 
       authenticatedFetch, 
       getAuthStatus, 
       showToast 
-    } from '../src/apiClient.js';
+    } from '../src/apiClient.module.js';
     
     let metadata = null;
     let currentMode = null; // 'district' or 'city'

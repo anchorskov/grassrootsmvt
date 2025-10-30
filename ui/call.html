@@ -5,52 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex, nofollow" />
 <title>Volunteer Call</title>
-<script>
-  // Load environment configuration globally for non-module context
-  async function loadEnvironmentConfig() {
-    try {
-      const module = await import('./config/environments.js');
-      window.environmentConfig = module.default || module.environmentConfig;
-    } catch (error) {
-      console.error('Failed to load environment config:', error);
-      // Fallback configuration
-      window.environmentConfig = {
-        shouldBypassAuth: () => location.hostname === 'localhost' || location.hostname === '127.0.0.1',
-        getApiUrl: (endpoint, params = {}) => {
-          const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-          const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
-          
-            // Handle endpoint mapping like the real environment config
-            const endpointMap = {
-              'ping': '/api/ping',
-              'voters': '/api/voters',
-              'neighborhoods': '/api/neighborhoods',
-              'log': '/api/log',
-              'call': '/api/call',
-              'whoami': '/api/whoami'
-            };          const endpointPath = endpointMap[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
-          let url = `${baseUrl}${endpointPath}`;
-          
-          if (Object.keys(params).length > 0) {
-            const searchParams = new URLSearchParams(params);
-            url += `?${searchParams.toString()}`;
-          }
-          return url;
-        },
-        debug: (message, data) => {
-          const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-          if (isLocal) console.log(`[ENV-LOCAL] ${message}`, data || '');
-        },
-        config: {
-          environment: location.hostname === 'localhost' ? 'local' : 'production',
-          isLocal: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-        }
-      };
-    }
-  }
-  window.envConfigReady = loadEnvironmentConfig();  // Store promise for later
-</script>
+<script src="/config/environments.js"></script>
 <script src="/src/apiClient.js"></script>
+<script src="/shared/authGlobal.js"></script>
 <style>
   body { font-family: system-ui, sans-serif; margin: 1rem; max-width: 720px; }
   .card { border: 1px solid #ddd; border-radius: 12px; padding: 1rem; margin: 1rem 0; box-shadow: 0 1px 2px rgba(0,0,0,.04); }
@@ -151,14 +108,6 @@
 </div>
 
 <script>
-  // Load the API shim which exposes window.apiFetch and API()
-  (function(){
-    // Load the API shim as an ES module so imports inside it work correctly.
-    const s = document.createElement('script');
-    s.type = 'module';
-    s.src = '/src/api-shim.js';
-    document.head.appendChild(s);
-  })();
 
   // Debug snippet: logs token presence and tests /api/ping connectivity
   (function(){
@@ -174,7 +123,7 @@
             if (window.apiFetch) resolve();
             else setTimeout(resolve, 500);
           });
-          const j = await window.apiFetch('ping'); // Remove leading slash
+          const j = await window.apiGet('ping');
           console.log('🌎 /api/ping result:', j);
         } catch (err) {
           console.error('Failed to reach /api/ping:', err);
@@ -185,17 +134,13 @@
   })();
 
   // Use environment-aware API URL building instead of hardcoded paths
-  const API = (path) => {
-    if (window.environmentConfig) {
-      // Remove leading slash and /api/ if present, then let getApiUrl handle it
-      const cleanPath = path.replace(/^\/?(api\/)?/, '');
-      return window.environmentConfig.getApiUrl(cleanPath);
+  const API = (path = '', params = {}) => {
+    const cleanPath = String(path).replace(/^\/?(api\/)?/, '');
+    if (window.environmentConfig && typeof window.environmentConfig.getApiUrl === 'function') {
+      return window.environmentConfig.getApiUrl(cleanPath, params);
     }
-    // Fallback if environment config not loaded yet
-    const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-    const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
-    const cleanPath = path.replace(/^\/?(api\/)?/, '');
-    return `${baseUrl}/api/${cleanPath}`;
+    const qs = new URLSearchParams(params);
+    return `/api/${cleanPath}${qs.toString() ? `?${qs}` : ''}`;
   };
 
   const who = document.getElementById("whoami");
@@ -241,47 +186,24 @@
   }
 
   async function jsonFetch(url, init = {}) {
-    console.log('📡 jsonFetch:', url, init.method || 'GET');
-    console.log('  window.apiFetch available?', !!window.apiFetch);
-    
-    // Wait for apiFetch to be available
-    if (!window.apiFetch) {
-      console.warn('⏳ Waiting for apiFetch to be available...');
-      let attempts = 0;
-      while (!window.apiFetch && attempts < 20) {
-        await new Promise(r => setTimeout(r, 100));
-        attempts++;
-      }
-      if (!window.apiFetch) {
-        throw new Error('apiFetch not available after waiting');
-      }
-      console.log('✅ apiFetch now available');
+    if (typeof window.apiFetch !== 'function') {
+      throw new Error('apiClient not ready');
     }
-    
-    // For API endpoints, use the environment-aware apiFetch
-    if (url.includes('/api/')) {
-      // Extract the endpoint from the full URL
-      const endpointMatch = url.match(/\/api\/(.+)/);
-      if (endpointMatch) {
-        const endpoint = endpointMatch[1];
-        console.log('  → Using apiFetch for endpoint:', endpoint);
-        const response = await window.apiFetch(endpoint, init);
-        console.log('  → Response status:', response.status);
-        const ct = response.headers.get("content-type") || "";
-        return ct.includes("application/json") ? response.json() : response.text();
-      }
+    const path = String(url).replace(/^\/?api\/?/, '');
+    const response = await window.apiFetch(path, init);
+    const text = await response.text().catch(() => '');
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status}`);
+      error.status = response.status;
+      error.body = text;
+      throw error;
     }
-    
-    // Fallback for non-API endpoints
-    const r = await fetch(url, {
-      credentials: "include",
-      ...init,
-      headers: { "content-type": "application/json", ...(init.headers || {}) },
-    });
-    if (r.status === 401) throw new Error("Unauthorized");
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const ct = r.headers.get("content-type") || "";
-    return ct.includes("application/json") ? r.json() : r.text();
+    if (!text) return null;
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
   }
 
   async function loadWho() {
@@ -416,13 +338,11 @@
   const filters = getFilters();
   showFiltersBadge(filters);
   (async () => {
-    if (window.envConfigReady) await window.envConfigReady;  // Wait for environment
     console.log("✅ Ready, loading data...");
     await loadWho();     // don’t block if this fails; loadWho() already swallows errors
     await nextVoter();   // show a voter immediately
   })();
 </script>
-<script src="/shared/authGlobal.js"></script>
 <script>
   // Update user email badge on authentication change
   function updateUserEmailBadge() {

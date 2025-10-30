@@ -119,7 +119,7 @@ async function ensureAuth(request, env, config) {
     null;
   return {
     email: headerEmail || (config.isLocal ? 'dev@localhost' : null),
-    authenticated: !!headerEmail,
+    authenticated: !!headerEmail || config.isLocal,
     isLocal: config.isLocal,
   };
 }
@@ -139,36 +139,62 @@ function parseVoterIds(paramValue) {
     .filter(Boolean);
 }
 
+async function handleApiRequest(request, env, cfCtx) {
+  const config = getEnvironmentConfig(env);
+  const allowedOrigin = pickAllowedOrigin(request, env);
+  const url = new URL(request.url);
+  const path = url.pathname.replace(/^\/api(?=\/|$)/, '') || '/';
+
+  if (request.method === 'OPTIONS') {
+    return preflightResponse(allowedOrigin, request);
+  }
+
+  const ctx = {
+    config,
+    allowedOrigin,
+    path,
+    jsonResponse: (data, status = 200, origin = allowedOrigin, extraHeaders = {}) =>
+      jsonResponse(data, status, origin, extraHeaders),
+  };
+
+  try {
+    return router(request, env, cfCtx, ctx);
+  } catch (err) {
+    console.error('[worker] unhandled error', err);
+    const status = err?.status && Number.isInteger(err.status) ? err.status : 500;
+    return jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      status,
+      allowedOrigin
+    );
+  }
+}
+
+async function handleAssetRequest(request, env) {
+  if (!env.ASSETS) {
+    return new Response('ASSETS binding is not configured', { status: 500 });
+  }
+
+  const assetResponse = await env.ASSETS.fetch(request);
+  if (assetResponse.status === 404 && request.method === 'GET') {
+    const accept = request.headers.get('accept') || '';
+    if (accept && accept.includes('text/html')) {
+      const fallbackUrl = new URL('/', request.url);
+      const fallbackRequest = new Request(fallbackUrl.toString(), request);
+      return env.ASSETS.fetch(fallbackRequest);
+    }
+  }
+  return assetResponse;
+}
+
 export default {
   async fetch(request, env, cfCtx) {
-    const config = getEnvironmentConfig(env);
-    const allowedOrigin = pickAllowedOrigin(request, env);
-    const url = new URL(request.url);
-    const path = url.pathname.replace(/^\/api(?=\/|$)/, '') || '/';
-
-    if (request.method === 'OPTIONS') {
-      return preflightResponse(allowedOrigin, request);
+    const { pathname } = new URL(request.url);
+    const isApiRequest = pathname === '/api' || pathname.startsWith('/api/');
+    if (isApiRequest) {
+      return handleApiRequest(request, env, cfCtx);
     }
-
-    const ctx = {
-      config,
-      allowedOrigin,
-      path,
-      jsonResponse: (data, status = 200, origin = allowedOrigin, extraHeaders = {}) =>
-        jsonResponse(data, status, origin, extraHeaders),
-    };
-
-    try {
-      return router(request, env, cfCtx, ctx);
-    } catch (err) {
-      console.error('[worker] unhandled error', err);
-      const status = err?.status && Number.isInteger(err.status) ? err.status : 500;
-      return jsonResponse(
-        { ok: false, error: String(err?.message || err) },
-        status,
-        allowedOrigin
-      );
-    }
+    return handleAssetRequest(request, env);
   },
 };
 

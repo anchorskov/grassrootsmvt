@@ -30,7 +30,7 @@ class StreetAutocomplete {
     this.getCity = options.getCity || (() => null);
     this.onStreetSelected = options.onStreetSelected || (() => {});
     this.onHouseFieldChange = options.onHouseFieldChange || (() => {});
-    this.apiEndpoint = options.apiEndpoint || 'http://localhost:8787/api/streets';
+  this.apiEndpoint = options.apiEndpoint || `${window.location.origin}/api/streets`;
     this.maxSuggestions = options.maxSuggestions || 20;
     this.enableHouseAfterChars = options.enableHouseAfterChars || 3;
     
@@ -104,17 +104,19 @@ class StreetAutocomplete {
   async handleFocus() {
     const county = this.getCounty();
     const city = this.getCity();
-    
     if (!county || !city) {
       this.showMessage('Please select county and city first', 'no-results');
       return;
     }
-    
-    // Check if we need to reload streets
+    // Always POST with normalized args
     if (this.needsReload(county, city)) {
-      await this.loadStreets(county, city);
+      await this.loadStreets({
+        county,
+        city,
+        q: '',
+        limit: 2000
+      });
     } else if (this.allStreets.length > 0) {
-      // Show existing streets
       this.showStreetSuggestions(this.allStreets, '');
     }
   }
@@ -161,32 +163,33 @@ class StreetAutocomplete {
   
   async loadStreets(county, city) {
     if (this.isLoading) return;
-    
     this.isLoading = true;
     this.showMessage('Loading streets...', 'loading');
-    
     try {
-      const response = await fetch(this.apiEndpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ county, city })
-      });
-      
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-      
-      const data = await response.json();
-      
+      // Accept object arg for flexibility
+      const source = typeof county === 'object' ? county : { county, city, q: '', limit: 2000 };
+      const {
+        county: countyValue,
+        city: cityValue,
+        q = '',
+        limit = 2000
+      } = source;
+      const countyUpper = (countyValue || '').toUpperCase();
+      const cityUpper = (cityValue || '').toUpperCase();
+      const body = {
+        county: countyUpper,
+        city: cityUpper,
+        county_norm: countyUpper,
+        city_norm: cityUpper,
+        q,
+        limit
+      };
+      const data = await window.apiPost('streets', body);
       if (data.streets && data.streets.length > 0) {
-        // Cache streets and location
         this.allStreets = data.streets.map(s => s.name).sort();
-        this.currentCounty = county;
-        this.currentCity = city;
-        
-        console.log(`✅ Loaded ${this.allStreets.length} streets for ${county}/${city}`);
-        
-        // Show all streets initially
+        this.currentCounty = countyUpper;
+        this.currentCity = cityUpper;
+        console.log(`✅ Loaded ${this.allStreets.length} streets for ${countyUpper}/${cityUpper}`);
         this.showStreetSuggestions(this.allStreets, '');
       } else {
         this.showMessage('No streets found for this area', 'no-results');

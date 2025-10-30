@@ -6,14 +6,7 @@ async function initAuthUI() {
 
   // Authentication now handled by Cloudflare Access and /api/whoami.
   try {
-    const res = await fetch("/api/whoami", { credentials: "include" });
-    if (!res.ok) {
-      if (userInfoDiv) {
-        userInfoDiv.innerHTML = `<a href="/">Sign In</a>`;
-      }
-      return;
-    }
-    const data = await res.json();
+    const data = await window.apiGet('whoami');
     if (data.authenticated || data.ok) {
       if (userInfoDiv) {
         userInfoDiv.innerHTML = `

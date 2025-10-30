@@ -1,4 +1,4 @@
-import { apiFetch } from './apiClient.js';
+import { apiFetch } from '../../js/common/apiClient.mjs';
 
 // Expose a simple global helper for non-module pages
 window.apiFetch = apiFetch;
