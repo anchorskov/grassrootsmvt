@@ -29,7 +29,7 @@
     "deploy:pages:legacy": "npx wrangler pages deploy ./ui --project-name=grassrootsmvt --commit-dirty=true",
     "verify:functions": "curl -sS -H 'Authorization: Bearer $CF_API_TOKEN' https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/$PROJECT/deployments?per_page=1 | jq '.result[0].uses_functions'",
     "deploy:check": "bash ./scripts/deploy_and_check.sh",
-    "zip:review": "zip -r ./grassroots-review.zip worker/wrangler.toml worker/src/index.js ui/index.html ui/src/apiClient.js README.md ACCESS.md DEPLOYING.md"
+    "zip:review": "zip -r ./grassroots-review.zip worker/wrangler.toml worker/src/index.js ui/index.html ui/src/apiClient.v2.js README.md ACCESS.md DEPLOYING.md"
   },
   "repository": {
     "type": "git",
@@ -52,7 +52,7 @@
     "cors": "^2.8.5",
     "express": "^5.1.0",
     "miniflare": "^4.20251004.0",
-    "wrangler": "^4.45.2"
+    "wrangler": "latest"
   },
   "dependencies": {
     "jose": "^6.1.0"

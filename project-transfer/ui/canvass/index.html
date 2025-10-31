@@ -80,14 +80,6 @@
 <div id="toast" style="position:fixed;left:50%;transform:translateX(-50%);bottom:20px;background:#111827;color:white;padding:8px 12px;border-radius:8px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.2);">Opening call...</div>
 
 <script>
-  // Load API shim (exposes window.apiFetch and API())
-  (function(){
-    const s = document.createElement('script');
-    s.type = 'module';
-    s.src = '/src/api-shim.js';
-    document.head.appendChild(s);
-  })();
-
   // Debug snippet: logs token presence and tests /api/ping connectivity
   (function(){
     const dbg = document.createElement('script');
