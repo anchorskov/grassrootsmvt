@@ -2,64 +2,8 @@
 <html>
 <head>
   <title>URL Generation Debug</title>
-  <script>
-    // Load environment configuration globally
-    async function loadEnvironmentConfig() {
-      try {
-        const module = await import('./config/environments.js');
-        window.environmentConfig = module.default || module.environmentConfig;
-        console.log('✅ Environment config loaded:', window.environmentConfig);
-        console.log('✅ Config object:', window.environmentConfig.config);
-        
-        // Test URL generation
-        console.log('✅ ping URL:', window.environmentConfig.getApiUrl('ping'));
-        console.log('✅ call URL:', window.environmentConfig.getApiUrl('call'));
-        console.log('✅ whoami URL:', window.environmentConfig.getApiUrl('whoami'));
-        
-      } catch (error) {
-        console.error('❌ Environment config error:', error);
-        // Show fallback
-        console.log('Using fallback configuration');
-        window.environmentConfig = {
-          shouldBypassAuth: () => location.hostname === 'localhost' || location.hostname === '127.0.0.1',
-          getApiUrl: (endpoint, params = {}) => {
-            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-            const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
-            
-            const endpointMap = {
-              'ping': '/api/ping',
-              'voters': '/api/voters',
-              'call': '/api/call',
-              'whoami': '/api/whoami'
-            };
-            
-            const endpointPath = endpointMap[endpoint] || (endpoint.startsWith('/') ? endpoint : `/api/${endpoint}`);
-            let url = `${baseUrl}${endpointPath}`;
-            
-            if (Object.keys(params).length > 0) {
-              const searchParams = new URLSearchParams(params);
-              url += `?${searchParams.toString()}`;
-            }
-            return url;
-          },
-          debug: (message, data) => {
-            const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-            if (isLocal) console.log(`[ENV-LOCAL] ${message}`, data || '');
-          },
-          config: {
-            environment: location.hostname === 'localhost' ? 'local' : 'production',
-            isLocal: location.hostname === 'localhost' || location.hostname === '127.0.0.1'
-          }
-        };
-        
-        console.log('✅ Fallback ping URL:', window.environmentConfig.getApiUrl('ping'));
-        console.log('✅ Fallback call URL:', window.environmentConfig.getApiUrl('call'));
-      }
-    }
-    
-    loadEnvironmentConfig();
-  </script>
-  <script src="/src/apiClient.js"></script>
+  <script src="/config/environments.js"></script>
+  <script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
 </head>
 <body>
   <h1>🔍 URL Generation Debug</h1>
@@ -121,14 +65,9 @@
       
       // Simulate the API function from call.html
       const API = (path) => {
-        if (window.environmentConfig) {
-          const cleanPath = path.replace(/^\/?(api\/)?/, '');
-          return window.environmentConfig.getApiUrl(cleanPath);
-        }
-        const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-        const baseUrl = isLocal ? 'http://localhost:8787' : 'https://api.grassrootsmvt.org';
+        if (!window.environmentConfig) return `/api/${path.replace(/^\/?(api\/)?/, '')}`;
         const cleanPath = path.replace(/^\/?(api\/)?/, '');
-        return `${baseUrl}/api/${cleanPath}`;
+        return window.environmentConfig.getApiUrl(cleanPath);
       };
       
       log('✅ Testing API function:');

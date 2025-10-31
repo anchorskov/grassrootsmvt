@@ -1,5 +1,5 @@
 // ES module wrapper for the classic apiClient.js
-import '/src/apiClient.js';
+import '/src/apiClient.v2.js?v=2025-10-30a';
 
 export const apiFetch = window.apiFetch;
 export const apiGet = window.apiGet;

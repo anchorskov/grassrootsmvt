@@ -1,4 +1,5 @@
 (() => {
+  // Never hardcode an origin. Always use same-origin via environmentConfig.
   const OFFLINE_QUEUE_KEY = 'grassrootsmvt:offline-queue';
   const isBrowser = typeof window !== 'undefined';
 
@@ -10,10 +11,27 @@
     if (!window.environmentConfig || typeof window.environmentConfig.getApiUrl !== 'function') {
       const isLocal = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
       window.environmentConfig = {
+        shouldBypassAuth() {
+          return isLocal;
+        },
         getApiUrl(endpoint = '', params = {}) {
-          const clean = String(endpoint).replace(/^\/?api\/?/, '');
+          const endpointMap = {
+            ping: '/api/ping',
+            voters: '/api/voters',
+            neighborhoods: '/api/neighborhoods',
+            log: '/api/log',
+            call: '/api/call',
+            whoami: '/api/whoami',
+          };
+          const raw = String(endpoint ?? '');
+          const normalizedKey = raw.replace(/^\/?api\/?/, '');
+          const mapped =
+            endpointMap[normalizedKey] ||
+            endpointMap[raw] ||
+            (raw.startsWith('/') ? raw : `/api/${normalizedKey}`);
+          const endpointPath = mapped.startsWith('/') ? mapped : `/${mapped}`;
           const search = new URLSearchParams(params);
-          return `/api/${clean}${search.toString() ? `?${search}` : ''}`;
+          return `${endpointPath}${search.toString() ? `?${search}` : ''}`;
         },
         debug() {},
         config: {
@@ -25,6 +43,11 @@
     return window.environmentConfig;
   };
 
+  function kickToAccess(returnToUrl) {
+    const to = encodeURIComponent(returnToUrl || window.location.href);
+    window.location.assign(`/api/whoami?nav=1&to=${to}`);
+  }
+
   const isStructuredBody = value =>
     value &&
     typeof value === 'object' &&
@@ -35,21 +58,34 @@
 
   const normalizeEndpoint = input => {
     if (!input) return '';
-    if (typeof input !== 'string') return '';
-    if (/^https?:\/\//i.test(input)) {
-      const url = new URL(input, window.location.href);
+    const value = typeof input === 'string' ? input : String(input);
+    if (/^https?:\/\//i.test(value)) {
+      const url = new URL(value, window.location.href);
       if (url.origin !== window.location.origin) {
         throw new Error(`Cross-origin requests are not allowed: ${url.origin}`);
       }
-      const cleaned = `${url.pathname}${url.search}${url.hash}`.replace(/^\/?api\/?/, '');
-      return cleaned.replace(/^\/+/, '');
+      const cleaned = `${url.pathname}${url.search}${url.hash}`;
+      return cleaned.replace(/^\/?api\/?/, '').replace(/^\/+/, '');
     }
-    return input.replace(/^\/?api\/?/, '');
+    return value.replace(/^\/?api\/?/, '');
   };
 
   const buildApiUrl = (endpoint, params) => {
     const env = ensureEnvironmentConfig();
-    return env.getApiUrl(endpoint, params);
+    return env.getApiUrl(normalizeEndpoint(endpoint), params);
+  };
+
+  const withAuthHeaders = async (init = {}) => {
+    const options = { credentials: 'include', ...init };
+    const headers = new Headers(options.headers || {});
+    if (isStructuredBody(options.body)) {
+      if (!headers.has('content-type')) {
+        headers.set('content-type', 'application/json');
+      }
+      options.body = JSON.stringify(options.body);
+    }
+    options.headers = headers;
+    return options;
   };
 
   const parseJson = async response => {
@@ -67,46 +103,41 @@
 
   const apiFetch = async (endpoint, init = {}) => {
     const { params, ...rest } = init || {};
-    const options = { credentials: 'include', ...rest };
-    const headers = new Headers(options.headers || {});
-
-    if (isStructuredBody(options.body)) {
-      if (!headers.has('content-type')) {
-        headers.set('content-type', 'application/json');
-      }
-      options.body = JSON.stringify(options.body);
-    }
-
-    options.headers = headers;
-
-    const url = buildApiUrl(normalizeEndpoint(endpoint), params);
-    return fetch(url, options);
+    const url = buildApiUrl(endpoint, params);
+    return fetch(url, await withAuthHeaders(rest));
   };
 
-  const apiGet = async (endpoint, params) => {
-    const response = await apiFetch(endpoint, { method: 'GET', params });
-    if (!response.ok) {
-      const error = new Error(`GET ${endpoint} failed (${response.status})`);
-      error.status = response.status;
-      error.body = await response.text().catch(() => '');
-      throw error;
+  const apiGet = async (path, params) => {
+    const url = buildApiUrl(path, params);
+    const res = await fetch(url, await withAuthHeaders({ method: 'GET' }));
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      const err = new Error(`GET ${path} ${res.status}`);
+      err.status = res.status;
+      err.body = text;
+      throw err;
     }
-    return parseJson(response);
+    return res.json();
   };
 
-  const apiPost = async (endpoint, body = {}, init = {}) => {
-    const response = await apiFetch(endpoint, {
-      ...init,
-      method: init.method || 'POST',
-      body,
-    });
-    if (!response.ok) {
-      const error = new Error(`POST ${endpoint} failed (${response.status})`);
-      error.status = response.status;
-      error.body = await response.text().catch(() => '');
-      throw error;
+  const apiPost = async (path, body, init = {}) => {
+    const url = buildApiUrl(path);
+    const res = await fetch(
+      url,
+      await withAuthHeaders({
+        ...init,
+        method: 'POST',
+        body: JSON.stringify(body || {}),
+      })
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      const err = new Error(`POST ${path} ${res.status}`);
+      err.status = res.status;
+      err.body = text;
+      throw err;
     }
-    return parseJson(response);
+    return res.json();
   };
 
   const showToast = (message, type = 'info', duration = 4000) => {
@@ -311,11 +342,7 @@
   const ensureAccessSession = () => Promise.resolve(true);
 
   const startAccessRedirect = () => {
-    const redirect = buildApiUrl('whoami', {
-      nav: '1',
-      to: encodeURIComponent(window.location.href),
-    });
-    window.location.href = redirect;
+    kickToAccess(window.location.href);
     return new Promise(() => {});
   };
 
@@ -335,7 +362,7 @@
       return !!(data && data.authenticated);
     } catch (err) {
       if (err?.status === 401) {
-        startAccessRedirect();
+        kickToAccess(window.location.href);
       }
       return false;
     }
@@ -346,7 +373,8 @@
       return await apiGet('whoami');
     } catch (err) {
       if (err?.status === 401 || err?.status === 403) {
-        return startAccessRedirect();
+        kickToAccess(window.location.href);
+        return new Promise(() => {});
       }
       throw err;
     }

@@ -145,7 +145,6 @@
   </div>
 
   <!-- JavaScript -->
-  <script type="module" src="/src/api-shim.js"></script>
   <script type="module">
     // Import API client with offline support and authentication
     import { 
@@ -158,6 +157,8 @@
       getAuthStatus,
       authenticatedFetch
     } from '../src/apiClient.js';
+    
+    const API_BASE = '';
     
     let currentVoter = null;
     let voters = [];

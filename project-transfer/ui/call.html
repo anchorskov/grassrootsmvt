@@ -99,15 +99,6 @@
 <div class="card" id="empty" hidden>No eligible voters (or not logged in).</div>
 
 <script>
-  // Load the API shim which exposes window.apiFetch and API()
-  (function(){
-    // Load the API shim as an ES module so imports inside it work correctly.
-    const s = document.createElement('script');
-    s.type = 'module';
-    s.src = '/src/api-shim.js';
-    document.head.appendChild(s);
-  })();
-
   // Debug snippet: logs token presence and tests /api/ping connectivity
   (function(){
     const dbg = document.createElement('script');

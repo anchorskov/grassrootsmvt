@@ -226,23 +226,17 @@
   </div>
 
   <script src="/config/environments.js"></script>
-  <script src="/src/apiClient.js"></script>
+  <script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
   <script src="/shared/authGlobal.js"></script>
   <script type="module">
     // Import authentication-enabled API client
     import { 
-      authenticatedFetch, 
       getAuthStatus, 
       showToast 
     } from '../src/apiClient.module.js';
     
     let metadata = null;
     let currentMode = null; // 'district' or 'city'
-
-    // API Configuration with environment detection
-    const API_BASE = window.location.hostname.includes('localhost') 
-      ? 'http://localhost:8787' 
-      : 'https://api.grassrootsmvt.org';
 
     // DOM Elements
     const elements = {
@@ -317,13 +311,7 @@
     async function fetchMetadata() {
       try {
         console.log('🌐 Fetching metadata with authentication');
-        const response = await authenticatedFetch(`${API_BASE}/api/metadata`);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
+        const data = await window.apiGet('metadata');
         
         if (!data.ok) {
           throw new Error(data.message || 'API returned error status');
@@ -343,17 +331,9 @@
     // Fetch smart metadata based on selection using authenticated requests
     async function fetchSmartMetadata(params) {
       try {
-        const queryString = new URLSearchParams(params).toString();
-        const url = `${API_BASE}/api/metadata?${queryString}`;
         console.log('🧠 Fetching smart metadata with authentication');
         
-        const response = await authenticatedFetch(url);
-        
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-        
-        const data = await response.json();
+        const data = await window.apiGet('metadata', params);
         
         if (!data.ok) {
           throw new Error(data.message || 'API returned error status');

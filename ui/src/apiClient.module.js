@@ -1,5 +1,5 @@
 import '../config/environments.js';
-import './apiClient.js';
+import './apiClient.v2.js?v=2025-10-30a';
 
 const ensure = name => {
   const value = window[name];

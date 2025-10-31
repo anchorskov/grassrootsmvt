@@ -145,7 +145,7 @@
   </div>
 
   <script src="/config/environments.js"></script>
-  <script src="/src/apiClient.js"></script>
+  <script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
   <script src="/shared/authGlobal.js"></script>
   <script type="module">
     // Import API client with offline support and authentication
@@ -466,30 +466,24 @@
         submitBtn.textContent = '🏘️ Submitting...';
         
         // Submit canvass to /api/canvass
-        const canvassResponse = await fetch(`${API_BASE}/api/canvass`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        
-        if (!canvassResponse.ok) {
-          throw new Error(`Canvass submission failed: ${canvassResponse.status}`);
+        const canvassResponse = await window.apiPost('canvass', payload);
+        if (!canvassResponse?.ok) {
+          throw new Error(`Canvass submission failed: ${canvassResponse?.error || 'unknown_error'}`);
         }
         
         // Submit pulse opt-in if checked
         if (payload.pulse_opt_in) {
-          const pulseResponse = await fetch(`${API_BASE}/api/pulse`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
+          try {
+            const pulseResponse = await window.apiPost('pulse', { 
               voter_id: payload.voter_id, 
               contact_method: 'sms', 
               consent_source: 'canvass' 
-            })
-          });
-          
-          if (!pulseResponse.ok) {
-            console.warn('Pulse opt-in submission failed:', pulseResponse.status);
+            });
+            if (!pulseResponse?.ok) {
+              console.warn('Pulse opt-in submission failed:', pulseResponse?.error || pulseResponse);
+            }
+          } catch (pulseError) {
+            console.warn('Pulse opt-in submission failed:', pulseError);
           }
         }
         

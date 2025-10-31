@@ -4,9 +4,7 @@
 (function initializeAuth() {
   'use strict';
   
-  const LOCAL_API = "http://localhost:8787";
-  const PROD_API = "https://volunteers.grassrootsmvt.org/api";
-  const API_BASE = window.location.hostname === "localhost" ? LOCAL_API : PROD_API;
+  const API_BASE = '';
   
   /**
    * Extract JWT token from Cloudflare Access cookie

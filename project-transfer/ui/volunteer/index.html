@@ -226,7 +226,6 @@
   </div>
 
   <!-- JavaScript -->
-  <script type="module" src="../src/api-shim.js"></script>
   <script type="module">
     // Import authentication-enabled API client
     import { 
@@ -238,10 +237,8 @@
     let metadata = null;
     let currentMode = null; // 'district' or 'city'
 
-    // API Configuration with environment detection
-    const API_BASE = window.location.hostname.includes('localhost') 
-      ? 'http://localhost:8787' 
-      : 'https://api.grassrootsmvt.org';
+    // API base uses same-origin paths
+    const API_BASE = '';
 
     // DOM Elements
     const elements = {
