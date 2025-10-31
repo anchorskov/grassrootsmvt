@@ -189,12 +189,39 @@ async function handleAssetRequest(request, env) {
 
 export default {
   async fetch(request, env, cfCtx) {
-    const { pathname } = new URL(request.url);
-    const isApiRequest = pathname === '/api' || pathname.startsWith('/api/');
+    const url = new URL(request.url);
+
+    if (url.pathname === '/src/apiClient.js') {
+      url.pathname = '/src/apiClient.v2.js';
+      url.searchParams.set('v', '2025-10-30a');
+      return Response.redirect(url.toString(), 302);
+    }
+
+    const isApiRequest = url.pathname === '/api' || url.pathname.startsWith('/api/');
     if (isApiRequest) {
       return handleApiRequest(request, env, cfCtx);
     }
-    return handleAssetRequest(request, env);
+
+    if (url.pathname === '/src/api-shim.js') {
+      return new Response('// shim removed', {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/javascript',
+          'Cache-Control': 'no-store',
+        },
+      });
+    }
+
+    const assetResponse = await handleAssetRequest(request, env);
+    if (url.pathname.startsWith('/src/apiClient.v2.js')) {
+      const headers = new Headers(assetResponse.headers);
+      headers.set('Cache-Control', 'no-store');
+      return new Response(assetResponse.body, {
+        status: assetResponse.status,
+        headers,
+      });
+    }
+    return assetResponse;
   },
 };
 
@@ -252,8 +279,10 @@ router.get('/whoami', async (request, env, ctx) => {
     const aud = env.POLICY_AUD;
     if (team && aud) {
       const loginBase = team.replace(/\/+$/, '');
-      const back = encodeURIComponent(`/whoami?nav=1&to=${encodeURIComponent(to)}`);
-      const login = `${loginBase}/cdn-cgi/access/login/api.grassrootsmvt.org?kid=${aud}&redirect_url=${back}`;
+      const appHost = url.host || url.hostname;
+      const returnPath = url.pathname || '/api/whoami';
+      const back = encodeURIComponent(`${returnPath}?nav=1&to=${encodeURIComponent(to)}`);
+      const login = `${loginBase}/cdn-cgi/access/login/${appHost}?kid=${aud}&redirect_url=${back}`;
       return Response.redirect(login, 302);
     }
     return new Response('Unauthorized', { status: 401 });
