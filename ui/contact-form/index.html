@@ -105,7 +105,10 @@
     <div class="form-row">
       <div class="form-group">
         <label for="house-number">House Number *</label>
-        <input type="text" id="house-number" placeholder="123" required>
+        <div class="autocomplete-container">
+          <input type="text" id="house-number" placeholder="Select street first" required disabled>
+          <div id="house-suggestions" class="autocomplete-suggestions"></div>
+        </div>
       </div>
       <div class="form-group">
         <label for="street-name">Street Name *</label>
@@ -271,8 +274,9 @@
   <script src="/config/environments.js"></script>
   <script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
   <script src="/shared/authGlobal.js"></script>
-  <!-- Import the optimized street autocomplete component using streets_index -->
+  <!-- Import the optimized autocomplete components using streets_index -->
   <script src="../shared/streetAutocompleteOptimized.js"></script>
+  <script src="../shared/houseAutocomplete.js"></script>
   
   <script type="module">
     // Progressive form logic with API integration
@@ -337,6 +341,55 @@
     
     // Setup all event listeners
     function setupEventListeners() {
+      // Initialize house autocomplete component
+      const houseAutocomplete = new HouseAutocomplete({
+        houseInputId: 'house-number',
+        suggestionsId: 'house-suggestions',
+        getCounty: () => formData.county,
+        getCity: () => formData.city,
+        getStreet: () => formData.streetName,
+        onHouseSelected: (houseNumber, houseData) => {
+          console.log('🏠 House selected:', houseNumber, houseData);
+          formData.houseNumber = houseNumber;
+          checkExistingVoter(houseNumber);
+          updateButtonStates();
+        },
+        onHouseInput: (value) => {
+          checkAddress();
+        }
+      });
+      
+      // Initialize street autocomplete
+      const streetAutocomplete = new StreetAutocompleteOptimized({
+        streetInputId: 'street-name',
+        houseInputId: 'house-number',
+        suggestionsId: 'street-suggestions',
+        getCounty: () => formData.county,
+        getCity: () => formData.city,
+        onStreetSelected: async (streetName) => {
+          console.log('📍 Street selected:', streetName);
+          formData.streetName = streetName;
+          
+          // Enable house field
+          houseAutocomplete.enable();
+          
+          // Load house numbers
+          await houseAutocomplete.loadHouseNumbers(streetName);
+          
+          checkAddress();
+        },
+        onHouseFieldChange: (enabled) => {
+          if (enabled) {
+            houseAutocomplete.enable();
+          } else {
+            houseAutocomplete.disable();
+          }
+        }
+      });
+      
+      // Initialize house field as disabled
+      houseAutocomplete.disable();
+      
       // County selection
       document.getElementById('county').addEventListener('change', async (e) => {
         const county = e.target.value;
@@ -361,29 +414,6 @@
       
       // Address fields
       document.getElementById('house-number').addEventListener('input', checkAddress);
-      // Street autocomplete setup using reusable component
-      const streetAutocomplete = new StreetAutocomplete({
-        streetInputId: 'street-name',
-        suggestionsId: 'street-suggestions',
-        getCounty: () => formData.county,
-        getCity: () => formData.city,
-        onStreetSelected: (streetName) => {
-          // Enable house field and trigger address check
-          enableHouseField();
-          populateHouseNumbers(streetName);
-          checkAddress();
-        },
-        onHouseFieldChange: (enabled) => {
-          if (enabled) {
-            enableHouseField();
-          } else {
-            disableHouseField();
-          }
-        }
-      });
-      
-      // Initialize house field as disabled
-      disableHouseField();
       
       // Name fields
       document.getElementById('first-name').addEventListener('input', debounce(searchNames, 500));
@@ -475,34 +505,88 @@
       houseInput.placeholder = "Select street first";
     }
 
-    // Function to populate house numbers based on selected street
-    async function populateHouseNumbers(streetName) {
-      console.log('🏠 Loading house numbers for street:', streetName);
-      try {
-        const filters = {
-          county: formData.county,
-          city: formData.city
-        };
-        // API call to get addresses on this specific street
-        const data = await window.apiPost('canvass/nearby', {
-          filters,
-          street: streetName,
-          limit: 100
-        });
-        console.log('📡 House numbers API response:', data);
-        if (data.rows && data.rows.length > 0) {
-          // Extract house numbers from addresses
-          const houseNumbers = [...new Set(data.rows.map(r => {
-            const match = r.address.match(/^(\d+)/);
-            return match ? match[1] : null;
-          }).filter(Boolean))].sort((a, b) => parseInt(a) - parseInt(b));
-          console.log('🏠 Available house numbers:', houseNumbers);
-          // For contact form, we don't need a dropdown - just enable the field
-          // The house numbers are available for validation if needed
+    
+    // Check for existing voter at this address
+    async function checkExistingVoter(houseNumber) {
+      if (!houseNumber || !formData.streetName) return;
+      
+      console.log('🔍 Checking for existing voter at:', houseNumber, formData.streetName);
+      
+      // Find matching house in our data
+      const matchingHouse = formData.houseData.find(h => h.house_number === houseNumber);
+      
+      if (matchingHouse && matchingHouse.voter_count > 0) {
+        console.log('✅ Found existing voter(s):', matchingHouse);
+        
+        // Fetch full voter details
+        try {
+          const data = await window.apiPost('canvass/nearby', {
+            filters: {
+              county: formData.county,
+              city: formData.city
+            },
+            street: formData.streetName,
+            houseNumber: houseNumber,
+            limit: 10
+          });
+          
+          if (data.rows && data.rows.length > 0) {
+            showExistingVoterAlert(data.rows);
+            
+            // Auto-fill first voter's data
+            if (data.rows.length === 1) {
+              autoFillVoterData(data.rows[0]);
+            }
+          }
+        } catch (error) {
+          console.error('Failed to fetch voter details:', error);
         }
-      } catch (error) {
-        console.error('❌ Failed to load house numbers:', error);
+      } else {
+        // Hide alert if no existing voter
+        document.getElementById('existing-voter-alert').style.display = 'none';
       }
+    }
+    
+    // Show alert for existing voter(s)
+    function showExistingVoterAlert(voters) {
+      const alert = document.getElementById('existing-voter-alert');
+      const details = document.getElementById('existing-voter-details');
+      
+      details.innerHTML = voters.map(voter => `
+        <div style="margin: 0.5rem 0; padding: 0.5rem; background: white; border-radius: 4px;">
+          <strong>${voter.first_name} ${voter.last_name}</strong> - ${voter.political_party || 'Unknown'}
+          <br><small>${voter.address}</small>
+          ${voter.phone ? `<br><small>Phone: ${voter.phone}</small>` : ''}
+        </div>
+      `).join('');
+      
+      alert.style.display = 'block';
+    }
+    
+    // Auto-fill form with existing voter data
+    function autoFillVoterData(voter) {
+      console.log('📝 Auto-filling form with voter data:', voter);
+      
+      // Store for later
+      formData.existingVoter = voter;
+      
+      // Auto-advance to step 3 and pre-fill
+      setTimeout(() => {
+        document.getElementById('first-name').value = voter.first_name || '';
+        document.getElementById('last-name').value = voter.last_name || '';
+        document.getElementById('full-address').value = voter.address || '';
+        document.getElementById('zip-code').value = voter.zip || '';
+        
+        if (voter.phone) {
+          document.getElementById('phone-primary').value = voter.phone;
+        }
+        
+        if (voter.political_party) {
+          document.getElementById('estimated-party').value = voter.political_party;
+        }
+        
+        updateButtonStates();
+      }, 100);
     }
 
     async function checkAddress() {

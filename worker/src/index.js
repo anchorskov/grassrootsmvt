@@ -1075,8 +1075,8 @@ router.post('/houses', async (request, env, ctx) => {
     `).bind(county, city, street).all();
 
     const houses = (result.results || []).map(row => ({
-      number: row.house_number,
-      count: row.voter_count,
+      house_number: row.house_number,
+      voter_count: row.voter_count,
     }));
 
     return ctx.jsonResponse(

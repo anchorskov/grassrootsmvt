@@ -8,6 +8,7 @@
 <script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
 <script src="/shared/authGlobal.js"></script>
 <script src="../shared/streetAutocompleteOptimized.js"></script>
+<script src="../shared/houseAutocomplete.js"></script>
 <script type="module">
   import { showUserBadge } from '../shared/userBadge.js';
   showUserBadge();
@@ -475,121 +476,7 @@
     houseSuggestions.style.display = 'none';
   }
 
-  // Function to populate house numbers based on selected street
-  async function populateHouseNumbers(streetName) {
-    const houseInput = document.getElementById('house');
-    const houseSuggestions = document.getElementById('houseSuggestions');
-    
-    console.log('🏠 Loading house numbers for street:', streetName);
-    
-    try {
-      const filters = fromQS();
-      
-      // API call to get addresses on this specific street
-      const data = await jsonFetch(API('canvass/nearby'), {
-        method: 'POST',
-        body: JSON.stringify({ filters, street: streetName, limit: 100 })
-      });
-      console.log('📡 House numbers API response:', data);
-      
-      if (data.rows && data.rows.length > 0) {
-        // Extract house numbers from addresses
-        const houseNumbers = [...new Set(data.rows.map(r => {
-          const match = r.address.match(/^(\d+)/);
-          return match ? match[1] : null;
-        }).filter(Boolean))].sort((a, b) => parseInt(a) - parseInt(b));
-        
-        console.log('🏠 Available house numbers:', houseNumbers);
-        
-        // Set up house number autocomplete
-        setupHouseAutocomplete(houseNumbers);
-      }
-    } catch (error) {
-      console.error('❌ Failed to load house numbers:', error);
-    }
-  }
-
-  // Function to set up house number autocomplete
-  function setupHouseAutocomplete(houseNumbers) {
-    const houseInput = document.getElementById('house');
-    const houseSuggestions = document.getElementById('houseSuggestions');
-    
-    console.log('🏠 Setting up house autocomplete with numbers:', houseNumbers);
-    
-    // Remove any existing event listeners (prevent duplicates)
-    const newHouseInput = houseInput.cloneNode(true);
-    houseInput.parentNode.replaceChild(newHouseInput, houseInput);
-    
-    // Show house numbers on focus (only if enabled)
-    newHouseInput.addEventListener('focus', function() {
-      if (!this.disabled && houseNumbers && houseNumbers.length > 0) {
-        houseSuggestions.innerHTML = houseNumbers.slice(0, 15).map(num => 
-          `<div class="autocomplete-suggestion" data-house="${num}">${num}</div>`
-        ).join('');
-        houseSuggestions.style.display = 'block';
-        houseSuggestions.style.backgroundColor = '#fef3c7'; // Light yellow highlight
-        console.log('✅ House numbers dropdown shown');
-      }
-    });
-    
-    // Filter house numbers as user types (only if enabled)
-    newHouseInput.addEventListener('input', function() {
-      if (this.disabled) return;
-      
-      const value = this.value;
-      if (houseNumbers && houseNumbers.length > 0) {
-        if (value.length === 0) {
-          // Show all house numbers
-          houseSuggestions.innerHTML = houseNumbers.slice(0, 15).map(num => 
-            `<div class="autocomplete-suggestion" data-house="${num}">${num}</div>`
-          ).join('');
-          houseSuggestions.style.display = 'block';
-        } else {
-          // Filter house numbers
-          const matches = houseNumbers.filter(num => num.startsWith(value)).slice(0, 15);
-          if (matches.length > 0) {
-            houseSuggestions.innerHTML = matches.map(num => 
-              `<div class="autocomplete-suggestion" data-house="${num}">${num}</div>`
-            ).join('');
-            houseSuggestions.style.display = 'block';
-          } else {
-            houseSuggestions.style.display = 'none';
-          }
-        }
-      }
-    });
-    
-    // Handle house number clicks
-    houseSuggestions.addEventListener('click', function(e) {
-      if (e.target.classList.contains('autocomplete-suggestion')) {
-        console.log('🖱️ Clicked house number:', e.target.dataset.house);
-        if (e.target.dataset.house) {
-          newHouseInput.value = e.target.dataset.house;
-          houseSuggestions.style.display = 'none';
-          
-          // Update instructions when house is selected
-          updateInstruction('houseSelected');
-          
-          newHouseInput.focus();
-        }
-      }
-    });
-    
-    // Hide house suggestions when clicking outside
-    document.addEventListener('click', function(e) {
-      if (!newHouseInput.contains(e.target) && !houseSuggestions.contains(e.target)) {
-        houseSuggestions.style.display = 'none';
-      }
-    });
-    
-    // Prevent interaction when disabled
-    newHouseInput.addEventListener('click', function(e) {
-      if (this.disabled) {
-        e.preventDefault();
-        console.log('🚫 House field is disabled - select street first');
-      }
-    });
-  }
+  // House numbers now handled by HouseAutocomplete component
 
   document.getElementById('btnFind').addEventListener('click', findNearby);
   
@@ -605,29 +492,41 @@
     streetEl.selectionStart = streetEl.selectionEnd = pos;
   });
 
+  // Initialize reusable house autocomplete component
+  const houseAutocomplete = new HouseAutocomplete({
+    houseInputId: 'house',
+    suggestionsId: 'houseSuggestions',
+    getCounty: () => fromQS().county,
+    getCity: () => fromQS().city,
+    getStreet: () => document.getElementById('street').value,
+    onHouseSelected: (houseNumber, houseData) => {
+      console.log('🏠 House selected:', houseNumber);
+      updateInstruction('houseSelected');
+    }
+  });
+  
   // Initialize reusable street autocomplete component
-  const streetAutocomplete = new StreetAutocomplete({
+  const streetAutocomplete = new StreetAutocompleteOptimized({
     streetInputId: 'street',
+    houseInputId: 'house',
     suggestionsId: 'streetSuggestions',
     getCounty: () => fromQS().county,
     getCity: () => fromQS().city,
-    onStreetSelected: (streetName) => {
+    onStreetSelected: async (streetName) => {
       // Enable house number field
-      enableHouseField();
+      houseAutocomplete.enable();
       
       // Update instructions when street is selected
       updateInstruction('streetSelected');
       
       // Load house numbers for this street
-      setTimeout(() => {
-        populateHouseNumbers(streetName);
-      }, 100);
+      await houseAutocomplete.loadHouseNumbers(streetName);
     },
     onHouseFieldChange: (enabled) => {
       if (enabled) {
-        enableHouseField();
+        houseAutocomplete.enable();
       } else {
-        disableHouseField();
+        houseAutocomplete.disable();
       }
     }
   });
