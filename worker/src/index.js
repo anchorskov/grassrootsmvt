@@ -191,6 +191,11 @@ export default {
   async fetch(request, env, cfCtx) {
     const url = new URL(request.url);
 
+    // Suppress Chrome DevTools noise
+    if (url.pathname.startsWith('/.well-known/')) {
+      return new Response(null, { status: 404 });
+    }
+
     if (url.pathname === '/src/apiClient.js') {
       url.pathname = '/src/apiClient.v2.js';
       url.searchParams.set('v', '2025-10-30a');
@@ -985,37 +990,28 @@ router.post('/streets', async (request, env, ctx) => {
 
   const db = getDb(env);
   if (!db) {
-    // TODO: Provision D1 table voters required by /streets route.
-    return missingTableResponse('voters', ctx.allowedOrigin);
+    return missingTableResponse('streets_index', ctx.allowedOrigin);
   }
 
   try {
     await ensureAuth(request, env, ctx.config);
-    const votersTable = await resolveTable(env, ['voters']);
-    const addrTable = await resolveTable(env, ['voters_addr_norm', 'voters_addr', 'voter_addresses']);
-    const result = await buildStatement(
-      db,
-      `
-      SELECT DISTINCT 
-             UPPER(TRIM(SUBSTR(va.addr1, INSTR(va.addr1, ' ') + 1))) AS street_name,
-             COUNT(*) AS voter_count
-      FROM ${votersTable} v
-      JOIN ${addrTable} va ON v.voter_id = va.voter_id
-      WHERE v.county = ?1
-        AND va.city = ?2
-        AND va.addr1 IS NOT NULL
-        AND va.addr1 != ''
-        AND INSTR(va.addr1, ' ') > 0
-        AND LENGTH(TRIM(SUBSTR(va.addr1, INSTR(va.addr1, ' ') + 1))) > 0
-      GROUP BY UPPER(TRIM(SUBSTR(va.addr1, INSTR(va.addr1, ' ') + 1)))
-      ORDER BY street_name
-      `,
-      [county, city]
-    ).all();
+    
+    // Use streets_index for fast, clean street names
+    const result = await db.prepare(`
+      SELECT 
+        si.street_canonical AS street_name,
+        COUNT(*) AS street_count
+      FROM streets_index si
+      JOIN wy_city_county cc ON si.city_county_id = cc.id
+      WHERE cc.county_norm = UPPER(?1)
+        AND cc.city_norm = UPPER(?2)
+      GROUP BY si.street_canonical
+      ORDER BY si.street_canonical
+    `).bind(county, city).all();
 
     const streets = (result.results || []).map(row => ({
       name: row.street_name,
-      count: row.voter_count,
+      count: row.street_count,
     }));
 
     return ctx.jsonResponse(
@@ -1025,11 +1021,72 @@ router.post('/streets', async (request, env, ctx) => {
       { 'Cache-Control': 'max-age=3600' }
     );
   } catch (err) {
-    if (err instanceof DependencyMissingError) {
-      // TODO: Provision D1 table required by /streets route.
-      return missingTableResponse(err.table, ctx.allowedOrigin);
-    }
     console.error('/streets error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.post('/houses', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    throw err;
+  }
+
+  const { county, city, street } = body || {};
+  if (!county || !city || !street) {
+    return ctx.jsonResponse(
+      { ok: false, error: 'county, city, and street are required' },
+      400,
+      ctx.allowedOrigin
+    );
+  }
+
+  const db = getDb(env);
+  if (!db) {
+    return missingTableResponse('voters_addr_norm', ctx.allowedOrigin);
+  }
+
+  try {
+    await ensureAuth(request, env, ctx.config);
+    
+    // Get house numbers from voters_addr_norm using city_county_id for speed
+    const result = await db.prepare(`
+      SELECT DISTINCT
+        TRIM(SUBSTR(addr1, 1, INSTR(addr1, ' ')-1)) AS house_number,
+        COUNT(*) AS voter_count
+      FROM voters_addr_norm va
+      JOIN wy_city_county cc ON va.city_county_id = cc.id
+      WHERE cc.county_norm = UPPER(?1)
+        AND cc.city_norm = UPPER(?2)
+        AND UPPER(TRIM(SUBSTR(va.addr1, INSTR(va.addr1, ' ')+1))) = UPPER(?3)
+        AND va.addr1 IS NOT NULL
+        AND INSTR(va.addr1, ' ') > 0
+      GROUP BY house_number
+      ORDER BY CAST(house_number AS INTEGER), house_number
+    `).bind(county, city, street).all();
+
+    const houses = (result.results || []).map(row => ({
+      number: row.house_number,
+      count: row.voter_count,
+    }));
+
+    return ctx.jsonResponse(
+      { ok: true, county, city, street, houses, total: houses.length },
+      200,
+      ctx.allowedOrigin,
+      { 'Cache-Control': 'max-age=3600' }
+    );
+  } catch (err) {
+    console.error('/houses error', err);
     return ctx.jsonResponse(
       { ok: false, error: String(err?.message || err) },
       500,
