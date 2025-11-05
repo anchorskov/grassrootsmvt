@@ -868,9 +868,10 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
     return missingTableResponse('voters', ctx.allowedOrigin);
   }
 
-  const { filters = {}, house, street, range = 20, limit: requestedLimit = 20 } = body || {};
+  const { filters = {}, house, street, range = 20, limit: requestedLimit = 20, house_number } = body || {};
   const limit = Math.min(Math.max(Number(requestedLimit) || 20, 1), 100);
   const streetFilter = String(street || '').toUpperCase().trim();
+  const houseNumberFilter = house_number ? String(house_number).trim() : null;
   const countyFilter = String(filters.county || '').trim();
   const cityFilter = String(filters.city || '').trim();
   const partiesFilter = Array.isArray(filters.parties) ? filters.parties : [];
@@ -903,6 +904,13 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
     if (streetFilter) {
       query += ` AND UPPER(va.addr1) LIKE '%' || ?${paramIndex} || '%'`;
       params.push(streetFilter);
+      paramIndex++;
+    }
+
+    // Filter by house number if provided (fast exact match)
+    if (houseNumberFilter) {
+      query += ` AND va.addr1 LIKE ?${paramIndex} || ' %'`;
+      params.push(houseNumberFilter);
       paramIndex++;
     }
 

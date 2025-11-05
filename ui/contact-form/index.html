@@ -286,6 +286,8 @@
     let formData = {};
     let potentialMatches = [];
     let wyomingData = {}; // Will hold citiesByCounty data
+    let houseAutocomplete; // Declare at module level for access in callbacks
+    let streetAutocomplete; // Declare at module level for access in callbacks
 
     // Initialize form
     async function init() {
@@ -342,12 +344,17 @@
     // Setup all event listeners
     function setupEventListeners() {
       // Initialize house autocomplete component
-      const houseAutocomplete = new HouseAutocomplete({
+      houseAutocomplete = new HouseAutocomplete({
         houseInputId: 'house-number',
         suggestionsId: 'house-suggestions',
         getCounty: () => formData.county,
         getCity: () => formData.city,
         getStreet: () => formData.streetName,
+        onHousesLoaded: (houseNumbers, houseData) => {
+          // Store house data for voter lookup
+          console.log('📦 Storing house data:', houseData.length, 'houses');
+          formData.houseData = houseData;
+        },
         onHouseSelected: (houseNumber, houseData) => {
           console.log('🏠 House selected:', houseNumber, houseData);
           formData.houseNumber = houseNumber;
@@ -360,7 +367,7 @@
       });
       
       // Initialize street autocomplete
-      const streetAutocomplete = new StreetAutocompleteOptimized({
+      streetAutocomplete = new StreetAutocompleteOptimized({
         streetInputId: 'street-name',
         houseInputId: 'house-number',
         suggestionsId: 'street-suggestions',
@@ -508,17 +515,25 @@
     
     // Check for existing voter at this address
     async function checkExistingVoter(houseNumber) {
-      if (!houseNumber || !formData.streetName) return;
+      if (!houseNumber || !formData.streetName) {
+        console.log('⚠️ Missing house number or street name');
+        return;
+      }
       
       console.log('🔍 Checking for existing voter at:', houseNumber, formData.streetName);
       
       // Find matching house in our data
+      if (!formData.houseData) {
+        console.log('⚠️ No house data available yet');
+        return;
+      }
+      
       const matchingHouse = formData.houseData.find(h => h.house_number === houseNumber);
       
       if (matchingHouse && matchingHouse.voter_count > 0) {
-        console.log('✅ Found existing voter(s):', matchingHouse);
+        console.log('✅ Found existing voter(s) at this address:', matchingHouse);
         
-        // Fetch full voter details
+        // Fetch full voter details from the nearby API with house number filter
         try {
           const data = await window.apiPost('canvass/nearby', {
             filters: {
@@ -526,22 +541,31 @@
               city: formData.city
             },
             street: formData.streetName,
-            houseNumber: houseNumber,
-            limit: 10
+            house_number: houseNumber,  // Filter by house number in DB query
+            limit: 10  // Only need voters at this specific house
           });
           
-          if (data.rows && data.rows.length > 0) {
+          console.log('📡 Voter lookup response:', data);
+          
+          if (data.ok && data.rows && data.rows.length > 0) {
+            console.log(`✅ Found ${data.rows.length} voter(s) at ${houseNumber} ${formData.streetName}`);
+            
             showExistingVoterAlert(data.rows);
             
-            // Auto-fill first voter's data
+            // Auto-fill first voter's data if only one person at this address
             if (data.rows.length === 1) {
               autoFillVoterData(data.rows[0]);
             }
+          } else {
+            console.log(`ℹ️ No voters found at ${houseNumber} ${formData.streetName}`);
+            document.getElementById('existing-voter-alert').style.display = 'none';
           }
         } catch (error) {
-          console.error('Failed to fetch voter details:', error);
+          console.error('❌ Failed to fetch voter details:', error);
+          document.getElementById('existing-voter-alert').style.display = 'none';
         }
       } else {
+        console.log('ℹ️ No voters found at this address in house data');
         // Hide alert if no existing voter
         document.getElementById('existing-voter-alert').style.display = 'none';
       }
@@ -554,9 +578,9 @@
       
       details.innerHTML = voters.map(voter => `
         <div style="margin: 0.5rem 0; padding: 0.5rem; background: white; border-radius: 4px;">
-          <strong>${voter.first_name} ${voter.last_name}</strong> - ${voter.political_party || 'Unknown'}
-          <br><small>${voter.address}</small>
-          ${voter.phone ? `<br><small>Phone: ${voter.phone}</small>` : ''}
+          <strong>${voter.name}</strong> - ${voter.party || 'Unknown'}
+          <br><small>${voter.address}, ${voter.city} ${voter.zip}</small>
+          ${voter.phone_e164 ? `<br><small>Phone: ${voter.phone_e164}</small>` : ''}
         </div>
       `).join('');
       
@@ -570,19 +594,24 @@
       // Store for later
       formData.existingVoter = voter;
       
+      // Parse first and last name from combined name
+      const nameParts = (voter.name || '').split(' ');
+      const firstName = nameParts[0] || '';
+      const lastName = nameParts.slice(1).join(' ') || '';
+      
       // Auto-advance to step 3 and pre-fill
       setTimeout(() => {
-        document.getElementById('first-name').value = voter.first_name || '';
-        document.getElementById('last-name').value = voter.last_name || '';
+        document.getElementById('first-name').value = firstName;
+        document.getElementById('last-name').value = lastName;
         document.getElementById('full-address').value = voter.address || '';
         document.getElementById('zip-code').value = voter.zip || '';
         
-        if (voter.phone) {
-          document.getElementById('phone-primary').value = voter.phone;
+        if (voter.phone_e164) {
+          document.getElementById('phone-primary').value = voter.phone_e164;
         }
         
-        if (voter.political_party) {
-          document.getElementById('estimated-party').value = voter.political_party;
+        if (voter.party) {
+          document.getElementById('estimated-party').value = voter.party;
         }
         
         updateButtonStates();
@@ -601,36 +630,9 @@
         return;
       }
       
-      try {
-        // Address validation temporarily disabled
-        console.log('Address validation temporarily disabled for:', { county, city, street, number });
-        
-        // Hide any existing voter alerts since we can't check
-        document.getElementById('existing-voter-alert').style.display = 'none';
-        updateButtonStates();
-        
-        return;
-        
-        if (result.exists && result.matches.length > 0) {
-          // Show existing voter alert
-          const alert = document.getElementById('existing-voter-alert');
-          const details = document.getElementById('existing-voter-details');
-          
-          details.innerHTML = result.matches.map(voter => `
-            <div><strong>${voter.first_name} ${voter.last_name}</strong> - ${voter.political_party}</div>
-            <div>${voter.addr1}, ${voter.city}</div>
-            ${voter.phone_e164 ? `<div>Phone: ${voter.phone_e164}</div>` : ''}
-          `).join('<hr>');
-          
-          alert.style.display = 'block';
-        } else {
-          document.getElementById('existing-voter-alert').style.display = 'none';
-        }
-        
-        updateButtonStates();
-      } catch (error) {
-        console.error('Failed to check address:', error);
-      }
+      // Trigger voter lookup when address is complete
+      await checkExistingVoter(number);
+      updateButtonStates();
     }
     
     async function searchNames() {
