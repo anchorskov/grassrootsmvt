@@ -128,12 +128,12 @@
       
       <div class="form-row">
         <div class="form-group">
-          <label for="estimated-party">Estimated Party Affiliation</label>
+          <label for="estimated-party">Party Affiliation</label>
           <select id="estimated-party">
             <option value="">Unknown</option>
             <option value="Republican">Republican</option>
-            <option value="Democrat">Democrat</option>
-            <option value="Independent">Independent</option>
+            <option value="Democratic">Democratic</option>
+            <option value="Unaffiliated">Unaffiliated</option>
             <option value="Libertarian">Libertarian</option>
             <option value="Other">Other</option>
           </select>
@@ -288,7 +288,14 @@
       document.getElementById('email').value = voter.email || '';
       
       // Political information
-      document.getElementById('estimated-party').value = voter.party || '';
+      console.log('🎭 Setting party affiliation:', voter.party);
+      const partySelect = document.getElementById('estimated-party');
+      if (voter.party) {
+        partySelect.value = voter.party;
+        if (partySelect.value !== voter.party) {
+          console.warn('⚠️ Party value not found in dropdown options:', voter.party);
+        }
+      }
       document.getElementById('support-level').value = voter.support_level || '';
     }
 
