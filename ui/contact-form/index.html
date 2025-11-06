@@ -428,7 +428,14 @@
       
       // Navigation buttons
       document.getElementById('next-to-address').addEventListener('click', () => goToStep(2));
-      document.getElementById('next-to-personal').addEventListener('click', () => goToStep(3));
+      document.getElementById('next-to-personal').addEventListener('click', () => {
+        // Check if existing voter was found - redirect to update form
+        if (formData.existingVoter) {
+          redirectToUpdateForm(formData.existingVoter);
+        } else {
+          goToStep(3);
+        }
+      });
       document.getElementById('next-to-interaction').addEventListener('click', () => goToStep(4));
       document.getElementById('back-to-location').addEventListener('click', () => goToStep(1));
       document.getElementById('back-to-address').addEventListener('click', () => goToStep(2));
@@ -559,15 +566,21 @@
           } else {
             console.log(`ℹ️ No voters found at ${houseNumber} ${formData.streetName}`);
             document.getElementById('existing-voter-alert').style.display = 'none';
+            formData.existingVoter = null;
+            document.getElementById('next-to-personal').innerHTML = 'Continue: New Voter →';
           }
         } catch (error) {
           console.error('❌ Failed to fetch voter details:', error);
           document.getElementById('existing-voter-alert').style.display = 'none';
+          formData.existingVoter = null;
+          document.getElementById('next-to-personal').innerHTML = 'Continue: New Voter →';
         }
       } else {
         console.log('ℹ️ No voters found at this address in house data');
         // Hide alert if no existing voter
         document.getElementById('existing-voter-alert').style.display = 'none';
+        formData.existingVoter = null;
+        document.getElementById('next-to-personal').innerHTML = 'Continue: New Voter →';
       }
     }
     
@@ -614,8 +627,22 @@
           document.getElementById('estimated-party').value = voter.party;
         }
         
+        // Change button text to indicate update flow
+        document.getElementById('next-to-personal').innerHTML = 'Update Existing Voter →';
+        
         updateButtonStates();
       }, 100);
+    }
+
+    // Redirect to update form for existing voters
+    function redirectToUpdateForm(voter) {
+      console.log('🔄 Redirecting to update form for existing voter:', voter);
+      
+      // Store voter data in sessionStorage for the update page
+      sessionStorage.setItem('voterUpdateData', JSON.stringify(voter));
+      
+      // Redirect to update form
+      window.location.href = '/ui/contact-form/update.html';
     }
 
     async function checkAddress() {
