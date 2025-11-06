@@ -200,6 +200,7 @@
   <input type="hidden" id="voter-id">
   <input type="hidden" id="original-data">
 
+  <script src="/config/environments.js"></script>
   <script src="/src/apiClient.v2.js?v=2025-11-05"></script>
   <script src="/shared/authGlobal.js"></script>
   
@@ -230,7 +231,7 @@
           sessionStorage.removeItem('voterUpdateData');
         } else {
           alert('No voter data found. Redirecting to new contact form.');
-          window.location.href = '/ui/contact-form/';
+          window.location.href = './';
         }
       }
       
@@ -254,7 +255,7 @@
       } catch (error) {
         console.error('Failed to fetch voter data:', error);
         alert('Failed to load voter data. Redirecting to new contact form.');
-        window.location.href = '/ui/contact-form/';
+        window.location.href = './';
       }
     }
 
@@ -307,7 +308,7 @@
       // Cancel button
       document.getElementById('cancel-btn').addEventListener('click', () => {
         if (confirm('Discard changes and return to contact list?')) {
-          window.location.href = '/ui/contact-form/';
+          window.location.href = './';
         }
       });
 
@@ -319,7 +320,7 @@
 
       // Add another contact
       document.getElementById('add-another').addEventListener('click', () => {
-        window.location.href = '/ui/contact-form/';
+        window.location.href = './';
       });
     }
 

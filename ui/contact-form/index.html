@@ -430,9 +430,12 @@
       document.getElementById('next-to-address').addEventListener('click', () => goToStep(2));
       document.getElementById('next-to-personal').addEventListener('click', () => {
         // Check if existing voter was found - redirect to update form
+        console.log('🔘 Next button clicked. formData.existingVoter:', formData.existingVoter);
         if (formData.existingVoter) {
+          console.log('✅ Existing voter found, redirecting to update form');
           redirectToUpdateForm(formData.existingVoter);
         } else {
+          console.log('➡️ No existing voter, going to step 3');
           goToStep(3);
         }
       });
@@ -641,8 +644,8 @@
       // Store voter data in sessionStorage for the update page
       sessionStorage.setItem('voterUpdateData', JSON.stringify(voter));
       
-      // Redirect to update form
-      window.location.href = '/ui/contact-form/update.html';
+      // Redirect to update form (relative path)
+      window.location.href = 'update.html';
     }
 
     async function checkAddress() {
