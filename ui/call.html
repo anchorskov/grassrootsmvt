@@ -328,9 +328,15 @@
     nextVoter();
   });
 
-  // Keyboard shortcut: N = Get Next
+  // Keyboard shortcut: N = Get Next (only when not typing in input fields)
   window.addEventListener("keydown", (e) => {
-    if (e.key.toLowerCase() === "n" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    // Don't trigger if user is typing in an input, textarea, or other editable element
+    const target = e.target;
+    const isInputField = target.tagName === 'INPUT' || 
+                        target.tagName === 'TEXTAREA' || 
+                        target.isContentEditable;
+    
+    if (e.key.toLowerCase() === "n" && !e.metaKey && !e.ctrlKey && !e.altKey && !isInputField) {
       e.preventDefault(); nextVoter();
     }
   });
