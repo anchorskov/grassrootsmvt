@@ -185,7 +185,7 @@
 
       <!-- Action Buttons -->
       <div class="form-row" style="margin-top: 2rem;">
-        <button type="button" class="btn-secondary" id="cancel-btn">Cancel</button>
+        <button type="button" class="btn-secondary" id="cancel-btn">Discard</button>
         <button type="submit" class="btn-success">Save Updates</button>
       </div>
     </div>
@@ -208,9 +208,53 @@
     const environmentConfig = window.environmentConfig;
     let voterData = {};
     let originalData = {};
+    const RETURN_PATH_KEY = 'contactUpdateReturnTo';
+    let returnPath = '/contact-form/';
+
+    function normalizeReturnTarget(target) {
+      if (!target) return null;
+      const trimmed = target.trim();
+      if (!trimmed) return null;
+      if (trimmed.startsWith('http')) {
+        if (!trimmed.startsWith(window.location.origin)) return null;
+        const relative = trimmed.slice(window.location.origin.length) || '/';
+        return relative.startsWith('/') ? relative : `/${relative}`;
+      }
+      return trimmed.startsWith('/') ? trimmed : null;
+    }
+
+    function determineReturnPath() {
+      const params = new URLSearchParams(window.location.search);
+      const fromQuery = normalizeReturnTarget(params.get('return_to'));
+      const storedRaw = sessionStorage.getItem(RETURN_PATH_KEY);
+      if (storedRaw !== null) {
+        sessionStorage.removeItem(RETURN_PATH_KEY);
+      }
+      
+      if (fromQuery) {
+        returnPath = fromQuery;
+        return;
+      }
+      
+      const stored = normalizeReturnTarget(storedRaw);
+      if (stored) {
+        returnPath = stored;
+        return;
+      }
+      
+      const ref = normalizeReturnTarget(document.referrer || '');
+      if (ref) {
+        returnPath = ref;
+      }
+    }
+
+    function navigateBackToOrigin() {
+      window.location.href = returnPath || '/contact-form/';
+    }
 
     // Get voter data from URL parameters or localStorage
     async function init() {
+      determineReturnPath();
       const urlParams = new URLSearchParams(window.location.search);
       const voterId = urlParams.get('voter_id');
       const encodedData = urlParams.get('data');
@@ -314,8 +358,8 @@
 
       // Cancel button
       document.getElementById('cancel-btn').addEventListener('click', () => {
-        if (confirm('Discard changes and return to contact list?')) {
-          window.location.href = './';
+        if (confirm('Discard changes and return')) {
+          navigateBackToOrigin();
         }
       });
 
@@ -327,7 +371,7 @@
 
       // Add another contact
       document.getElementById('add-another').addEventListener('click', () => {
-        window.location.href = './';
+        navigateBackToOrigin();
       });
     }
 

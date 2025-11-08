@@ -643,9 +643,16 @@
       
       // Store voter data in sessionStorage for the update page
       sessionStorage.setItem('voterUpdateData', JSON.stringify(voter));
+      const returnPath = (window.location.pathname + window.location.search) || '/contact-form/';
+      sessionStorage.setItem('contactUpdateReturnTo', returnPath);
+      
+      const params = new URLSearchParams({
+        voter_id: voter.voter_id || '',
+        return_to: returnPath
+      });
       
       // Redirect to update form (relative path)
-      window.location.href = 'update.html';
+      window.location.href = `update.html?${params.toString()}`;
     }
 
     async function checkAddress() {

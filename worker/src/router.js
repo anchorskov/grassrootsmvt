@@ -22,12 +22,26 @@ class Router {
   delete(path, handler) { this.tables.DELETE.set(path, { handler }); }
 
   // Very small wildcard support: patterns ending with '*' match prefix
+  // Also supports :param patterns like /admin/contacts/:id
   matchDynamic(method, path) {
     const table = this.tables[method] || new Map();
     for (const [pattern, entry] of table.entries()) {
       if (pattern.endsWith('*')) {
         const base = pattern.slice(0, -1);
         if (path.startsWith(base)) return entry;
+      }
+      
+      // Support :param style routes
+      if (pattern.includes(':')) {
+        const patternParts = pattern.split('/');
+        const pathParts = path.split('/');
+        
+        if (patternParts.length === pathParts.length) {
+          const matches = patternParts.every((part, i) => {
+            return part.startsWith(':') || part === pathParts[i];
+          });
+          if (matches) return entry;
+        }
       }
     }
     return null;

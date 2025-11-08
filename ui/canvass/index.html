@@ -137,12 +137,16 @@
 <script>
 
   // Debug snippet: Cloudflare Access now manages authentication. Manual token storage removed.
-  const API = (p = '', params = {}) =>
-    window.environmentConfig.getApiUrl(String(p).replace(/^\/+/, ''), params);
+const API = (p = '', params = {}) =>
+  window.environmentConfig.getApiUrl(String(p).replace(/^\/+/, ''), params);
 
-  function fromQS() {
-    const u = new URL(location.href);
-    const parties = u.searchParams.getAll('parties');
+const RETURN_PATH_KEY = 'contactUpdateReturnTo';
+const CANVASS_STATE_KEY = 'canvassPageState';
+let latestRows = [];
+
+function fromQS() {
+  const u = new URL(location.href);
+  const parties = u.searchParams.getAll('parties');
     const f = {
       county: (u.searchParams.get('county')||'').toUpperCase() || null,
       city:   (u.searchParams.get('city')||'').toUpperCase() || null,
@@ -179,12 +183,76 @@
     }
   }
 
-  function setMsg(t) { document.getElementById('msg').textContent = t || ''; }
+function setMsg(t) { document.getElementById('msg').textContent = t || ''; }
+
+function getCanvassFormValues() {
+  return {
+    house: document.getElementById('house').value || '',
+    street: document.getElementById('street').value || '',
+    range: document.getElementById('range').value || '',
+    limit: document.getElementById('limit').value || ''
+  };
+}
+
+function persistCanvassState(rows = latestRows) {
+  try {
+    const state = {
+      ...getCanvassFormValues(),
+      rows: Array.isArray(rows) ? rows : [],
+      msg: document.getElementById('msg')?.textContent || '',
+      url: window.location.pathname + window.location.search,
+      ts: Date.now()
+    };
+    sessionStorage.setItem(CANVASS_STATE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn('⚠️ Unable to save canvass state:', e);
+  }
+}
+
+function restoreCanvassState() {
+  const raw = sessionStorage.getItem(CANVASS_STATE_KEY);
+  if (!raw) return;
+  try {
+    const state = JSON.parse(raw);
+    const currentUrl = window.location.pathname + window.location.search;
+    if (state.url && state.url !== currentUrl) return;
+    
+    const streetInput = document.getElementById('street');
+    const houseInput = document.getElementById('house');
+    const rangeSelect = document.getElementById('range');
+    const limitSelect = document.getElementById('limit');
+    
+    if (state.street) {
+      streetInput.value = state.street;
+      enableHouseField();
+    }
+    if (state.house) {
+      houseInput.value = state.house;
+    }
+    if (state.range && Array.from(rangeSelect.options).some(opt => opt.value === String(state.range))) {
+      rangeSelect.value = state.range;
+    }
+    if (state.limit && Array.from(limitSelect.options).some(opt => opt.value === String(state.limit))) {
+      limitSelect.value = state.limit;
+    }
+    
+    if (Array.isArray(state.rows) && state.rows.length) {
+      latestRows = state.rows;
+      renderList(state.rows).catch(err => console.warn('⚠️ Failed to restore canvass list:', err));
+    }
+    if (state.msg) {
+      setMsg(state.msg);
+    }
+  } catch (e) {
+    console.warn('⚠️ Unable to restore canvass state:', e);
+  }
+}
 
   async function renderList(rows) {
     console.log('🎨 renderList called with:', rows);
     const el = document.getElementById('results');
     console.log('🎨 Results element:', el);
+    latestRows = Array.isArray(rows) ? rows : [];
     
     el.innerHTML = '';
     if (!rows || !rows.length) { 
@@ -194,6 +262,8 @@
     }
     
     console.log('🎨 Rendering', rows.length, 'rows');
+    
+    const voterLookup = new Map(rows.map(r => [String(r.voter_id), r]));
     
     // Fetch contact status for all voters
     let contactStatus = {};
@@ -286,6 +356,7 @@
       btn.addEventListener('click', async () => {
         const voter_id = btn.getAttribute('data-id');
         let outcome = btn.getAttribute('data-a');
+        let comments = null;
         
         if (outcome === 'call') {
           // Prefill call UI and show toast then navigate there
@@ -371,14 +442,32 @@
         }
         
         if (outcome === 'note') {
-          const t = prompt('Note for this address / voter?');
-          if (!t) return;
-          outcome = 'note';
-          comments = t;
+          const voterRow = voterLookup.get(String(voter_id));
+          if (!voterRow) {
+            alert('Unable to load voter details for this note. Please refresh and try again.');
+            return;
+          }
+          
+          const returnPath = (window.location.pathname + window.location.search) || '/canvass/index.html';
+          persistCanvassState();
+          try {
+            sessionStorage.setItem('voterUpdateData', JSON.stringify(voterRow));
+            sessionStorage.setItem(RETURN_PATH_KEY, returnPath);
+          } catch (e) {
+            console.warn('⚠️ Unable to cache voter data locally:', e);
+          }
+          
+          const params = new URLSearchParams({
+            voter_id,
+            data: JSON.stringify(voterRow),
+            return_to: returnPath
+          });
+          
+          window.location.href = `/contact-form/update.html?${params.toString()}`;
+          return;
         }
         
         // Handle simple outcomes (no_answer, etc.)
-        let comments = null;
         try {
           await jsonFetch(API('/complete'), { method:'POST', body: JSON.stringify({ voter_id, outcome, comments }) });
           btn.closest('div').querySelectorAll('button').forEach(b => b.disabled = true);
@@ -406,25 +495,26 @@
     console.log('🔍 Making API call with filters:', filters);
     console.log('🔍 API URL will be:', API('/canvass/nearby'));
     
-    try {
-      const requestBody = { filters, house, street, range, limit };
-      console.log('🔍 Request body:', requestBody);
-      
-      const j = await jsonFetch(API('/canvass/nearby'), {
+  try {
+    const requestBody = { filters, house, street, range, limit };
+    console.log('🔍 Request body:', requestBody);
+    
+    const j = await jsonFetch(API('/canvass/nearby'), {
         method: 'POST',
         body: JSON.stringify(requestBody)
       });
-      
-      console.log('🔍 API response:', j);
-      console.log('🔍 Response rows:', j.rows);
-      
-      await renderList(j.rows || []);
-      setMsg(`Found ${j.rows?.length||0} nearby addresses.`);
-    } catch (e) {
-      console.error('🔍 Error in findNearby:', e);
-      setMsg('Error: '+e.message);
-    }
+    
+    console.log('🔍 API response:', j);
+    console.log('🔍 Response rows:', j.rows);
+    
+    await renderList(j.rows || []);
+    setMsg(`Found ${j.rows?.length||0} nearby addresses.`);
+    persistCanvassState(j.rows || []);
+  } catch (e) {
+    console.error('🔍 Error in findNearby:', e);
+    setMsg('Error: '+e.message);
   }
+}
 
   // Street autocomplete functionality
   let streetCache = null;
@@ -478,7 +568,8 @@
 
   // House numbers now handled by HouseAutocomplete component
 
-  document.getElementById('btnFind').addEventListener('click', findNearby);
+document.getElementById('btnFind').addEventListener('click', findNearby);
+window.addEventListener('pagehide', () => persistCanvassState());
   
   // QoL: Enter on street field triggers search
   const streetEl = document.getElementById('street');
@@ -491,6 +582,8 @@
     streetEl.value = (streetEl.value || '').toUpperCase();
     streetEl.selectionStart = streetEl.selectionEnd = pos;
   });
+  
+  restoreCanvassState();
 
   // Initialize reusable house autocomplete component
   const houseAutocomplete = new HouseAutocomplete({

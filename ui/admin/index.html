@@ -16,10 +16,6 @@
 <body>
   <h1>Admin Dashboard</h1>
   <div class="muted" id="whoami">…</div>
-  <div id="auth-status" class="auth-status" style="position:fixed;top:8px;right:8px;z-index:100;font-size:.875rem;padding:.5rem .75rem;border-radius:8px;background:#f1f5f9;color:#475569;border:1px solid #e2e8f0;">
-    <span class="online-indicator">🔄 Checking connection...</span>
-    <span id="user-email-badge" style="display:none; margin-left:8px; color:#2563eb; font-weight:600;"></span>
-  </div>
 
   <div class="card">
     <h2>Health</h2>
@@ -36,12 +32,73 @@
     <div id="contacts">Loading…</div>
   </div>
 
+  <div class="card">
+    <h2>Contact Management</h2>
+    <div style="margin-bottom: 1rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
+      <button id="refreshContacts" style="padding: 0.5rem 1rem; border-radius: 6px; background: #0ea5e9; color: white; border: none; cursor: pointer;">🔄 Refresh</button>
+      <label style="display: flex; align-items: center; gap: 0.5rem;">
+        <span>Filter:</span>
+        <select id="reviewedFilter" style="padding: 0.5rem; border-radius: 6px; border: 1px solid #ccc;">
+          <option value="all">All Records</option>
+          <option value="false" selected>Unreviewed Only</option>
+          <option value="true">Reviewed Only</option>
+        </select>
+      </label>
+      <span id="contactCount" class="muted"></span>
+      <div style="margin-left: auto;">
+        <button id="prevPage" style="padding: 0.5rem 1rem; border-radius: 6px; background: #6b7280; color: white; border: none; cursor: pointer;" disabled>← Prev</button>
+        <button id="nextPage" style="padding: 0.5rem 1rem; border-radius: 6px; background: #6b7280; color: white; border: none; cursor: pointer;">Next →</button>
+      </div>
+    </div>
+    <div id="contactsList">Loading…</div>
+  </div>
+
+  <!-- Edit Modal -->
+  <div id="editModal" style="display:none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; overflow-y: auto;">
+    <div style="max-width: 600px; margin: 2rem auto; background: white; border-radius: 12px; padding: 2rem; box-shadow: 0 4px 12px rgba(0,0,0,0.15);">
+      <h2 style="margin-top: 0;">Edit Contact Record</h2>
+      <div id="editForm"></div>
+      <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
+        <button id="saveEdit" style="flex: 1; padding: 0.75rem; border-radius: 6px; background: #10b981; color: white; border: none; cursor: pointer; font-weight: 600;">💾 Save Changes</button>
+        <button id="cancelEdit" style="flex: 1; padding: 0.75rem; border-radius: 6px; background: #6b7280; color: white; border: none; cursor: pointer;">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/config/environments.js"></script>
+  <script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
   <script src="/shared/authGlobal.js"></script>
   <script>
-  const api = (p, opts) => fetch('https://grassrootsmvt-functions.anchorskov.workers.dev' + p, opts).then(r => {
-      if (!r.ok) throw new Error("HTTP " + r.status);
-      return r.json();
-    });
+    const API = (path = '', params = {}) => {
+      const cleanPath = String(path).replace(/^\/?(api\/)?/, '');
+      if (window.environmentConfig && typeof window.environmentConfig.getApiUrl === 'function') {
+        return window.environmentConfig.getApiUrl(cleanPath, params);
+      }
+      const qs = new URLSearchParams(params);
+      return `/api/${cleanPath}${qs.toString() ? `?${qs}` : ''}`;
+    };
+
+    async function jsonFetch(url, init = {}) {
+      if (typeof window.apiFetch !== 'function') {
+        throw new Error('apiClient not ready');
+      }
+      const path = String(url).replace(/^\/?api\/?/, '');
+      const response = await window.apiFetch(path, init);
+      const text = await response.text().catch(() => '');
+      if (!response.ok) {
+        const error = new Error(`HTTP ${response.status}: ${text}`);
+        error.status = response.status;
+        error.body = text;
+        throw error;
+      }
+      if (!text) return null;
+      try {
+        return JSON.parse(text);
+      } catch {
+        return text;
+      }
+    }
+
     const el = id => document.getElementById(id);
     const tbl = (rows, cols) => {
       const head = "<tr>" + cols.map(c=>"<th>"+c+"</th>").join("") + "</tr>";
@@ -49,46 +106,231 @@
       return "<table>"+head+body+"</table>";
     };
 
+    let currentPage = 0;
+    let pageSize = 25;
+    let currentFilter = 'false'; // default to unreviewed
+    let currentContact = null;
+
+    async function loadContacts() {
+      try {
+        el("contactsList").textContent = "Loading...";
+        const reviewedParam = currentFilter === 'all' ? {} : { reviewed: currentFilter };
+        const result = await jsonFetch(API('/admin/contacts', { 
+          limit: pageSize, 
+          offset: currentPage * pageSize,
+          ...reviewedParam
+        }));
+        
+        const showing = result.contacts.length;
+        const total = result.total;
+        const pageStart = currentPage * pageSize + 1;
+        const pageEnd = Math.min((currentPage + 1) * pageSize, total);
+        
+        el("contactCount").textContent = `Showing ${pageStart}-${pageEnd} of ${total} contacts`;
+        
+        // Update pagination buttons
+        el("prevPage").disabled = currentPage === 0;
+        el("nextPage").disabled = pageEnd >= total;
+        
+        if (result.contacts.length === 0) {
+          el("contactsList").innerHTML = "<em>No contacts found</em>";
+          return;
+        }
+        
+        // Build interactive table
+        let html = '<table class="table"><thead><tr>';
+        html += '<th>ID</th><th>Voter ID</th><th>Method</th><th>Outcome</th><th>Volunteer</th><th>Date</th>';
+        if (result.has_reviewed_column) {
+          html += '<th>Reviewed</th>';
+        }
+        html += '<th>Actions</th></tr></thead><tbody>';
+        
+        result.contacts.forEach(contact => {
+          html += `<tr data-id="${contact.id}">`;
+          html += `<td>${contact.id}</td>`;
+          html += `<td><strong>${contact.voter_id}</strong></td>`;
+          html += `<td>${contact.method || '-'}</td>`;
+          html += `<td>${contact.outcome || '-'}</td>`;
+          html += `<td>${contact.volunteer || '-'}</td>`;
+          html += `<td>${contact.created_at || '-'}</td>`;
+          if (result.has_reviewed_column) {
+            const isReviewed = contact.reviewed === 1;
+            html += `<td>${isReviewed ? '✅' : '⏳'}</td>`;
+          }
+          html += `<td>
+            <button onclick="viewContact(${contact.id})" style="padding: 0.25rem 0.5rem; border-radius: 4px; background: #3b82f6; color: white; border: none; cursor: pointer; margin-right: 0.25rem;">👁️ View</button>
+            <button onclick="editContact(${contact.id})" style="padding: 0.25rem 0.5rem; border-radius: 4px; background: #10b981; color: white; border: none; cursor: pointer; margin-right: 0.25rem;">✏️ Edit</button>
+            <button onclick="deleteContact(${contact.id})" style="padding: 0.25rem 0.5rem; border-radius: 4px; background: #ef4444; color: white; border: none; cursor: pointer;">🗑️ Delete</button>
+          </td>`;
+          html += '</tr>';
+        });
+        
+        html += '</tbody></table>';
+        el("contactsList").innerHTML = html;
+      } catch (e) {
+        el("contactsList").textContent = "Error loading contacts: " + e.message;
+      }
+    }
+
+    window.viewContact = async function(id) {
+      try {
+        const result = await jsonFetch(API(`/admin/contacts/${id}`));
+        alert(JSON.stringify(result.contact, null, 2));
+      } catch (e) {
+        alert("Error: " + e.message);
+      }
+    };
+
+    window.editContact = async function(id) {
+      try {
+        const result = await jsonFetch(API(`/admin/contacts/${id}`));
+        currentContact = result.contact;
+        
+        // Build edit form
+        let formHtml = '<div style="display: grid; gap: 1rem;">';
+        
+        // Editable fields
+        const editableFields = [
+          { key: 'outcome', label: 'Outcome', type: 'text' },
+          { key: 'comments', label: 'Comments', type: 'textarea' },
+          { key: 'method', label: 'Method', type: 'text' },
+          { key: 'reviewed', label: 'Reviewed', type: 'checkbox' },
+          { key: 'ok_callback', label: 'OK to Callback', type: 'checkbox' },
+          { key: 'dnc', label: 'Do Not Call', type: 'checkbox' },
+          { key: 'best_day', label: 'Best Day', type: 'text' },
+          { key: 'best_time_window', label: 'Best Time', type: 'text' },
+          { key: 'email', label: 'Email', type: 'text' },
+        ];
+        
+        editableFields.forEach(field => {
+          const value = currentContact[field.key];
+          formHtml += '<div>';
+          formHtml += `<label style="display: block; margin-bottom: 0.25rem; font-weight: 600;">${field.label}</label>`;
+          
+          if (field.type === 'checkbox') {
+            formHtml += `<input type="checkbox" id="edit_${field.key}" ${value == 1 ? 'checked' : ''} style="width: 20px; height: 20px;">`;
+          } else if (field.type === 'textarea') {
+            formHtml += `<textarea id="edit_${field.key}" rows="3" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;">${value || ''}</textarea>`;
+          } else {
+            formHtml += `<input type="text" id="edit_${field.key}" value="${value || ''}" style="width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 6px;">`;
+          }
+          formHtml += '</div>';
+        });
+        
+        formHtml += '</div>';
+        el("editForm").innerHTML = formHtml;
+        el("editModal").style.display = 'block';
+      } catch (e) {
+        alert("Error loading contact: " + e.message);
+      }
+    };
+
+    window.deleteContact = async function(id) {
+      if (!confirm(`Are you sure you want to delete contact #${id}? This cannot be undone.`)) {
+        return;
+      }
+      
+      try {
+        await jsonFetch(API(`/admin/contacts/${id}`), { method: 'DELETE' });
+        alert("Contact deleted successfully");
+        await loadContacts();
+      } catch (e) {
+        alert("Error deleting contact: " + e.message);
+      }
+    };
+
+    el("saveEdit").addEventListener('click', async () => {
+      if (!currentContact) return;
+      
+      try {
+        const updates = {
+          outcome: el("edit_outcome").value,
+          comments: el("edit_comments").value,
+          method: el("edit_method").value,
+          reviewed: el("edit_reviewed").checked ? 1 : 0,
+          ok_callback: el("edit_ok_callback").checked ? 1 : 0,
+          dnc: el("edit_dnc").checked ? 1 : 0,
+          best_day: el("edit_best_day").value,
+          best_time_window: el("edit_best_time_window").value,
+          email: el("edit_email").value,
+        };
+        
+        await jsonFetch(API(`/admin/contacts/${currentContact.id}`), {
+          method: 'PUT',
+          body: JSON.stringify(updates)
+        });
+        
+        alert("Contact updated successfully");
+        el("editModal").style.display = 'none';
+        await loadContacts();
+      } catch (e) {
+        alert("Error updating contact: " + e.message);
+      }
+    });
+
+    el("cancelEdit").addEventListener('click', () => {
+      el("editModal").style.display = 'none';
+      currentContact = null;
+    });
+
+    el("reviewedFilter").addEventListener('change', (e) => {
+      currentFilter = e.target.value;
+      currentPage = 0;
+      loadContacts();
+    });
+
+    el("prevPage").addEventListener('click', () => {
+      if (currentPage > 0) {
+        currentPage--;
+        loadContacts();
+      }
+    });
+
+    el("nextPage").addEventListener('click', () => {
+      currentPage++;
+      loadContacts();
+    });
+
     async function load() {
       try {
-        const who = await api("/api/whoami");
-        el("whoami").textContent = "Signed in as " + who.email;
+        // Test admin access first
+        const adminWho = await jsonFetch(API('/admin/whoami'));
+        el("whoami").textContent = "Signed in as " + adminWho.email + (adminWho.isAdmin ? " [ADMIN]" : " [USER]");
 
-        const h = await api("/api/admin/health");
-        el("health").textContent = JSON.stringify(h, null, 2);
+        if (!adminWho.isAdmin) {
+          el("health").textContent = "⛔ Admin access required";
+          el("followups").textContent = "⛔ Admin access required";
+          el("contacts").textContent = "⛔ Admin access required";
+          el("contactsList").textContent = "⛔ Admin access required";
+          return;
+        }
 
-        const f = await api("/api/admin/followups");
-        el("followups").innerHTML = f.rows.length ? tbl(f.rows, ["voter_id","due_date","reason","created_by","created_at"]) : "<em>No open follow-ups</em>";
+        // Get admin stats
+        const stats = await jsonFetch(API('/admin/stats'));
+        el("health").textContent = JSON.stringify(stats, null, 2);
 
-        const c = await api("/api/admin/contacts/recent");
-        el("contacts").innerHTML = c.rows.length ? tbl(c.rows, ["voter_id","method","outcome","notes","created_at"]) : "<em>No recent contacts</em>";
+        // Placeholder for future admin features
+        el("followups").innerHTML = "<em>Feature coming soon</em>";
+        el("contacts").innerHTML = "<em>Feature coming soon</em>";
+        
+        // Load contacts list
+        await loadContacts();
       } catch (e) {
         el("health").textContent = "Error: " + e.message;
         el("followups").textContent = "Error: " + e.message;
         el("contacts").textContent = "Error: " + e.message;
+        el("contactsList").textContent = "Error: " + e.message;
       }
     }
-    load();
-
-    // Update user email badge on authentication change
-    function updateUserEmailBadge() {
-      const badge = document.getElementById('user-email-badge');
-      if (window.authGlobal && window.authGlobal.user && window.authGlobal.user.email) {
-        badge.textContent = window.authGlobal.user.email;
-        badge.style.display = '';
-      } else {
-        badge.textContent = '';
-        badge.style.display = 'none';
-      }
-    }
-    if (window.authGlobal) {
-      window.authGlobal.onAuthChange(updateUserEmailBadge);
-      updateUserEmailBadge();
+    
+    // Refresh button
+    document.getElementById('refreshContacts').addEventListener('click', loadContacts);
+    
+    // Wait for apiClient to be ready
+    if (window.apiFetch) {
+      load();
     } else {
-      window.addEventListener('authGlobalReady', function() {
-        window.authGlobal.onAuthChange(updateUserEmailBadge);
-        updateUserEmailBadge();
-      });
+      setTimeout(load, 500);
     }
   </script>
   <script type="module">

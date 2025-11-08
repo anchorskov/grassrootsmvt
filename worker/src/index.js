@@ -2,7 +2,7 @@
 import { router } from './router.js';
 import { getEnvironmentConfig } from './utils/env.js';
 import { pickAllowedOrigin, preflightResponse, parseAllowedOrigins } from './utils/cors.js';
-import { requireAuth } from './auth.js';
+import { requireAuth, requireAdmin, isAdmin } from './auth.js';
 
 const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
 const tableCache = new Map();
@@ -589,8 +589,10 @@ router.post('/call', async (request, env, ctx) => {
       const votersTable = await resolveTable(env, ['voters']);
       const addrTable = await resolveTable(env, ['voters_addr_norm', 'voters_addr', 'voter_addresses']);
       const phonesTable = await resolveTable(env, ['voter_phones', 'best_phone', 'best_phone_view']);
+      const contactsTable = await resolveTable(env, ['voter_contacts', 'voter_contact']);
       const filters = body.filters || {};
       const excludeIds = Array.isArray(body.exclude_ids) ? body.exclude_ids : [];
+      const excludeContacted = body.exclude_contacted !== false; // Default true
 
       let sql = `
         SELECT v.voter_id,
@@ -604,10 +606,16 @@ router.post('/call', async (request, env, ctx) => {
         FROM ${votersTable} v
         LEFT JOIN ${addrTable} va ON v.voter_id = va.voter_id
         LEFT JOIN ${phonesTable} vp ON v.voter_id = vp.voter_id
+        LEFT JOIN ${contactsTable} vc ON v.voter_id = vc.voter_id
         WHERE 1 = 1
       `;
       const params = [];
       let paramIndex = 1;
+
+      // Exclude voters who have already been contacted (unless explicitly disabled)
+      if (excludeContacted) {
+        sql += ` AND vc.voter_id IS NULL`;
+      }
 
       if (filters.county) {
         sql += ` AND v.county = ?${paramIndex++}`;
@@ -1175,6 +1183,28 @@ router.post('/contact', async (request, env, ctx) => {
         : null;
     if (volunteerColumn) addColumn(volunteerColumn, auth.email || 'unknown@local');
 
+    // Handle additional call-specific fields if columns exist
+    const callFields = {
+      'ok_callback': body.ok_callback,
+      'requested_info': body.requested_info,
+      'dnc': body.dnc,
+      'best_day': body.best_day,
+      'best_time_window': body.best_time_window,
+      'optin_sms': body.optin_sms,
+      'optin_email': body.optin_email,
+      'email': body.email,
+      'wants_volunteer': body.wants_volunteer,
+      'share_insights_ok': body.share_insights_ok,
+      'for_term_limits': body.for_term_limits,
+      'issue_public_lands': body.issue_public_lands
+    };
+    
+    for (const [fieldName, fieldValue] of Object.entries(callFields)) {
+      if (columns.includes(fieldName) && fieldValue !== undefined && fieldValue !== null) {
+        addColumn(fieldName, fieldValue);
+      }
+    }
+
     const timestampColumn = columns.includes('ts')
       ? 'ts'
       : columns.includes('created_at')
@@ -1423,6 +1453,384 @@ router.post('/pulse', async (request, env, ctx) => {
       return missingTableResponse('pulse_optins', ctx.allowedOrigin);
     }
     console.error('/pulse error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+// ============================================================================
+// ADMIN ROUTES
+// ============================================================================
+
+router.get('/admin/whoami', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const userIsAdmin = isAdmin(auth.email, env);
+    
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        email: auth.email,
+        isAdmin: userIsAdmin,
+        environment: ctx.config.environment,
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    const status = err?.status === 401 ? 401 : 500;
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      status,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.get('/admin/stats', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('voters', ctx.allowedOrigin);
+    }
+    
+    // Get voter contact statistics
+    const contactTable = await resolveTable(env, ['voter_contacts', 'voter_contact']);
+    const votersTable = await resolveTable(env, ['voters']);
+    const columns = await getTableColumns(env, contactTable);
+    
+    // Determine which column name to use for method
+    const methodColumn = columns.includes('method') 
+      ? 'method' 
+      : columns.includes('contact_method') 
+        ? 'contact_method' 
+        : null;
+    
+    const totalVoters = await buildStatement(db, `SELECT COUNT(*) as count FROM ${votersTable}`).first();
+    const totalContacts = await buildStatement(db, `SELECT COUNT(*) as count FROM ${contactTable}`).first();
+    
+    // Get contacts by method (if column exists)
+    let contactsByMethod = { results: [] };
+    if (methodColumn) {
+      contactsByMethod = await buildStatement(db, `
+        SELECT 
+          ${methodColumn} as method,
+          COUNT(*) as count
+        FROM ${contactTable}
+        WHERE ${methodColumn} IS NOT NULL
+        GROUP BY ${methodColumn}
+      `).all();
+    }
+    
+    // Get contacts by outcome
+    const contactsByOutcome = await buildStatement(db, `
+      SELECT 
+        outcome,
+        COUNT(*) as count
+      FROM ${contactTable}
+      WHERE outcome IS NOT NULL
+      GROUP BY outcome
+      ORDER BY count DESC
+    `).all();
+    
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        stats: {
+          total_voters: totalVoters?.count || 0,
+          total_contacts: totalContacts?.count || 0,
+          by_method: contactsByMethod?.results || [],
+          by_outcome: contactsByOutcome?.results || [],
+        },
+        admin: auth.email,
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/stats error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.get('/admin/contacts', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('voter_contacts', ctx.allowedOrigin);
+    }
+    
+    const url = new URL(request.url);
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 500);
+    const offset = parseInt(url.searchParams.get('offset') || '0');
+    const reviewedFilter = url.searchParams.get('reviewed'); // 'true', 'false', or null (all)
+    
+    const contactTable = await resolveTable(env, ['voter_contacts', 'voter_contact']);
+    const columns = await getTableColumns(env, contactTable);
+    
+    // Determine column names
+    const methodColumn = columns.includes('method') ? 'method' : 'contact_method';
+    const volunteerColumn = columns.includes('volunteer_email') ? 'volunteer_email' : 'volunteer_id';
+    const timestampColumn = columns.includes('created_at') ? 'created_at' : 'ts';
+    const commentsColumn = columns.includes('comments') ? 'comments' : 'notes';
+    const reviewedColumn = columns.includes('reviewed') ? 'reviewed' : null;
+    
+    // Build query with optional reviewed filter
+    let whereClause = '1 = 1';
+    const params = [];
+    let paramIndex = 1;
+    
+    if (reviewedFilter === 'true' && reviewedColumn) {
+      whereClause += ` AND ${reviewedColumn} = 1`;
+    } else if (reviewedFilter === 'false' && reviewedColumn) {
+      whereClause += ` AND (${reviewedColumn} = 0 OR ${reviewedColumn} IS NULL)`;
+    }
+    
+    // Get contacts
+    const selectColumns = `
+        id,
+        voter_id,
+        ${methodColumn} as method,
+        outcome,
+        ${volunteerColumn} as volunteer,
+        ${commentsColumn} as comments,
+        ${reviewedColumn ? `${reviewedColumn} as reviewed,` : '0 as reviewed,'}
+        ${timestampColumn} as created_at
+    `;
+    
+    const contacts = await buildStatement(db, `
+      SELECT ${selectColumns}
+      FROM ${contactTable}
+      WHERE ${whereClause}
+      ORDER BY ${timestampColumn} DESC
+      LIMIT ?${paramIndex++} OFFSET ?${paramIndex++}
+    `, [limit, offset]).all();
+    
+    // Get total count
+    const total = await buildStatement(db, `
+      SELECT COUNT(*) as count FROM ${contactTable}
+      WHERE ${whereClause}
+    `).first();
+    
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        contacts: contacts?.results || [],
+        total: total?.count || 0,
+        limit,
+        offset,
+        has_reviewed_column: !!reviewedColumn,
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/contacts error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.get('/admin/contacts/:id', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('voter_contacts', ctx.allowedOrigin);
+    }
+    
+    const url = new URL(request.url);
+    const id = url.pathname.split('/').pop();
+    
+    const contactTable = await resolveTable(env, ['voter_contacts', 'voter_contact']);
+    const columns = await getTableColumns(env, contactTable);
+    
+    // Get all columns for full record
+    const contact = await buildStatement(db, `
+      SELECT * FROM ${contactTable} WHERE id = ?1
+    `, [id]).first();
+    
+    if (!contact) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Contact not found' },
+        404,
+        ctx.allowedOrigin
+      );
+    }
+    
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        contact,
+        available_columns: columns,
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/contacts/:id error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.put('/admin/contacts/:id', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('voter_contacts', ctx.allowedOrigin);
+    }
+    
+    const url = new URL(request.url);
+    const id = url.pathname.split('/').pop();
+    
+    let body;
+    try {
+      body = await readJson(request);
+    } catch (err) {
+      if (err instanceof BadRequestError) {
+        return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+      }
+      throw err;
+    }
+    
+    const contactTable = await resolveTable(env, ['voter_contacts', 'voter_contact']);
+    const columns = await getTableColumns(env, contactTable);
+    
+    // Build UPDATE statement dynamically
+    const updateFields = [];
+    const params = [];
+    let paramIndex = 1;
+    
+    // Allowed fields to update
+    const allowedFields = ['outcome', 'comments', 'notes', 'method', 'contact_method', 'reviewed', 
+                          'ok_callback', 'requested_info', 'dnc', 'best_day', 'best_time_window',
+                          'optin_sms', 'optin_email', 'email', 'wants_volunteer', 'share_insights_ok',
+                          'for_term_limits', 'issue_public_lands'];
+    
+    for (const field of allowedFields) {
+      if (body[field] !== undefined && columns.includes(field)) {
+        updateFields.push(`${field} = ?${paramIndex++}`);
+        params.push(body[field]);
+      }
+    }
+    
+    if (updateFields.length === 0) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'No valid fields to update' },
+        400,
+        ctx.allowedOrigin
+      );
+    }
+    
+    params.push(id);
+    
+    await buildStatement(db, `
+      UPDATE ${contactTable}
+      SET ${updateFields.join(', ')}
+      WHERE id = ?${paramIndex}
+    `, params).run();
+    
+    return ctx.jsonResponse(
+      { ok: true, message: 'Contact updated', id },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/contacts/:id PUT error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.delete('/admin/contacts/:id', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('voter_contacts', ctx.allowedOrigin);
+    }
+    
+    const url = new URL(request.url);
+    const id = url.pathname.split('/').pop();
+    
+    const contactTable = await resolveTable(env, ['voter_contacts', 'voter_contact']);
+    
+    await buildStatement(db, `
+      DELETE FROM ${contactTable} WHERE id = ?1
+    `, [id]).run();
+    
+    return ctx.jsonResponse(
+      { ok: true, message: 'Contact deleted', id },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/contacts/:id DELETE error', err);
     return ctx.jsonResponse(
       { ok: false, error: String(err?.message || err) },
       500,

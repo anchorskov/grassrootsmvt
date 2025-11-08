@@ -228,8 +228,49 @@
 
   let inFlightNext = false;
 
-  async function nextVoter() {
-    console.log('🔄 nextVoter called');
+  // Reset the form to blank state
+  function resetForm() {
+    document.getElementById("outcome").value = "";
+    document.getElementById("best_day").value = "";
+    document.getElementById("best_time_window").value = "";
+    document.getElementById("email").value = "";
+    document.getElementById("comments").value = "";
+    ["ok_callback","requested_info","dnc","optin_sms","optin_email",
+     "wants_volunteer","share_insights_ok","for_term_limits","issue_public_lands"]
+     .forEach(id => document.getElementById(id).checked = false);
+  }
+
+  // Check if user has entered any meaningful data
+  function hasFormData() {
+    const outcome = document.getElementById("outcome").value;
+    const email = document.getElementById("email").value.trim();
+    const comments = document.getElementById("comments").value.trim();
+    const bestDay = document.getElementById("best_day").value;
+    const bestTime = document.getElementById("best_time_window").value;
+    
+    // Check if any checkbox is checked
+    const anyCheckbox = ["ok_callback","requested_info","dnc","optin_sms","optin_email",
+       "wants_volunteer","share_insights_ok","for_term_limits","issue_public_lands"]
+       .some(id => document.getElementById(id).checked);
+    
+    // Has data if: outcome selected OR any other field filled OR any checkbox checked
+    return outcome || email || comments || bestDay || bestTime || anyCheckbox;
+  }
+
+  async function nextVoter(skipPrompt = false) {
+    console.log('🔄 nextVoter called, skipPrompt:', skipPrompt);
+    
+    // Check for unsaved data unless we're explicitly skipping the prompt
+    if (!skipPrompt && hasFormData()) {
+      const userChoice = confirm("You have unsaved data. Do you want to save before moving to the next voter?\n\nClick OK to save, or Cancel to discard changes.");
+      if (userChoice) {
+        // User wants to save
+        await saveAndNext();
+        return;
+      }
+      // User chose to discard - continue to next voter
+    }
+    
     if (inFlightNext) return;
     inFlightNext = true;
     getNextBtn.disabled = true;
@@ -253,6 +294,9 @@
         return;
       }
 
+      // Reset form before showing new voter
+      resetForm();
+      
       // show
       empty.hidden = true; voterCard.hidden = false;
       voterCard.dataset.voter = v.voter_id;
@@ -263,7 +307,7 @@
         `<strong>${name || "—"}</strong><br/>${(v.city||'')} ${(v.county||'')}${party}<br/>${phone}`;
 
       // remember to avoid immediate repeats
-      pushSeen(v.voter_id);                       // NEW
+      pushSeen(v.voter_id);
       setMsg("");
     } catch (e) {
       console.error('❌ nextVoter error:', e);
@@ -280,9 +324,33 @@
   saveBtn.addEventListener("click", saveAndNext);
 
   async function saveAndNext() {
+    const voter_id = voterCard.dataset.voter || "";
+    
+    if (!voter_id) { 
+      alert("No voter selected."); 
+      return; 
+    }
+    
+    // Check if there's any meaningful data to save
+    if (!hasFormData()) {
+      console.log('ℹ️ No data entered, skipping save and moving to next voter');
+      // Just move to next without saving
+      nextVoter(true); // skipPrompt = true to avoid recursive prompt
+      return;
+    }
+    
+    const outcome = document.getElementById("outcome").value;
+    if (!outcome) { 
+      alert("Choose an outcome to save the call record."); 
+      return; 
+    }
+    
     const payload = {
-      voter_id: voterCard.dataset.voter || "",
-      outcome: document.getElementById("outcome").value,
+      voter_id: voter_id,
+      contact_method: 'phone',
+      outcome: outcome,
+      comments: document.getElementById("comments").value || null,
+      // Additional call-specific fields
       ok_callback: +document.getElementById("ok_callback").checked,
       requested_info: +document.getElementById("requested_info").checked,
       dnc: +document.getElementById("dnc").checked,
@@ -294,38 +362,26 @@
       wants_volunteer: +document.getElementById("wants_volunteer").checked,
       share_insights_ok: +document.getElementById("share_insights_ok").checked,
       for_term_limits: +document.getElementById("for_term_limits").checked,
-      issue_public_lands: +document.getElementById("issue_public_lands").checked,
-      comments: document.getElementById("comments").value || null
+      issue_public_lands: +document.getElementById("issue_public_lands").checked
     };
-    if (!payload.voter_id) { alert("No voter selected."); return; }
-    if (!payload.outcome) { alert("Choose an outcome."); return; }
 
     try {
       setMsg("Saving...");
-  await jsonFetch(API("/complete"), { method: "POST", body: JSON.stringify(payload) });
-      // reset a few fields
-      document.getElementById("outcome").value = "";
-      document.getElementById("best_day").value = "";
-      document.getElementById("best_time_window").value = "";
-      document.getElementById("email").value = "";
-      document.getElementById("comments").value = "";
-      ["ok_callback","requested_info","dnc","optin_sms","optin_email",
-       "wants_volunteer","share_insights_ok","for_term_limits","issue_public_lands"]
-       .forEach(id => document.getElementById(id).checked = false);
+      await jsonFetch(API("/contact"), { method: "POST", body: JSON.stringify(payload) });
       setMsg("Saved.");
-      // remember and fetch next
+      // remember and fetch next (form will be reset in nextVoter)
       const vid = voterCard.dataset.voter;
       if (vid) pushSeen(vid);
-      nextVoter();
+      nextVoter(true); // skipPrompt = true since we just saved
     } catch (e) {
       setMsg(`Save failed: ${e.message}`, "error");
     }
   }
-  // make Skip also record the current id so we don’t bounce back to it
+  // Skip button - intentionally discards data without saving
   document.getElementById("skipBtn").addEventListener("click", () => {
     const vid = voterCard.dataset.voter;
     if (vid) pushSeen(vid);
-    nextVoter();
+    nextVoter(true); // skipPrompt = true, user explicitly chose to skip
   });
 
   // Keyboard shortcut: N = Get Next (only when not typing in input fields)
@@ -337,7 +393,8 @@
                         target.isContentEditable;
     
     if (e.key.toLowerCase() === "n" && !e.metaKey && !e.ctrlKey && !e.altKey && !isInputField) {
-      e.preventDefault(); nextVoter();
+      e.preventDefault(); 
+      nextVoter(); // Will prompt if data exists
     }
   });
 

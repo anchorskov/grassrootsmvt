@@ -24,6 +24,7 @@ migrations_dir = "db/migrations"
 ENVIRONMENT = "local"
 DATA_BACKEND = "d1"
 ALLOW_ORIGIN_DEV = "http://127.0.0.1:8788,http://localhost:8788,http://localhost:5173"
+ADMIN_EMAILS = "dev@localhost,admin@grassrootsmvt.org"
 
 # ===== PREVIEW =====
 [env.preview]
