@@ -9,14 +9,20 @@
 <script src="/shared/authGlobal.js"></script>
 <script src="../shared/streetAutocompleteOptimized.js"></script>
 <script src="../shared/houseAutocomplete.js"></script>
-<script type="module">
-  import { showUserBadge } from '../shared/userBadge.js';
-  showUserBadge();
-</script>
 <style>
   :root { --gap: 10px; }
   body { font-family: system-ui, sans-serif; margin: 12px; position: relative; }
-  .auth-status { position: fixed; top: 8px; right: 8px; z-index: 100; font-size: 0.875rem; padding: 0.5rem 0.75rem; border-radius: 8px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+  .auth-inline {
+    margin: 4px 0 12px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: #e0f2fe;
+    color: #0f172a;
+    font-size: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
   .card { border:1px solid #e5e7eb; border-radius:12px; padding:12px; margin:12px 0; box-shadow:0 1px 2px rgba(0,0,0,.04); }
   h1 { font-size: 1.4rem; margin: 4px 0 12px; }
   .row { display:flex; gap:var(--gap); flex-wrap:wrap; align-items:center; }
@@ -71,10 +77,8 @@
 </head>
 
 <body>
-<!-- Authentication status indicator -->
-<div id="user-badge" style="position:fixed;top:8px;right:8px;z-index:100;"></div>
-
 <h1>Canvass</h1>
+<div class="auth-inline" id="authInline">Checking sign-in…</div>
 
 <div class="card">
   <div class="muted" id="filtersBadge">Loading filters…</div>
@@ -91,9 +95,10 @@
   
   <div id="instructionsPanel" style="background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
     <div id="instructionText" style="font-weight: 500; color: #0369a1;">
-      👋 Click on the Street field below to start
+      👋 Click the Street field and start typing at least two letters
     </div>
   </div>
+  <div id="districtStreetsStatus" class="muted" style="display:none; margin-bottom: 8px;"></div>
 
   <div class="card">
     <div class="row">
@@ -104,7 +109,7 @@
       </div>
       <div class="autocomplete-container">
         <label for="street">Street</label>
-        <input id="street" type="text" placeholder="e.g. RAVEN ST" autocomplete="off" />
+        <input id="street" type="text" placeholder="Start typing street name" autocomplete="off" />
         <div id="streetSuggestions" class="autocomplete-suggestions"></div>
       </div>
     </div>
@@ -143,6 +148,13 @@ const API = (p = '', params = {}) =>
 const RETURN_PATH_KEY = 'contactUpdateReturnTo';
 const CANVASS_STATE_KEY = 'canvassPageState';
 let latestRows = [];
+const WY_META_PATHS = ['/admin/wy.json', '/ui/admin/wy.json'];
+let wyMetaCache = null;
+const DISTRICT_STREET_LIMIT = 400;
+const DISTRICT_CITY_SCAN_LIMIT = 12;
+let districtStreetSeedPromise = null;
+let streetAutocomplete;
+const districtStreetsStatusEl = document.getElementById('districtStreetsStatus');
 
 function fromQS() {
   const u = new URL(location.href);
@@ -184,6 +196,112 @@ function fromQS() {
   }
 
 function setMsg(t) { document.getElementById('msg').textContent = t || ''; }
+
+function setDistrictStreetsStatus(text, tone = 'muted') {
+  if (!districtStreetsStatusEl) return;
+  if (!text) {
+    districtStreetsStatusEl.style.display = 'none';
+    districtStreetsStatusEl.style.color = '';
+    districtStreetsStatusEl.textContent = '';
+    return;
+  }
+  districtStreetsStatusEl.style.display = '';
+  const palette = {
+    muted: '#475569',
+    success: '#166534',
+    warning: '#92400e',
+    error: '#b91c1c',
+  };
+  districtStreetsStatusEl.style.color = palette[tone] || palette.muted;
+  districtStreetsStatusEl.textContent = text;
+}
+
+async function waitForApiClientMethods() {
+  const started = Date.now();
+  while (typeof window.apiPost !== 'function') {
+    await new Promise(resolve => setTimeout(resolve, 25));
+    if (Date.now() - started > 5000) {
+      throw new Error('API client not ready');
+    }
+  }
+}
+
+async function loadWyMeta() {
+  if (wyMetaCache) return wyMetaCache;
+  let lastErr = null;
+  for (const path of WY_META_PATHS) {
+    try {
+      const res = await fetch(path, { cache: 'no-store' });
+      if (!res.ok) {
+        lastErr = new Error(`${path} -> HTTP ${res.status}`);
+        continue;
+      }
+      const data = await res.json();
+      const normalized = {};
+      Object.entries(data.citiesByCounty || {}).forEach(([county, list]) => {
+        normalized[county.toUpperCase()] = (list || []).map(city => city.toUpperCase());
+      });
+      wyMetaCache = { citiesByCounty: normalized };
+      return wyMetaCache;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr || new Error('Unable to load metadata');
+}
+
+function normalizeCountyName(value) {
+  return (value || '').toString().trim().toUpperCase();
+}
+
+async function preloadDistrictStreets(filters) {
+  if (!filters?.district_type || !filters?.district) return;
+  if (districtStreetSeedPromise) return districtStreetSeedPromise;
+  districtStreetSeedPromise = (async () => {
+    try {
+      await waitForApiClientMethods();
+      setDistrictStreetsStatus(`Loading streets for District ${filters.district}…`);
+      const payload = {
+        filters: {
+          county: filters.county || null,
+          city: filters.city || null,
+          district_type: filters.district_type,
+          district: filters.district,
+          parties: filters.parties || [],
+        },
+        limit: DISTRICT_STREET_LIMIT,
+      };
+      const response = await window.apiFetch('canvass/nearby', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : { rows: [] };
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      const streets = new Set();
+      rows.forEach(row => {
+        const addr = row.address || '';
+        const street = addr.replace(/^\d+\s+/, '').trim().toUpperCase();
+        if (street) streets.add(street);
+      });
+      const list = Array.from(streets).sort();
+      if (streetAutocomplete) {
+        streetAutocomplete.setSeededStreets(list);
+      }
+      if (list.length) {
+        setDistrictStreetsStatus(`Loaded ${list.length} streets found in District ${filters.district}.`, 'success');
+      } else {
+        setDistrictStreetsStatus('No streets found for this district yet. Try typing to search manually.', 'warning');
+      }
+    } catch (err) {
+      console.error('Unable to preload district streets', err);
+      setDistrictStreetsStatus('Unable to preload streets for this district.', 'error');
+    } finally {
+      districtStreetSeedPromise = null;
+    }
+  })();
+  return districtStreetSeedPromise;
+}
 
 function getCanvassFormValues() {
   return {
@@ -330,6 +448,11 @@ function restoreCanvassState() {
         `;
       }
       
+      const districtChips = [
+        r.house_district ? `<span class="chip muted-chip">HD ${r.house_district}</span>` : '',
+        r.senate_district ? `<span class="chip muted-chip">SD ${r.senate_district}</span>` : ''
+      ].filter(Boolean).join(' ');
+
       div.innerHTML = `
         <div class="person-name">${r.name || 'Name Unknown'} <span style="font-size:0.8rem;font-weight:400;color:#64748b;">(ID: ${r.voter_id})</span></div>
         <div class="addr">${r.address}</div>
@@ -338,6 +461,7 @@ function restoreCanvassState() {
           ${r.phone_e164
             ? `<span class="chip">${r.phone_e164}${r.phone_confidence ? ' ('+r.phone_confidence+')' : ''}</span>`
             : `<span class="chip muted-chip">no phone</span>`}
+          ${districtChips}
         </div>
         ${contactInfo}
         <div class="toolbar" style="margin-top:8px;">
@@ -599,7 +723,7 @@ window.addEventListener('pagehide', () => persistCanvassState());
   });
   
   // Initialize reusable street autocomplete component
-  const streetAutocomplete = new StreetAutocompleteOptimized({
+  streetAutocomplete = new StreetAutocompleteOptimized({
     streetInputId: 'street',
     houseInputId: 'house',
     suggestionsId: 'streetSuggestions',
@@ -638,8 +762,8 @@ window.addEventListener('pagehide', () => persistCanvassState());
   // Instructions state management
   let currentStep = 'street';
   const instructions = {
-    street: '👋 Click on the Street field below to start',
-    streetFocused: '📝 Type or select a street name from the blue dropdown',
+    street: '👋 Click the Street field and start typing at least two letters',
+    streetFocused: '📝 Keep typing — suggestions appear once you enter two or more letters',
     streetSelected: '🏠 Great! Now select a house number from the yellow dropdown above',
     houseSelected: '🔍 Perfect! Click "Find nearby" to search for voters',
     searching: '⏳ Searching for nearby voters...',
@@ -742,6 +866,56 @@ window.addEventListener('pagehide', () => persistCanvassState());
   
   const f = fromQS();
   showFiltersBadge(f);
+  if (f.district_type && f.district) {
+    preloadDistrictStreets(f);
+  } else {
+    setDistrictStreetsStatus('');
+  }
   
   // ...existing code...
+</script>
+<script>
+  (function () {
+    const authInline = document.getElementById('authInline');
+    if (!authInline) return;
+
+    const render = state => {
+      const email = state?.user?.email || null;
+      if (state?.authenticated && email) {
+        authInline.textContent = `Signed in as ${email}`;
+        authInline.style.background = '#dcfce7';
+        authInline.style.color = '#065f46';
+      } else {
+        authInline.textContent = 'Not signed in';
+        authInline.style.background = '#fee2e2';
+        authInline.style.color = '#991b1b';
+      }
+    };
+
+    const bind = () => {
+      const unsubscribe = window.authGlobal.onAuthChange(render);
+      render(window.authGlobal);
+      return unsubscribe;
+    };
+
+    if (window.authGlobal?.ready) {
+      bind();
+    } else {
+      window.addEventListener(
+        'authGlobalReady',
+        () => {
+          bind();
+        },
+        { once: true }
+      );
+    }
+  })();
+</script>
+<script type="module">
+  import { initHelpModal } from '../shared/helpModal.js';
+  initHelpModal({
+    helpPath: '/help/canvass.md',
+    title: 'Canvass Instructions',
+    toggleLabel: 'Help',
+  });
 </script>

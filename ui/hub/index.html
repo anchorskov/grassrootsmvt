@@ -17,6 +17,11 @@
   button[disabled] { opacity:.5; cursor:not-allowed; }
   .chips { display:flex; gap:.5rem; flex-wrap: wrap; }
   .chip { display:inline-flex; align-items:center; gap:.4rem; border:1px solid #cbd5e1; border-radius:999px; padding:.35rem .6rem; }
+  .district-toggle { margin-top: 0.75rem; padding: 0.65rem 0.9rem; border: 1px dashed #cbd5e1; border-radius: 10px; background: #f8fafc; display: flex; flex-direction: column; gap: 0.35rem; }
+  .district-toggle__label { display: flex; align-items: center; gap: 0.5rem; margin: 0; font-weight: 600; }
+  .district-toggle__label input { width: auto; }
+  .district-row { margin-top: 0.5rem; }
+  .small-text { font-size: 0.85rem; }
 </style>
 
 <h1>Volunteer Hub</h1>
@@ -36,6 +41,19 @@
         <option value="">— any —</option>
       </select>
     </div>
+  </div>
+
+  <div class="district-toggle">
+    <label class="district-toggle__label">
+      <input type="checkbox" id="enable_districts" />
+      Focus by state district (optional)
+    </label>
+    <p class="muted small-text">
+      Turn this on to filter by Wyoming House/Senate districts. Leave it off for county/city targeting.
+    </p>
+  </div>
+
+  <div class="row district-row" data-district-row hidden>
     <div>
       <label for="district_type">District type</label>
       <select id="district_type" disabled>
@@ -80,6 +98,8 @@
   const selCity   = document.getElementById('city');
   const selType   = document.getElementById('district_type');
   const selDist   = document.getElementById('district');
+  const chkDistricts = document.getElementById('enable_districts');
+  const districtRow  = document.querySelector('[data-district-row]');
   const chkR      = document.getElementById('p_r');
   const chkD      = document.getElementById('p_d');
   const chkU      = document.getElementById('p_u');
@@ -145,13 +165,30 @@
     return out;
   }
 
+  function districtFiltersEnabled() {
+    return !!(chkDistricts && chkDistricts.checked);
+  }
+
+  function syncDistrictVisibility() {
+    const enabled = districtFiltersEnabled();
+    if (districtRow) {
+      districtRow.hidden = !enabled;
+    }
+    if (!enabled) {
+      selType.value = '';
+      selDist.value = '';
+    }
+    selType.disabled = !enabled || !selCounty.value;
+    selDist.disabled = !enabled || !selType.value;
+  }
+
   function canProceed() {
-    // Require county OR district; if district_type is chosen, district must be chosen.
     const county = selCounty.value || '';
-    const dtype  = selType.value || '';
-    const dist   = selDist.value || '';
-    if (dtype && !dist) return false;
-    return !!(county || (dtype && dist));
+    if (!county) return false;
+    if (districtFiltersEnabled()) {
+      return !!(selType.value && selDist.value);
+    }
+    return true;
   }
 
   function updateButtons() {
@@ -168,8 +205,9 @@
     const county = selCounty.value ? selCounty.value.toUpperCase() : null;
     const city   = selCity.value   ? selCity.value.toUpperCase()   : null;
 
-    const district_type = selType.value || null;
-    let district = selDist.value || null;
+    const useDistricts = districtFiltersEnabled();
+    const district_type = useDistricts ? (selType.value || null) : null;
+    let district = useDistricts ? (selDist.value || null) : null;
     if (district) {
       const n = String(parseInt(district, 10));
       district = n && !isNaN(n) ? n.padStart(2,'0') : district;
@@ -215,6 +253,13 @@
   );
   btnCalls.addEventListener('click', () => go('/call.html'));
   btnCanv.addEventListener('click',  () => go('/canvass/'));
+  if (chkDistricts) {
+    chkDistricts.addEventListener('change', () => {
+      syncDistrictVisibility();
+      updateButtons();
+    });
+  }
+  syncDistrictVisibility();
 
   // Init
   fetchMeta().then((raw) => {
@@ -232,9 +277,9 @@
 
       // when county changes, clear district type + list
       selType.value = '';
-      selType.disabled = false;
+      selDist.value = '';
       fillSelect(selDist, [], { placeholder: '— select —' });
-      selDist.disabled = true;
+      syncDistrictVisibility();
       updateButtons();
     });
 
@@ -246,7 +291,7 @@
       if (dtype === 'house')   dists = wy.houseByCounty[cty]  || [];
       if (dtype === 'senate')  dists = wy.senateByCounty[cty] || [];
       fillSelect(selDist, dists);
-      selDist.disabled = !dists.length;
+      selDist.disabled = !districtFiltersEnabled() || !dists.length;
       updateButtons();
     });
 
@@ -259,4 +304,12 @@
     hint.textContent = 'Failed to load county/city metadata.';
   });
 })();
+</script>
+<script type="module">
+  import { initHelpModal } from '../shared/helpModal.js';
+  initHelpModal({
+    helpPath: '/help/hub.md',
+    title: 'Hub Instructions',
+    toggleLabel: 'Help',
+  });
 </script>

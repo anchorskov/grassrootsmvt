@@ -51,6 +51,7 @@
     "better-sqlite3": "^12.4.1",
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "linkedom": "^0.18.12",
     "miniflare": "^4.20251004.0",
     "wrangler": "latest"
   },

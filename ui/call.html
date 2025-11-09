@@ -22,7 +22,17 @@
   .toolbar { display:flex; gap:.5rem; align-items:center; }
   #voterCard[hidden], #empty[hidden] { display:none; }
   h1 { display:flex; justify-content:space-between; align-items:center; margin:.25rem 0 1rem; }
-  .auth-status { display: flex; align-items: center; margin-bottom: 1rem; }
+  .auth-inline {
+    margin: 4px 0 12px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: #e0f2fe;
+    color: #0f172a;
+    font-size: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
   .online-indicator { color: #4caf50; }
 </style>
 
@@ -32,9 +42,29 @@
     <button id="getNextBtn" style="padding:8px 12px;border-radius:6px;background:#6aa9ff;color:#fff;border:none;">Get Next</button>
   </span>
 </h1>
+<div class="auth-inline" id="authInline">Checking sign-in…</div>
 
 <div class="card" id="whoami">Checking login…</div>
 <div class="card muted" id="filtersBadge" style="display:none;"></div>
+<div class="card" id="districtControl" style="display:none; margin-top:12px;">
+  <label for="districtTypeSelect" style="font-weight:600;">District focus</label>
+  <div class="row" style="margin-top:8px; align-items:flex-end;">
+    <div>
+      <select id="districtTypeSelect">
+        <option value="">— none —</option>
+        <option value="house">House District</option>
+        <option value="senate">Senate District</option>
+      </select>
+    </div>
+    <div>
+      <select id="districtSelect" disabled>
+        <option value="">— select —</option>
+      </select>
+    </div>
+    <button id="districtApplyBtn" class="secondary" style="flex:0 0 auto;">Apply</button>
+  </div>
+  <div class="muted" id="districtControlStatus" style="margin-top:8px;"></div>
+</div>
 
 <div class="card" id="voterCard" hidden>
   <div id="voterInfo" class="muted"></div>
@@ -102,11 +132,6 @@
 
 <div class="card" id="empty" hidden>No eligible voters (or not logged in).</div>
 
-<div id="auth-status" class="auth-status">
-  <span class="online-indicator">🔄 Checking connection...</span>
-  <span id="user-email-badge" style="display:none; margin-left:8px; color:#2563eb; font-weight:600;"></span>
-</div>
-
 <script>
 
   // Debug snippet: logs token presence and tests /api/ping connectivity
@@ -152,6 +177,12 @@
   const saveBtn = document.getElementById('saveBtn');
   const skipBtn = document.getElementById('skipBtn');
   const filtersBadge = document.getElementById('filtersBadge');
+  const districtControl = document.getElementById('districtControl');
+  const districtTypeSelect = document.getElementById('districtTypeSelect');
+  const districtSelect = document.getElementById('districtSelect');
+  const districtApplyBtn = document.getElementById('districtApplyBtn');
+  const districtControlStatus = document.getElementById('districtControlStatus');
+  let districtMetadata = null;
 
   function setMsg(text, kind="muted") {
     msg.className = kind;
@@ -175,14 +206,126 @@
 
   function getFilters() {
     const fromUrl = getUrlFilters();
-    if (fromUrl.county || fromUrl.district_type || fromUrl.parties.length) return fromUrl;
-    try { return { ...JSON.parse(sessionStorage.getItem('vol.filters')||'{}'), require_phone:true }; }
-    catch { return { require_phone:true }; }
+    if (fromUrl.county || fromUrl.district_type || fromUrl.parties.length) {
+      const cleaned = { ...fromUrl, require_phone: true };
+      if (!cleaned.district_type || !cleaned.district) {
+        delete cleaned.district_type;
+        delete cleaned.district;
+      }
+      return cleaned;
+    }
+    try {
+      const stored = JSON.parse(sessionStorage.getItem('vol.filters') || '{}');
+      delete stored.district_type;
+      delete stored.district;
+      return { ...stored, require_phone: true };
+    } catch {
+      return { require_phone: true };
+    }
   }
 
   function showFiltersBadge(filters) {
     filtersBadge.style.display = 'block';
     filtersBadge.textContent = 'Filters: ' + JSON.stringify(filters);
+    updateDistrictControlStatus(filters);
+  }
+
+  function populateDistrictSelect(type) {
+    if (!districtSelect || !districtMetadata) return;
+    districtSelect.innerHTML = '<option value="">— select —</option>';
+    if (!type) {
+      districtSelect.disabled = true;
+      return;
+    }
+    const list =
+      type === 'senate'
+        ? (districtMetadata.senate_districts || [])
+        : (districtMetadata.house_districts || []);
+    list.forEach(code => {
+      const opt = document.createElement('option');
+      opt.value = code;
+      opt.textContent = `${type === 'senate' ? 'SD' : 'HD'} ${code}`;
+      districtSelect.appendChild(opt);
+    });
+    districtSelect.disabled = false;
+  }
+
+  function updateDistrictControlStatus(filters) {
+    if (!districtControlStatus) return;
+    if (filters?.district_type && filters?.district) {
+      districtControlStatus.textContent = `Targeting ${filters.district_type === 'senate' ? 'Senate' : 'House'} District ${filters.district}.`;
+    } else {
+      districtControlStatus.textContent = 'No district focus.';
+    }
+  }
+
+  async function initDistrictControl() {
+    if (!districtControl || districtMetadata) return;
+    const filters = getFilters();
+    const hasDistrict = filters.district_type && filters.district;
+    if (!hasDistrict) {
+      districtControl.style.display = 'none';
+      return;
+    }
+    try {
+      const resp = await fetch('/api/metadata', { headers: { Accept: 'application/json' } });
+      if (!resp.ok) throw new Error(`metadata ${resp.status}`);
+      districtMetadata = await resp.json();
+      districtControl.style.display = '';
+      updateDistrictControlStatus(filters);
+      if (filters.district_type) {
+        districtTypeSelect.value = filters.district_type;
+        populateDistrictSelect(filters.district_type);
+        districtSelect.value = filters.district || '';
+      } else {
+        districtSelect.disabled = true;
+      }
+    } catch (err) {
+      console.warn('District metadata unavailable', err);
+      districtControl.style.display = 'none';
+      districtMetadata = null;
+      return;
+    }
+
+    districtTypeSelect.addEventListener('change', () => {
+      const type = districtTypeSelect.value;
+      populateDistrictSelect(type);
+      if (!type) {
+        districtSelect.value = '';
+      }
+    });
+
+    districtApplyBtn.addEventListener('click', event => {
+      event.preventDefault();
+      applyDistrictSelection();
+    });
+  }
+
+  function applyDistrictSelection() {
+    const type = districtTypeSelect.value || null;
+    const district = districtSelect.value || null;
+    if (hasFormData()) {
+      const proceed = confirm('You have unsaved call data. Changing districts will load a new voter and discard the current form. Continue?');
+      if (!proceed) return;
+    }
+    const filters = { ...getFilters() };
+    const url = new URL(location.href);
+    if (type && district) {
+      filters.district_type = type;
+      filters.district = district;
+      url.searchParams.set('district_type', type);
+      url.searchParams.set('district', district);
+    } else {
+      delete filters.district_type;
+      delete filters.district;
+      url.searchParams.delete('district_type');
+      url.searchParams.delete('district');
+    }
+    sessionStorage.setItem('vol.filters', JSON.stringify(filters));
+    clearSeen();
+    history.replaceState(null, '', url);
+    showFiltersBadge(filters);
+    nextVoter(true);
   }
 
   async function jsonFetch(url, init = {}) {
@@ -218,6 +361,9 @@
   const SEEN_KEY = 'vol.seen_ids';
   function getSeen() {
     try { return JSON.parse(sessionStorage.getItem(SEEN_KEY) || '[]'); } catch { return []; }
+  }
+  function clearSeen() {
+    sessionStorage.removeItem(SEEN_KEY);
   }
   function pushSeen(id) {
     if (!id) return;
@@ -301,10 +447,20 @@
       empty.hidden = true; voterCard.hidden = false;
       voterCard.dataset.voter = v.voter_id;
       const name = [v.first_name, v.last_name].filter(Boolean).join(" ");
-      const party = v.political_party ? (' • Party: ' + v.political_party) : '';
       const phone = v.phone_1 ? ('Phone: ' + v.phone_1) : 'Phone: —';
+      const districtBits = [
+        v.house_district ? `HD ${v.house_district}` : null,
+        v.senate_district ? `SD ${v.senate_district}` : null,
+      ].filter(Boolean).join(' • ');
+      const lineParts = [
+        [v.city, v.county].filter(Boolean).join(', ').trim() || null,
+        v.political_party ? `Party: ${v.political_party}` : null,
+        districtBits || null,
+      ].filter(Boolean);
+      const details = lineParts.join(' • ');
+      const detailsHtml = details ? `${details}<br/>` : '';
       voterInfo.innerHTML =
-        `<strong>${name || "—"}</strong><br/>${(v.city||'')} ${(v.county||'')}${party}<br/>${phone}`;
+        `<strong>${name || "—"}</strong><br/>${detailsHtml}${phone}`;
 
       // remember to avoid immediate repeats
       pushSeen(v.voter_id);
@@ -400,35 +556,55 @@
 
   const filters = getFilters();
   showFiltersBadge(filters);
+  initDistrictControl();
   (async () => {
     console.log("✅ Ready, loading data...");
     await loadWho();     // don’t block if this fails; loadWho() already swallows errors
     await nextVoter();   // show a voter immediately
   })();
 </script>
-<script>
-  // Update user email badge on authentication change
-  function updateUserEmailBadge() {
-    const badge = document.getElementById('user-email-badge');
-    if (window.authGlobal && window.authGlobal.user && window.authGlobal.user.email) {
-      badge.textContent = window.authGlobal.user.email;
-      badge.style.display = '';
-    } else {
-      badge.textContent = '';
-      badge.style.display = 'none';
-    }
-  }
-  if (window.authGlobal) {
-    window.authGlobal.onAuthChange(updateUserEmailBadge);
-    updateUserEmailBadge();
-  } else {
-    window.addEventListener('authGlobalReady', function() {
-      window.authGlobal.onAuthChange(updateUserEmailBadge);
-      updateUserEmailBadge();
-    });
-  }
-</script>
 <script type="module">
-  import { showUserBadge } from '../shared/userBadge.js';
-  showUserBadge();
+  import { initHelpModal } from '../shared/helpModal.js';
+  initHelpModal({
+    helpPath: '/help/call.md',
+    title: 'Call Workflow Instructions',
+    toggleLabel: 'Help',
+    position: 'top-right',
+  });
+</script>
+<script>
+  (function () {
+    const authInline = document.getElementById('authInline');
+    if (!authInline) return;
+
+    const render = state => {
+      const email = state?.user?.email || null;
+      if (state?.authenticated && email) {
+        authInline.textContent = `Signed in as ${email}`;
+        authInline.style.background = '#dcfce7';
+        authInline.style.color = '#065f46';
+      } else {
+        authInline.textContent = 'Not signed in';
+        authInline.style.background = '#fee2e2';
+        authInline.style.color = '#991b1b';
+      }
+    };
+
+    const bind = () => {
+      window.authGlobal.onAuthChange(render);
+      render(window.authGlobal);
+    };
+
+    if (window.authGlobal?.ready) {
+      bind();
+    } else {
+      window.addEventListener(
+        'authGlobalReady',
+        () => {
+          bind();
+        },
+        { once: true }
+      );
+    }
+  })();
 </script>

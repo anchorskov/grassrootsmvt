@@ -330,13 +330,136 @@ router.get('/metadata', async (request, env, ctx) => {
   }
 
   const url = new URL(request.url);
-  const city = url.searchParams.get('city');
+  const countyParam = url.searchParams.get('city');
   const houseDistrict = url.searchParams.get('house_district');
   const senateDistrict = url.searchParams.get('senate_district');
+  const normalizeDistrictInput = value => {
+    if (!value) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    const num = Number(trimmed);
+    if (!Number.isNaN(num)) {
+      return String(Math.abs(num)).padStart(2, '0');
+    }
+    return trimmed.toUpperCase();
+  };
+
+  const getCoverageTable = async () => {
+    try {
+      return await resolveTable(env, ['district_coverage']);
+    } catch (err) {
+      if (err instanceof DependencyMissingError) return null;
+      throw err;
+    }
+  };
 
   try {
+    const coverageTable = await getCoverageTable();
     const votersTable = await resolveTable(env, ['voters']);
 
+    if (coverageTable) {
+      if (houseDistrict || senateDistrict) {
+        const districtType = houseDistrict ? 'house' : 'senate';
+        const districtCode = normalizeDistrictInput(houseDistrict || senateDistrict);
+        const coverageResult = await buildStatement(
+          db,
+          `SELECT county, city FROM ${coverageTable}
+           WHERE district_type = ?1 AND district_code = ?2
+           ORDER BY county, city`,
+          [districtType, districtCode]
+        ).all();
+        const coverageRows = coverageResult.results ?? [];
+        const counties = Array.from(new Set(coverageRows.map(row => row.county)));
+        const cities = Array.from(
+          new Set(
+            coverageRows
+              .map(row => row.city)
+              .filter(Boolean)
+          )
+        );
+        return ctx.jsonResponse(
+          {
+            ok: true,
+            mode: districtType === 'house' ? 'house_to_city' : 'senate_to_city',
+            district: districtCode,
+            counties,
+            cities,
+          },
+          200,
+          ctx.allowedOrigin,
+          { 'Cache-Control': 'max-age=86400' }
+        );
+      }
+
+      if (countyParam) {
+        const county = countyParam.toUpperCase();
+        const [houseResult, senateResult] = await Promise.all([
+          buildStatement(
+            db,
+            `SELECT DISTINCT district_code FROM ${coverageTable}
+             WHERE district_type = 'house' AND county = ?1
+             ORDER BY CAST(district_code AS INTEGER)`,
+            [county]
+          ).all(),
+          buildStatement(
+            db,
+            `SELECT DISTINCT district_code FROM ${coverageTable}
+             WHERE district_type = 'senate' AND county = ?1
+             ORDER BY CAST(district_code AS INTEGER)`,
+            [county]
+          ).all(),
+        ]);
+        return ctx.jsonResponse(
+          {
+            ok: true,
+            mode: 'city_to_district',
+            city: county,
+            house_districts: (houseResult.results ?? []).map(row => row.district_code),
+            senate_districts: (senateResult.results ?? []).map(row => row.district_code),
+          },
+          200,
+          ctx.allowedOrigin,
+          { 'Cache-Control': 'max-age=86400' }
+        );
+      }
+
+      const [countiesResult, houseCodesResult, senateCodesResult] = await Promise.all([
+        buildStatement(
+          db,
+          `SELECT DISTINCT county FROM ${coverageTable} ORDER BY county`
+        ).all(),
+        buildStatement(
+          db,
+          `SELECT DISTINCT district_code FROM ${coverageTable}
+           WHERE district_type = 'house'
+           ORDER BY CAST(district_code AS INTEGER)`
+        ).all(),
+        buildStatement(
+          db,
+          `SELECT DISTINCT district_code FROM ${coverageTable}
+           WHERE district_type = 'senate'
+           ORDER BY CAST(district_code AS INTEGER)`
+        ).all(),
+      ]);
+
+      return ctx.jsonResponse(
+        {
+          ok: true,
+          mode: 'default',
+          state: 'WY',
+          counties: (countiesResult.results ?? []).map(row => row.county),
+          cities: (countiesResult.results ?? []).map(row => row.county),
+          house_districts: (houseCodesResult.results ?? []).map(row => row.district_code),
+          senate_districts: (senateCodesResult.results ?? []).map(row => row.district_code),
+          auto_populate: false,
+        },
+        200,
+        ctx.allowedOrigin,
+        { 'Cache-Control': 'max-age=86400' }
+      );
+    }
+
+    // Fallback to legacy behavior if district_coverage table is missing.
     if (houseDistrict || senateDistrict) {
       const districtField = houseDistrict ? 'house' : 'senate';
       const districtValue = houseDistrict || senateDistrict;
@@ -363,7 +486,7 @@ router.get('/metadata', async (request, env, ctx) => {
       );
     }
 
-    if (city) {
+    if (countyParam) {
       const [houseResult, senateResult] = await Promise.all([
         buildStatement(
           db,
@@ -372,7 +495,7 @@ router.get('/metadata', async (request, env, ctx) => {
              AND house IS NOT NULL
              AND house != ''
            ORDER BY CAST(house AS INTEGER)`,
-          [city]
+          [countyParam]
         ).all(),
         buildStatement(
           db,
@@ -381,14 +504,14 @@ router.get('/metadata', async (request, env, ctx) => {
              AND senate IS NOT NULL
              AND senate != ''
            ORDER BY CAST(senate AS INTEGER)`,
-          [city]
+          [countyParam]
         ).all(),
       ]);
       return ctx.jsonResponse(
         {
           ok: true,
           mode: 'city_to_district',
-          city,
+          city: countyParam,
           house_districts: (houseResult.results ?? []).map(row => row.house),
           senate_districts: (senateResult.results ?? []).map(row => row.senate),
         },
@@ -441,7 +564,6 @@ router.get('/metadata', async (request, env, ctx) => {
     );
   } catch (err) {
     if (err instanceof DependencyMissingError) {
-      // TODO: Provision D1 table voters required by /metadata route.
       return missingTableResponse(err.table, ctx.allowedOrigin);
     }
     console.error('/metadata error', err);
@@ -602,7 +724,9 @@ router.post('/call', async (request, env, ctx) => {
                '' AS phone_2,
                v.county,
                COALESCE(va.city, '') AS city,
-               v.political_party
+               v.political_party,
+               COALESCE(va.house, v.house, '') AS house_district,
+               COALESCE(va.senate, v.senate, '') AS senate_district
         FROM ${votersTable} v
         LEFT JOIN ${addrTable} va ON v.voter_id = va.voter_id
         LEFT JOIN ${phonesTable} vp ON v.voter_id = vp.voter_id
@@ -633,6 +757,11 @@ router.post('/call', async (request, env, ctx) => {
       if (filters.require_phone) {
         sql += ' AND vp.phone_e164 IS NOT NULL AND vp.phone_e164 != ""';
       }
+      if (filters.district_type && filters.district) {
+        const column = filters.district_type === 'senate' ? 'v.senate' : 'v.house';
+        sql += ` AND ${column} = ?${paramIndex++}`;
+        params.push(filters.district);
+      }
       if (excludeIds.length) {
         const placeholders = excludeIds.map(() => `?${paramIndex++}`).join(',');
         sql += ` AND v.voter_id NOT IN (${placeholders})`;
@@ -655,6 +784,8 @@ router.post('/call', async (request, env, ctx) => {
             county: voter.county,
             city: voter.city,
             political_party: voter.political_party,
+            house_district: voter.house_district || null,
+            senate_district: voter.senate_district || null,
           },
           200,
           ctx.allowedOrigin
@@ -899,7 +1030,9 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
              v.county,
              v.political_party AS party,
              COALESCE(bp.phone_e164, '') AS phone_e164,
-             bp.confidence_code AS phone_confidence
+             bp.confidence_code AS phone_confidence,
+             COALESCE(va.house, v.house, '') AS house_district,
+             COALESCE(va.senate, v.senate, '') AS senate_district
       FROM ${votersTable} v
       LEFT JOIN ${addrTable} va ON v.voter_id = va.voter_id
       LEFT JOIN ${phoneTable} bp ON v.voter_id = bp.voter_id
@@ -939,6 +1072,11 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
       query += ` AND v.political_party IN (${placeholders})`;
       params.push(...partiesFilter);
     }
+    if (filters.district_type && filters.district) {
+      const column = filters.district_type === 'senate' ? 'v.senate' : 'v.house';
+      query += ` AND ${column} = ?${paramIndex++}`;
+      params.push(filters.district);
+    }
 
     if (house && range) {
       query += ` AND va.addr1 IS NOT NULL AND va.addr1 != ''`;
@@ -958,6 +1096,8 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
       party: row.party || '',
       phone_e164: row.phone_e164 || null,
       phone_confidence: row.phone_confidence || null,
+      house_district: row.house_district || null,
+      senate_district: row.senate_district || null,
     }));
 
     return ctx.jsonResponse(

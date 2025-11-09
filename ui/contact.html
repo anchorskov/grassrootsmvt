@@ -9,7 +9,17 @@
 <style>
   :root { --gap: 10px; }
   body { font-family: system-ui, sans-serif; margin: 12px; background: #f8fafc; }
-  .auth-status { position: fixed; top: 8px; right: 8px; z-index: 100; font-size: 0.875rem; padding: 0.5rem 0.75rem; border-radius: 8px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
+  .auth-inline {
+    margin: 4px 0 16px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: #e0f2fe;
+    color: #0f172a;
+    font-size: 0.9rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
   .card { border:1px solid #e5e7eb; border-radius:12px; padding:20px; margin:12px 0; box-shadow:0 2px 4px rgba(0,0,0,.06); background: white; }
   h1 { font-size: 1.6rem; margin: 4px 0 16px; color: #1e293b; }
   h2 { font-size: 1.2rem; margin: 16px 0 12px; color: #374151; }
@@ -38,14 +48,8 @@
 </head>
 <body>
 
-<div class="auth-status">
-</div>
-<div id="auth-status" class="auth-status">
-  <span class="online-indicator">🔄 Checking connection...</span>
-  <span id="user-email-badge" style="display:none; margin-left:8px; color:#2563eb; font-weight:600;"></span>
-</div>
-
 <h1>Contact Voter</h1>
+<div class="auth-inline" id="authInline">Checking sign-in…</div>
 
 <div id="loading" class="card">
   <p>Loading voter information...</p>
@@ -147,26 +151,40 @@
 
 <script src="/shared/authGlobal.js"></script>
 <script>
-  // Update user email badge on authentication change
-  function updateUserEmailBadge() {
-    const badge = document.getElementById('user-email-badge');
-    if (window.authGlobal && window.authGlobal.user && window.authGlobal.user.email) {
-      badge.textContent = window.authGlobal.user.email;
-      badge.style.display = '';
+  (function () {
+    const authInline = document.getElementById('authInline');
+    if (!authInline) return;
+
+    const render = state => {
+      const email = state?.user?.email || null;
+      if (state?.authenticated && email) {
+        authInline.textContent = `Signed in as ${email}`;
+        authInline.style.background = '#dcfce7';
+        authInline.style.color = '#065f46';
+      } else {
+        authInline.textContent = 'Not signed in';
+        authInline.style.background = '#fee2e2';
+        authInline.style.color = '#991b1b';
+      }
+    };
+
+    const bind = () => {
+      window.authGlobal.onAuthChange(render);
+      render(window.authGlobal);
+    };
+
+    if (window.authGlobal?.ready) {
+      bind();
     } else {
-      badge.textContent = '';
-      badge.style.display = 'none';
+      window.addEventListener(
+        'authGlobalReady',
+        () => {
+          bind();
+        },
+        { once: true }
+      );
     }
-  }
-  if (window.authGlobal) {
-    window.authGlobal.onAuthChange(updateUserEmailBadge);
-    updateUserEmailBadge();
-  } else {
-    window.addEventListener('authGlobalReady', function() {
-      window.authGlobal.onAuthChange(updateUserEmailBadge);
-      updateUserEmailBadge();
-    });
-  }
+  })();
 </script>
 <script>
   // API helper functions
@@ -298,9 +316,13 @@
   document.addEventListener('DOMContentLoaded', initPage);
 </script>
 <script type="module">
-  import { showUserBadge } from '../shared/userBadge.js';
-  showUserBadge();
+  import { initHelpModal } from '../shared/helpModal.js';
+  initHelpModal({
+    helpPath: '/help/contact.md',
+    title: 'Contact Instructions',
+    toggleLabel: 'Help',
+    position: 'top-right',
+  });
 </script>
-
 </body>
 </html>

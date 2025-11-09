@@ -41,12 +41,14 @@ class StreetAutocompleteOptimized {
     this.housesEndpoint = options.housesEndpoint || `${window.location.origin}/api/houses`;
     this.maxSuggestions = options.maxSuggestions || 20;
     this.enableHouseAfterChars = options.enableHouseAfterChars || 3;
+    this.minCharsToShow = options.minCharsToShow ?? 2;
     
     // State
     this.allStreets = [];
     this.currentCounty = null;
     this.currentCity = null;
     this.isLoading = false;
+    this.seededStreets = [];
     
     this.init();
   }
@@ -109,6 +111,14 @@ class StreetAutocompleteOptimized {
   }
   
   async handleFocus() {
+    if (!this.streetInput) return;
+    const currentValue = (this.streetInput.value || '').trim().toUpperCase();
+
+    if (this.seededStreets.length) {
+      this.showStreetSuggestions(this.seededStreets, currentValue);
+      return;
+    }
+
     const county = this.getCounty();
     const city = this.getCity();
     if (!county || !city) {
@@ -118,25 +128,45 @@ class StreetAutocompleteOptimized {
     
     if (this.needsReload(county, city)) {
       await this.loadStreets(county, city);
+    }
+    
+    if (currentValue.length >= this.minCharsToShow) {
+      this.showStreetSuggestions(this.allStreets, currentValue);
     } else if (this.allStreets.length > 0) {
-      this.showStreetSuggestions(this.allStreets, '');
+      this.onHouseFieldChange(false);
+      this.showMessage(`Start typing at least ${this.minCharsToShow} letters to filter streets`, 'hint');
     }
   }
   
   handleInput() {
     const value = this.streetInput.value.toUpperCase().trim();
+    const usingSeeds = this.seededStreets.length > 0;
+    const sourceList = usingSeeds && this.seededStreets.length
+      ? this.seededStreets
+      : this.allStreets;
     
-    // Filter existing streets
-    if (this.allStreets.length > 0) {
-      this.showStreetSuggestions(this.allStreets, value);
+    if (usingSeeds && sourceList.length) {
+      this.showStreetSuggestions(sourceList, value);
     }
     
     // Manage house field state
     if (value.length === 0) {
       this.onHouseFieldChange(false);
-    } else if (value.length >= this.enableHouseAfterChars) {
-      this.onHouseFieldChange(true);
+      if (!usingSeeds) {
+        this.showMessage(`Start typing at least ${this.minCharsToShow} letters to filter streets`, 'hint');
+      }
+      return;
     }
+    
+    if (!usingSeeds && value.length < this.minCharsToShow) {
+      this.onHouseFieldChange(false);
+      const remaining = this.minCharsToShow - value.length;
+      this.showMessage(`Keep typing (${remaining} more letter${remaining === 1 ? '' : 's'})`, 'hint');
+      return;
+    }
+    
+    this.onHouseFieldChange(value.length >= this.enableHouseAfterChars);
+    this.showStreetSuggestions(sourceList, value);
   }
   
   async handleSuggestionClick(e) {
@@ -201,7 +231,7 @@ class StreetAutocompleteOptimized {
   }
   
   showStreetSuggestions(streets, filterText) {
-    const filteredStreets = filterText ? 
+    const filteredStreets = filterText ?
       streets.filter(street => street.includes(filterText)).slice(0, this.maxSuggestions) :
       streets.slice(0, this.maxSuggestions);
       
@@ -220,6 +250,33 @@ class StreetAutocompleteOptimized {
     this.suggestions.innerHTML = `<div class="autocomplete-suggestion ${className}">${message}</div>`;
     this.suggestions.style.display = 'block';
   }
+
+  hideSuggestions() {
+    this.suggestions.style.display = 'none';
+  }
+
+  setSeededStreets(streets = []) {
+    const unique = Array.from(
+      new Set(
+        (streets || [])
+          .map(s => (s || '').toUpperCase().trim())
+          .filter(Boolean)
+      )
+    );
+    this.seededStreets = unique;
+    if (unique.length) {
+      const merged = Array.from(new Set([...unique, ...this.allStreets]));
+      this.allStreets = merged;
+      this.showStreetSuggestions(unique, '');
+    } else {
+      this.clearSeededStreets();
+    }
+  }
+
+  clearSeededStreets() {
+    this.seededStreets = [];
+    this.hideSuggestions();
+  }
   
   // Public methods
   clearCache() {
@@ -227,7 +284,8 @@ class StreetAutocompleteOptimized {
     this.currentCounty = null;
     this.currentCity = null;
     this.streetInput.value = '';
-    this.suggestions.style.display = 'none';
+    this.seededStreets = [];
+    this.hideSuggestions();
     this.onHouseFieldChange(false);
   }
   
