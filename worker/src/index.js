@@ -89,6 +89,15 @@ async function resolveTable(env, candidates) {
   throw new DependencyMissingError(candidates[candidates.length - 1] ?? candidates[0]);
 }
 
+async function resolveTableOptional(env, candidates) {
+  try {
+    return await resolveTable(env, candidates);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return null;
+    throw err;
+  }
+}
+
 async function getTableColumns(env, table) {
   const cacheKey = table;
   if (tableColumnsCache.has(cacheKey)) {
@@ -710,7 +719,10 @@ router.post('/call', async (request, env, ctx) => {
     if (body.filters !== undefined || body.exclude_ids !== undefined) {
       const votersTable = await resolveTable(env, ['voters']);
       const addrTable = await resolveTable(env, ['voters_addr_norm', 'voters_addr', 'voter_addresses']);
-      const phonesTable = await resolveTable(env, ['voter_phones', 'best_phone', 'best_phone_view']);
+      const phoneTable = await resolveTableOptional(env, ['best_phone', 'voter_phones', 'v_best_phone', 'best_phone_view']);
+      const phoneJoinClause = phoneTable ? `LEFT JOIN ${phoneTable} bp ON v.voter_id = bp.voter_id` : '-- no phone table available';
+      const phoneValueExpr = phoneTable ? "NULLIF(bp.phone_e164, '')" : 'NULL';
+      const phoneValueSelectExpr = phoneTable ? `COALESCE(${phoneValueExpr}, '')` : `''`;
       const contactsTable = await resolveTable(env, ['voter_contacts', 'voter_contact']);
       const filters = body.filters || {};
       const excludeIds = Array.isArray(body.exclude_ids) ? body.exclude_ids : [];
@@ -720,7 +732,7 @@ router.post('/call', async (request, env, ctx) => {
         SELECT v.voter_id,
                COALESCE(va.fn, '') AS first_name,
                COALESCE(va.ln, '') AS last_name,
-               COALESCE(vp.phone_e164, '') AS phone_1,
+               ${phoneValueSelectExpr} AS phone_1,
                '' AS phone_2,
                v.county,
                COALESCE(va.city, '') AS city,
@@ -729,7 +741,7 @@ router.post('/call', async (request, env, ctx) => {
                COALESCE(va.senate, v.senate, '') AS senate_district
         FROM ${votersTable} v
         LEFT JOIN ${addrTable} va ON v.voter_id = va.voter_id
-        LEFT JOIN ${phonesTable} vp ON v.voter_id = vp.voter_id
+        ${phoneJoinClause}
         LEFT JOIN ${contactsTable} vc ON v.voter_id = vc.voter_id
         WHERE 1 = 1
       `;
@@ -755,7 +767,15 @@ router.post('/call', async (request, env, ctx) => {
         params.push(...filters.parties);
       }
       if (filters.require_phone) {
-        sql += ' AND vp.phone_e164 IS NOT NULL AND vp.phone_e164 != ""';
+        if (phoneTable) {
+          sql += ` AND ${phoneValueExpr} IS NOT NULL`;
+        } else {
+          return ctx.jsonResponse(
+            { ok: true, empty: true, message: 'No phone data available for this environment.' },
+            200,
+            ctx.allowedOrigin
+          );
+        }
       }
       if (filters.district_type && filters.district) {
         const column = filters.district_type === 'senate' ? 'v.senate' : 'v.house';
@@ -1018,7 +1038,13 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
   try {
     const votersTable = await resolveTable(env, ['voters']);
     const addrTable = await resolveTable(env, ['voters_addr_norm', 'voters_addr', 'voter_addresses']);
-    const phoneTable = await resolveTable(env, ['best_phone', 'best_phone_view', 'voter_phones']);
+    const phoneTable = await resolveTableOptional(env, ['best_phone', 'voter_phones', 'v_best_phone', 'best_phone_view']);
+    const phoneColumns = phoneTable ? await getTableColumns(env, phoneTable) : [];
+    const hasConfidenceColumn = phoneColumns.includes('confidence_code');
+    const phoneJoinClause = phoneTable ? `LEFT JOIN ${phoneTable} bp ON v.voter_id = bp.voter_id` : '-- no phone table available';
+    const phoneValueExpr = phoneTable ? "NULLIF(bp.phone_e164, '')" : 'NULL';
+    const phoneValueSelectExpr = phoneTable ? `COALESCE(${phoneValueExpr}, '')` : `''`;
+    const phoneConfidenceExpr = phoneTable && hasConfidenceColumn ? 'bp.confidence_code' : 'NULL';
 
     let query = `
       SELECT v.voter_id,
@@ -1029,13 +1055,13 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
              COALESCE(va.zip, '') AS zip,
              v.county,
              v.political_party AS party,
-             COALESCE(bp.phone_e164, '') AS phone_e164,
-             bp.confidence_code AS phone_confidence,
+             ${phoneValueSelectExpr} AS phone_e164,
+             ${phoneConfidenceExpr} AS phone_confidence,
              COALESCE(va.house, v.house, '') AS house_district,
              COALESCE(va.senate, v.senate, '') AS senate_district
       FROM ${votersTable} v
       LEFT JOIN ${addrTable} va ON v.voter_id = va.voter_id
-      LEFT JOIN ${phoneTable} bp ON v.voter_id = bp.voter_id
+      ${phoneJoinClause}
       WHERE 1 = 1
     `;
 

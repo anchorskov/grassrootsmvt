@@ -354,8 +354,12 @@
       selType.value = '';
       selDist.value = '';
       clearDistrictLock();
-      if (fullCountyList.length) {
-        handleCountyChange();
+      // Refresh city options based on current county selection
+      if (wyMeta && selCounty.value) {
+        const cty = selCounty.value || '';
+        const cities = (wyMeta.citiesByCounty[cty] || []).slice().sort();
+        fillSelect(selCity, cities, { placeholder: '— any —', anyLabel: '— any —' });
+        selCity.disabled = !cty;
       }
     }
     selType.disabled = !enabled;

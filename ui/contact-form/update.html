@@ -21,6 +21,7 @@
     .voter-info-banner p { margin: 0.25rem 0; opacity: 0.9; }
     
     .form-group { margin: 1rem 0; }
+    .help-text { font-size: 0.9rem; color: #6b7280; margin-top: 0.35rem; }
     .form-row { display: flex; gap: 1rem; }
     .form-row .form-group { flex: 1; }
     label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
@@ -42,6 +43,25 @@
       padding-bottom: 0.5rem;
       border-bottom: 2px solid #e5e7eb;
     }
+    .pulse-optin-block {
+      border: 1px solid #fbbf24;
+      background: #fef9c3;
+      padding: 1rem;
+      border-radius: 8px;
+      margin-top: 1rem;
+    }
+    .pulse-optin-label {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-weight: 600;
+      font-size: 1rem;
+    }
+    .pulse-optin-checkbox {
+      width: 1.2rem;
+      height: 1.2rem;
+    }
+    .error-text { color: #b91c1c; margin-top: 0.25rem; }
   </style>
 </head>
 <body>
@@ -121,6 +141,22 @@
           <label for="email">Email Address</label>
           <input type="email" id="email" placeholder="voter@example.com">
         </div>
+      </div>
+
+      <div class="form-group pulse-optin-block">
+        <label class="pulse-optin-label">
+          <input type="checkbox" id="pulse-opt-in" class="pulse-optin-checkbox">
+          Opt-in to Pulse text updates (voter permission required)
+        </label>
+        <p class="help-text">
+          Get explicit consent before enabling this. We send occasional reminders (polling place info, early voting, events). Message/data rates may apply. Voters can reply STOP to opt out anytime.
+        </p>
+      </div>
+      <div class="form-group" id="pulse-phone-group" style="display:none;">
+        <label for="pulse-phone">Cell number for Pulse texts</label>
+        <input type="tel" id="pulse-phone" placeholder="e.g. 307-555-1234">
+        <p class="help-text">Use the voter’s preferred mobile number so we log consent correctly.</p>
+        <p class="help-text error-text" id="pulse-phone-error" style="display:none;"></p>
       </div>
 
       <!-- Political Information Section -->
@@ -210,6 +246,11 @@
     let originalData = {};
     const RETURN_PATH_KEY = 'contactUpdateReturnTo';
     let returnPath = '/contact-form/';
+    const pulseOptInInput = document.getElementById('pulse-opt-in');
+    const pulsePhoneGroup = document.getElementById('pulse-phone-group');
+    const pulsePhoneInput = document.getElementById('pulse-phone');
+    const pulsePhoneError = document.getElementById('pulse-phone-error');
+    const phonePrimaryInput = document.getElementById('phone-primary');
 
     function normalizeReturnTarget(target) {
       if (!target) return null;
@@ -250,6 +291,26 @@
 
     function navigateBackToOrigin() {
       window.location.href = returnPath || '/contact-form/';
+    }
+
+    function togglePulsePhoneGroup(show, { prefill = false } = {}) {
+      if (!pulsePhoneGroup) return;
+      pulsePhoneGroup.style.display = show ? 'block' : 'none';
+      if (show && prefill && pulsePhoneInput) {
+        if (!pulsePhoneInput.value) {
+          const primary = phonePrimaryInput?.value || voterData?.phone_e164 || '';
+          pulsePhoneInput.value = primary;
+        }
+      }
+      if (!show && pulsePhoneError) {
+        pulsePhoneError.style.display = 'none';
+        pulsePhoneError.textContent = '';
+      }
+    }
+
+    function normalizePhoneDigits(value) {
+      if (!value) return '';
+      return value.replace(/\D/g, '');
     }
 
     // Get voter data from URL parameters or localStorage
@@ -314,6 +375,8 @@
       document.getElementById('voter-address').textContent = `${voter.address}, ${voter.city}, ${voter.zip}`;
       document.getElementById('voter-id-display').textContent = `Voter ID: ${voter.voter_id}`;
       document.getElementById('voter-id').value = voter.voter_id;
+      originalData.pulse_opt_in = false;
+      originalData.pulse_phone = pulsePhoneInput?.value || '';
       
       // Personal information
       document.getElementById('first-name').value = voter.first_name || voter.name?.split(' ')[0] || '';
@@ -330,6 +393,19 @@
       // Contact information
       document.getElementById('phone-primary').value = voter.phone_e164 || '';
       document.getElementById('email').value = voter.email || '';
+      if (pulsePhoneInput) {
+        const initialPhone =
+          voter.phone_e164 ||
+          voter.phone_primary ||
+          voter.phone ||
+          document.getElementById('phone-primary').value ||
+          '';
+        pulsePhoneInput.value = initialPhone;
+      }
+      if (pulseOptInInput) {
+        pulseOptInInput.checked = false;
+      }
+      togglePulsePhoneGroup(false);
       
       // Political information
       console.log('🎭 Setting party affiliation:', voter.party);
@@ -346,12 +422,27 @@
     function setupEventListeners() {
       // Track changes to highlight modified fields
       document.querySelectorAll('input:not([type="hidden"]), select, textarea').forEach(field => {
-        field.addEventListener('input', (e) => {
-          const originalValue = originalData[field.id.replace(/-/g, '_')] || '';
-          if (e.target.value !== originalValue && e.target.value !== '') {
-            e.target.classList.add('field-changed');
+        const originalKey = field.id.replace(/-/g, '_');
+        const getCurrentValue = () => {
+          if (field.type === 'checkbox') {
+            return field.checked ? '1' : '0';
+          }
+          return field.value || '';
+        };
+        const getOriginalValue = () => {
+          const raw = originalData[originalKey];
+          if (field.type === 'checkbox') {
+            return raw ? '1' : '0';
+          }
+          return raw || '';
+        };
+        field.addEventListener('input', () => {
+          const current = getCurrentValue();
+          const original = getOriginalValue();
+          if (current !== original && current !== '') {
+            field.classList.add('field-changed');
           } else {
-            e.target.classList.remove('field-changed');
+            field.classList.remove('field-changed');
           }
         });
       });
@@ -373,11 +464,72 @@
       document.getElementById('add-another').addEventListener('click', () => {
         navigateBackToOrigin();
       });
+
+      if (pulseOptInInput) {
+        pulseOptInInput.addEventListener('change', () => {
+          togglePulsePhoneGroup(pulseOptInInput.checked, { prefill: true });
+          if (pulseOptInInput.checked) {
+            validatePulsePhone();
+          }
+        });
+      }
+
+      if (phonePrimaryInput && pulsePhoneInput) {
+        phonePrimaryInput.addEventListener('blur', () => {
+          if (!pulsePhoneInput.value) {
+            pulsePhoneInput.value = phonePrimaryInput.value;
+          }
+        });
+      }
+    }
+
+    function validatePulsePhone() {
+      if (!pulseOptInInput?.checked) {
+        if (pulsePhoneError) {
+          pulsePhoneError.style.display = 'none';
+          pulsePhoneError.textContent = '';
+        }
+        return { valid: true, digits: '' };
+      }
+      const digits = normalizePhoneDigits(pulsePhoneInput?.value || '');
+      if (digits.length !== 10) {
+        if (pulsePhoneError) {
+          pulsePhoneError.textContent = 'Enter a 10-digit mobile number before opting in.';
+          pulsePhoneError.style.display = 'block';
+        }
+        pulsePhoneInput?.focus();
+        return { valid: false, digits: '' };
+      }
+      if (pulsePhoneError) {
+        pulsePhoneError.style.display = 'none';
+        pulsePhoneError.textContent = '';
+      }
+      return { valid: true, digits };
+    }
+
+    async function recordPulseOptIn({ voterId, phoneDigits }) {
+      if (!voterId || !phoneDigits) return;
+      const e164 = phoneDigits.startsWith('+') ? phoneDigits : `+1${phoneDigits}`;
+      try {
+        await window.apiPost('pulse', {
+          voter_id: voterId,
+          contact_method: 'sms',
+          consent_source: 'webform',
+          phone: e164,
+        });
+        console.log('📲 Pulse opt-in recorded for', voterId);
+      } catch (err) {
+        console.warn('⚠️ Pulse opt-in recording failed', err);
+      }
     }
 
     async function saveUpdates() {
       const voterId = document.getElementById('voter-id').value;
+      const pulseOptInSelected = pulseOptInInput?.checked || false;
       
+      const pulseValidation = validatePulsePhone();
+      if (!pulseValidation.valid) return;
+
       const updatedData = {
         voter_id: voterId,
         first_name: document.getElementById('first-name').value,
@@ -404,6 +556,9 @@
         
         if (response.ok) {
           console.log('✅ Voter contact updated:', response);
+          if (pulseOptInSelected && pulseValidation.digits) {
+            await recordPulseOptIn({ voterId, phoneDigits: pulseValidation.digits });
+          }
           document.getElementById('update-form').style.display = 'none';
           document.getElementById('success-message').style.display = 'block';
         } else {

@@ -140,6 +140,7 @@
 <div id="toast" style="position:fixed;left:50%;transform:translateX(-50%);bottom:20px;background:#111827;color:white;padding:8px 12px;border-radius:8px;display:none;box-shadow:0 4px 12px rgba(0,0,0,.2);">Opening call...</div>
 
 <script>
+  console.clear();
 
   // Debug snippet: Cloudflare Access now manages authentication. Manual token storage removed.
 const API = (p = '', params = {}) =>
@@ -147,6 +148,7 @@ const API = (p = '', params = {}) =>
 
 const RETURN_PATH_KEY = 'contactUpdateReturnTo';
 const CANVASS_STATE_KEY = 'canvassPageState';
+const CANVASS_STATE_KEEP_FLAG = 'canvassStateKeep';
 let latestRows = [];
 const WY_META_PATHS = ['/admin/wy.json', '/ui/admin/wy.json'];
 let wyMetaCache = null;
@@ -312,7 +314,25 @@ function getCanvassFormValues() {
   };
 }
 
-function persistCanvassState(rows = latestRows) {
+function setCanvassStateKeepFlag(enabled) {
+  if (enabled) {
+    sessionStorage.setItem(CANVASS_STATE_KEEP_FLAG, '1');
+  } else {
+    sessionStorage.removeItem(CANVASS_STATE_KEEP_FLAG);
+  }
+}
+
+function shouldRestoreCanvassState() {
+  const keep = sessionStorage.getItem(CANVASS_STATE_KEEP_FLAG) === '1';
+  if (!keep) {
+    sessionStorage.removeItem(CANVASS_STATE_KEY);
+    return false;
+  }
+  sessionStorage.removeItem(CANVASS_STATE_KEEP_FLAG);
+  return true;
+}
+
+function persistCanvassState(rows = latestRows, { protect = false } = {}) {
   try {
     const state = {
       ...getCanvassFormValues(),
@@ -322,12 +342,16 @@ function persistCanvassState(rows = latestRows) {
       ts: Date.now()
     };
     sessionStorage.setItem(CANVASS_STATE_KEY, JSON.stringify(state));
+    if (protect) {
+      setCanvassStateKeepFlag(true);
+    }
   } catch (e) {
     console.warn('⚠️ Unable to save canvass state:', e);
   }
 }
 
 function restoreCanvassState() {
+  if (!shouldRestoreCanvassState()) return;
   const raw = sessionStorage.getItem(CANVASS_STATE_KEY);
   if (!raw) return;
   try {
@@ -487,6 +511,7 @@ function restoreCanvassState() {
           try {
             const pre = { voter_id, prefill: true };
             sessionStorage.setItem('vol.call_prefill', JSON.stringify(pre));
+            persistCanvassState(undefined, { protect: true });
             const toast = document.getElementById('toast');
             toast.style.display = 'block';
             setTimeout(() => { toast.style.display = 'none'; location.href = '/call.html?voter_id=' + encodeURIComponent(voter_id); }, 700);
@@ -561,6 +586,7 @@ function restoreCanvassState() {
             phone: phone.replace('no phone', '')
           }).toString()}`;
           
+          persistCanvassState(undefined, { protect: true });
           window.location.href = contactUrl;
           return;
         }
@@ -573,7 +599,7 @@ function restoreCanvassState() {
           }
           
           const returnPath = (window.location.pathname + window.location.search) || '/canvass/index.html';
-          persistCanvassState();
+          persistCanvassState(undefined, { protect: true });
           try {
             sessionStorage.setItem('voterUpdateData', JSON.stringify(voterRow));
             sessionStorage.setItem(RETURN_PATH_KEY, returnPath);
