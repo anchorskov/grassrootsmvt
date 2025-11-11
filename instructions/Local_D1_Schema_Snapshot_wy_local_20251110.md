@@ -10,6 +10,7 @@
 
 ### New Since 2025-10-26
 - **Migration 008**: Added `district_coverage` table (549 rows) mapping house/senate districts to counties/cities
+- **Migration 010**: Added `campaign_touchpoints` and `campaign_touchpoint_segments` for scripted volunteer conversations
 - **Contact System**: Added `voter_contacts` and `voter_contact_staging` tables for tracking volunteer interactions
 - **Contact Views**: Added `voter_contact` and `voter_contact_st` views for unified contact data access
 - **Phone Data**: `voter_phones` table populated with 113,358 records; `best_phone` table exists but empty
@@ -25,30 +26,32 @@
 ## Objects Inventory
 
 ### Local D1 (`wy_local`)
-| name                  | type  | purpose |
-|-----------------------|-------|---------|
-| _cf_METADATA          | table | Cloudflare metadata |
-| best_phone            | table | Curated best phone per voter (currently empty) |
-| call_activity         | table | Phone banking activity log |
-| canvass_activity      | table | Door-to-door canvassing log |
-| city_county_import    | table | City/county normalization staging |
-| d1_migrations         | table | Migration tracking |
-| district_coverage     | table | **NEW** District→county/city mapping (549 rows) |
-| message_templates     | table | Reusable message templates |
-| pulse_optins          | table | Text message consent records |
-| sqlite_sequence       | table | SQLite auto-increment tracking |
-| streets_index         | table | Canonical street normalization |
-| voter_contact_staging | table | **NEW** Contact form submissions staging |
-| voter_contacts        | table | **NEW** Processed voter contact records |
-| voter_emails          | table | Email addresses for voters |
-| voter_phones          | table | Phone numbers (113,358 rows) |
-| voters                | table | Core voter registration data |
-| voters_addr_norm      | table | Normalized voter addresses |
-| wy_city_county        | table | City/county authority table |
-| city_county           | view  | Friendly alias for wy_city_county |
-| v_voters_addr_norm    | view  | Voters with resolved city/county |
-| voter_contact         | view  | **NEW** Unified contact data view |
-| voter_contact_st      | view  | **NEW** Staging contact data view |
+| name                         | type  | purpose |
+|------------------------------|-------|---------|
+| _cf_METADATA                 | table | Cloudflare metadata |
+| best_phone                   | table | Curated best phone per voter (currently empty) |
+| call_activity                | table | Phone banking activity log |
+| campaign_touchpoints         | table | **NEW** Pre-scripted conversation flows for volunteers |
+| campaign_touchpoint_segments | table | **NEW** Voter targeting rules for touchpoints |
+| canvass_activity             | table | Door-to-door canvassing log |
+| city_county_import           | table | City/county normalization staging |
+| d1_migrations                | table | Migration tracking |
+| district_coverage            | table | **NEW** District→county/city mapping (549 rows) |
+| message_templates            | table | Reusable message templates |
+| pulse_optins                 | table | Text message consent records |
+| sqlite_sequence              | table | SQLite auto-increment tracking |
+| streets_index                | table | Canonical street normalization |
+| voter_contact_staging        | table | **NEW** Contact form submissions staging |
+| voter_contacts               | table | **NEW** Processed voter contact records |
+| voter_emails                 | table | Email addresses for voters |
+| voter_phones                 | table | Phone numbers (113,358 rows) |
+| voters                       | table | Core voter registration data |
+| voters_addr_norm             | table | Normalized voter addresses |
+| wy_city_county               | table | City/county authority table |
+| city_county                  | view  | Friendly alias for wy_city_county |
+| v_voters_addr_norm           | view  | Voters with resolved city/county |
+| voter_contact                | view  | **NEW** Unified contact data view |
+| voter_contact_st             | view  | **NEW** Staging contact data view |
 
 ---
 
@@ -222,6 +225,69 @@ LEFT JOIN wy_city_county AS wcc ON wcc.id = van.city_county_id;
 
 **Current State:** Table exists but is **empty** (0 rows). Phone data is currently only in `voter_phones`.
 
+### `campaign_touchpoints` (NEW — Migration 010)
+**Role:** Pre-scripted conversation flows for volunteers. Provides consistent messaging across phone banking, canvassing, and events. Each touchpoint is a reusable script with icebreaker, body, and call-to-action that can be targeted to specific voter segments.
+
+**Columns:**
+- `touchpoint_id` TEXT PRIMARY KEY (e.g., 'property_tax_relief_intro')
+- `label` TEXT NOT NULL (display name for admin/volunteer UI)
+- `icebreaker` TEXT NOT NULL (opening script: "Hi, this is...")
+- `body` TEXT NOT NULL (main talking points)
+- `cta_question` TEXT (call-to-action: "Can we count on your support?")
+- `issue_tag` TEXT (topic categorization: 'property_tax', 'education', etc.)
+- `channels` TEXT DEFAULT 'phone' (comma-separated: 'phone', 'door', 'event')
+- `priority` INTEGER DEFAULT 100 (sort order, lower = higher priority)
+- `is_active` INTEGER DEFAULT 1 (enable/disable without deleting)
+- `metadata` TEXT (JSON for additional config/notes)
+- `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP
+- `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP
+
+**Seed Data:**
+- `property_tax_relief_intro`: Example script for property tax outreach
+
+**Usage:**
+```sql
+-- Get all active phone touchpoints, highest priority first
+SELECT touchpoint_id, label, icebreaker, body, cta_question
+FROM campaign_touchpoints
+WHERE is_active = 1 AND channels LIKE '%phone%'
+ORDER BY priority ASC, label ASC;
+```
+
+### `campaign_touchpoint_segments` (NEW — Migration 010)
+**Role:** Targeting rules that link touchpoints to specific voter segments. Allows campaign to serve different scripts based on voter attributes (party, district, issue interest, etc.).
+
+**Columns:**
+- `id` INTEGER PRIMARY KEY AUTOINCREMENT
+- `touchpoint_id` TEXT NOT NULL REFERENCES campaign_touchpoints(touchpoint_id)
+- `segment_key` TEXT NOT NULL (attribute name: 'party', 'house_district', 'senate_district', 'county', etc.)
+- `segment_value` TEXT NOT NULL (value to match: 'R', 'D', 'U', '56', 'NATRONA', etc.)
+
+**Indexes:**
+- `idx_touchpoint_segments_key` ON (segment_key) - Fast lookups by attribute type
+- `idx_touchpoint_segments_touchpoint` ON (touchpoint_id, segment_key) - Fast lookups per touchpoint
+
+**Example Usage:**
+```sql
+-- Target "property tax relief" script only to Republicans in House District 56
+INSERT INTO campaign_touchpoint_segments (touchpoint_id, segment_key, segment_value)
+VALUES 
+  ('property_tax_relief_intro', 'party', 'R'),
+  ('property_tax_relief_intro', 'house_district', '56');
+
+-- Find touchpoints for a specific voter
+SELECT DISTINCT ct.*
+FROM campaign_touchpoints ct
+LEFT JOIN campaign_touchpoint_segments cts ON cts.touchpoint_id = ct.touchpoint_id
+WHERE ct.is_active = 1
+  AND (
+    cts.touchpoint_id IS NULL  -- No segments = show to everyone
+    OR (cts.segment_key = 'party' AND cts.segment_value = 'R')
+    OR (cts.segment_key = 'house_district' AND cts.segment_value = '56')
+  )
+ORDER BY ct.priority ASC;
+```
+
 ---
 
 ## Migration History
@@ -235,6 +301,7 @@ Applied migrations (from `d1_migrations` table):
 - 006: Voter contacts columns (best_day, best_time_window, share_insights_ok)
 - 007: Reviewed flag on voter_contacts
 - **008: District coverage table** (applied 2025-11-10)
+- **010: Campaign touchpoints and segments** (applied 2025-11-11)
 
 **Pending:** Migration 004 needs to be fixed (removes invalid view indexes) before it can be properly applied.
 
