@@ -900,6 +900,16 @@ window.addEventListener('pagehide', () => persistCanvassState());
   
   // ...existing code...
 </script>
+<script type="module">
+  import { mountLogoutButton } from '/shared/logoutButton.js';
+  import { initSessionTimeout } from '/shared/sessionTimeout.js';
+
+  mountLogoutButton({ position: 'top-right' });
+  initSessionTimeout({
+    idleMinutes: 20,
+    graceMinutes: 10,
+  });
+</script>
 <script>
   (function () {
     const authInline = document.getElementById('authInline');

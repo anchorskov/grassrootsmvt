@@ -14,3 +14,8 @@ This form appears when you’re editing an existing voter record (e.g., after cl
 - Use the Tags and Follow-up checkbox so coordinators can assign next steps.
 - Note opt-outs (text or email) immediately so we do not re-ask the same voter.
 - If you landed here by mistake, discard changes immediately to avoid overwriting another canvasser’s work.
+
+## Pulse opt-in basics
+- **What it is:** Pulse is our table of voters who have explicitly agreed to receive campaign texts and rapid updates. Only people in this list will ever be texted.
+- **How to explain it:** “With your permission we can send brief reminders by text—polling places, early voting, major events. Message/data rates may apply and you can reply STOP anytime.”
+- **When to enable:** Check the Pulse box only when (a) the voter gave a clear “yes,” and (b) you collected their preferred cell number in the yellow block. If they decline, record it in your notes so the next volunteer doesn’t re-ask.

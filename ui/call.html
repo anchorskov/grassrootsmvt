@@ -34,6 +34,34 @@
     gap: 6px;
   }
   .online-indicator { color: #4caf50; }
+  .pulse-optin-block {
+    border: 1px solid #fbbf24;
+    background: #fef9c3;
+    padding: 0.85rem 1rem;
+    border-radius: 8px;
+    margin: 1rem 0;
+  }
+  .pulse-optin-label {
+    display:flex;
+    align-items:center;
+    gap:0.6rem;
+    font-weight:600;
+  }
+  .pulse-optin-checkbox {
+    width:1.1rem;
+    height:1.1rem;
+  }
+  .help-text { font-size:0.9rem; color:#6b7280; margin-top:0.35rem; }
+  .error-text { color:#b91c1c; margin-top:0.3rem; }
+  .dnc-note {
+    font-size: 0.9rem;
+    color: #b45309;
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    margin: 0.5rem 0 0;
+  }
 </style>
 
 <h1>
@@ -83,6 +111,9 @@
     <label><input type="checkbox" id="requested_info"> Requested info</label>
     <label><input type="checkbox" id="dnc"> Do not call</label>
   </div>
+  <p id="dncNote" class="dnc-note" style="display:none;">
+    DNC is selected. Outcome is locked to “refused” and no other info is required. Click “Save &amp; next” to record this update.
+  </p>
 
   <div class="row">
     <div>
@@ -107,9 +138,13 @@
     <label><input type="checkbox" id="optin_sms"> Opt-in SMS</label>
     <label><input type="checkbox" id="optin_email"> Opt-in Email</label>
   </div>
+  <p class="help-text" id="email-note" style="margin-top:-0.35rem;margin-bottom:0;">
+    Only check an opt-in if you confirmed the voter’s preferred phone or email.
+  </p>
 
   <label for="email">Email address (if provided)</label>
   <input type="text" id="email" placeholder="name@example.com"/>
+  <p class="help-text error-text" id="email-error" style="display:none;"></p>
 
   <div class="row">
     <label><input type="checkbox" id="wants_volunteer"> Wants to volunteer</label>
@@ -122,6 +157,22 @@
 
   <label for="comments">Comments</label>
   <textarea id="comments" rows="3"></textarea>
+
+  <div class="pulse-optin-block">
+    <label class="pulse-optin-label">
+      <input type="checkbox" id="pulse-opt-in" class="pulse-optin-checkbox">
+      Opt-in to Pulse text updates (voter permission required)
+    </label>
+    <p class="help-text">
+      Ask for explicit consent before enabling this. We send occasional reminders (polling places, early voting). Message/data rates may apply and voters can reply STOP anytime.
+    </p>
+    <div id="pulse-phone-group" style="display:none; margin-top:0.5rem;">
+      <label for="pulse-phone">Cell number for Pulse texts</label>
+      <input type="tel" id="pulse-phone" placeholder="e.g. 307-555-1234">
+      <p class="help-text">Use the voter’s preferred mobile number so we log consent correctly.</p>
+      <p class="help-text error-text" id="pulse-phone-error" style="display:none;"></p>
+    </div>
+  </div>
 
   <div class="row" style="margin-top:.75rem;">
     <button id="saveBtn">Save & Next</button>
@@ -172,22 +223,169 @@
   const voterCard = document.getElementById("voterCard");
   const voterInfo = document.getElementById("voterInfo");
   const empty = document.getElementById("empty");
-  const msg = document.getElementById("msg");
-  const getNextBtn = document.getElementById('getNextBtn');
-  const saveBtn = document.getElementById('saveBtn');
-  const skipBtn = document.getElementById('skipBtn');
-  const filtersBadge = document.getElementById('filtersBadge');
-  const districtControl = document.getElementById('districtControl');
-  const districtTypeSelect = document.getElementById('districtTypeSelect');
-  const districtSelect = document.getElementById('districtSelect');
-  const districtApplyBtn = document.getElementById('districtApplyBtn');
-  const districtControlStatus = document.getElementById('districtControlStatus');
-  let districtMetadata = null;
+const msg = document.getElementById("msg");
+const getNextBtn = document.getElementById('getNextBtn');
+const saveBtn = document.getElementById('saveBtn');
+const skipBtn = document.getElementById('skipBtn');
+const filtersBadge = document.getElementById('filtersBadge');
+const districtControl = document.getElementById('districtControl');
+const districtTypeSelect = document.getElementById('districtTypeSelect');
+const districtSelect = document.getElementById('districtSelect');
+const districtApplyBtn = document.getElementById('districtApplyBtn');
+const districtControlStatus = document.getElementById('districtControlStatus');
+const optInSmsCheckbox = document.getElementById('optin_sms');
+const optInEmailCheckbox = document.getElementById('optin_email');
+const pulseOptInCheckbox = document.getElementById('pulse-opt-in');
+const pulsePhoneInput = document.getElementById('pulse-phone');
+const pulsePhoneGroup = document.getElementById('pulse-phone-group');
+const pulsePhoneError = document.getElementById('pulse-phone-error');
+const emailInput = document.getElementById('email');
+const emailError = document.getElementById('email-error');
+let districtMetadata = null;
+let currentVoterPhone = '';
 
-  function setMsg(text, kind="muted") {
-    msg.className = kind;
-    msg.textContent = text || "";
+function setMsg(text, kind="muted") {
+  msg.className = kind;
+  msg.textContent = text || "";
+}
+
+function normalizePhoneDigits(value) {
+  if (!value) return '';
+  return value.replace(/\D/g, '');
+}
+
+function normalizeTenDigitPhone(value) {
+  let digits = normalizePhoneDigits(value);
+  if (digits.length === 11 && digits.startsWith('1')) {
+    digits = digits.slice(1);
   }
+  return digits;
+}
+
+function togglePulsePhoneGroup(show, { prefill = false } = {}) {
+  if (!pulsePhoneGroup) return;
+  pulsePhoneGroup.style.display = show ? 'block' : 'none';
+  if (show && prefill && pulsePhoneInput && !pulsePhoneInput.value) {
+    const digits = normalizeTenDigitPhone(currentVoterPhone);
+    if (digits.length === 10) {
+      pulsePhoneInput.value = digits;
+    } else if (currentVoterPhone) {
+      pulsePhoneInput.value = currentVoterPhone;
+    }
+  }
+  if (!show && pulsePhoneError) {
+    pulsePhoneError.style.display = 'none';
+    pulsePhoneError.textContent = '';
+  }
+}
+
+function syncPulseOptIn(checked, { prefill = false, resetPhone = false } = {}) {
+  if (optInSmsCheckbox && optInSmsCheckbox.checked !== checked) {
+    optInSmsCheckbox.checked = checked;
+  }
+  if (pulseOptInCheckbox && pulseOptInCheckbox.checked !== checked) {
+    pulseOptInCheckbox.checked = checked;
+  }
+  togglePulsePhoneGroup(checked, { prefill });
+  if (!checked && resetPhone && pulsePhoneInput) {
+    pulsePhoneInput.value = normalizeTenDigitPhone(currentVoterPhone) || currentVoterPhone || '';
+  }
+}
+
+function validatePulsePhone() {
+  const wantsPulse = !!(optInSmsCheckbox?.checked || pulseOptInCheckbox?.checked);
+  if (!wantsPulse) {
+    if (pulsePhoneError) {
+      pulsePhoneError.style.display = 'none';
+      pulsePhoneError.textContent = '';
+    }
+    return { valid: true, digits: '' };
+  }
+  const digits = normalizeTenDigitPhone(pulsePhoneInput?.value || '');
+  if (digits.length !== 10) {
+    if (pulsePhoneError) {
+      pulsePhoneError.textContent = 'Enter a 10-digit mobile number before logging consent.';
+      pulsePhoneError.style.display = 'block';
+    }
+    pulsePhoneInput?.focus();
+    return { valid: false, digits: '' };
+  }
+  if (pulsePhoneError) {
+    pulsePhoneError.style.display = 'none';
+    pulsePhoneError.textContent = '';
+  }
+  return { valid: true, digits };
+}
+
+function isValidEmail(value) {
+  if (!value) return false;
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(value.trim());
+}
+
+function validateEmailOptIn() {
+  if (!optInEmailCheckbox) return true;
+  if (!optInEmailCheckbox.checked) {
+    if (emailError) {
+      emailError.style.display = 'none';
+      emailError.textContent = '';
+    }
+    return true;
+  }
+  const value = emailInput?.value || '';
+  if (!isValidEmail(value)) {
+    if (emailError) {
+      emailError.textContent = 'Enter a valid email address before logging email consent.';
+      emailError.style.display = 'block';
+    }
+    emailInput?.focus();
+    return false;
+  }
+  if (emailError) {
+    emailError.style.display = 'none';
+    emailError.textContent = '';
+  }
+  return true;
+}
+
+async function recordPulseOptIn(voterId, digits) {
+  if (!voterId || !digits) return;
+  const e164 = digits.startsWith('+') ? digits : `+1${digits}`;
+  try {
+    if (typeof window.apiPost === 'function') {
+      await window.apiPost('pulse', {
+        voter_id: voterId,
+        contact_method: 'sms',
+        consent_source: 'call',
+        phone: e164,
+      });
+    } else if (typeof window.apiFetch === 'function') {
+      await window.apiFetch('pulse', {
+        method: 'POST',
+        body: JSON.stringify({
+          voter_id: voterId,
+          contact_method: 'sms',
+          consent_source: 'call',
+          phone: e164,
+        }),
+      });
+    } else {
+      await fetch(API('/pulse'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          voter_id: voterId,
+          contact_method: 'sms',
+          consent_source: 'call',
+          phone: e164,
+        }),
+      });
+    }
+    console.log('📲 Pulse opt-in recorded for', voterId);
+  } catch (err) {
+    console.warn('⚠️ Pulse opt-in recording failed', err);
+  }
+}
 
   function getUrlFilters() {
     const u = new URL(location.href);
@@ -373,9 +571,12 @@
   }
 
   let inFlightNext = false;
+  let lastOutcomeBeforeDnc = '';
 
   // Reset the form to blank state
   function resetForm() {
+    lastOutcomeBeforeDnc = '';
+    currentVoterPhone = '';
     document.getElementById("outcome").value = "";
     document.getElementById("best_day").value = "";
     document.getElementById("best_time_window").value = "";
@@ -384,6 +585,11 @@
     ["ok_callback","requested_info","dnc","optin_sms","optin_email",
      "wants_volunteer","share_insights_ok","for_term_limits","issue_public_lands"]
      .forEach(id => document.getElementById(id).checked = false);
+    enforceDncMode();
+    syncPulseOptIn(false, { resetPhone: true });
+    if (pulsePhoneInput) {
+      pulsePhoneInput.value = '';
+    }
   }
 
   // Check if user has entered any meaningful data
@@ -442,6 +648,12 @@
 
       // Reset form before showing new voter
       resetForm();
+      currentVoterPhone = v.phone_e164 || v.phone_1 || v.phone || '';
+      if (pulsePhoneInput) {
+        const digits = normalizeTenDigitPhone(currentVoterPhone);
+        pulsePhoneInput.value = digits || currentVoterPhone || '';
+      }
+      syncPulseOptIn(false, { resetPhone: true });
       
       // show
       empty.hidden = true; voterCard.hidden = false;
@@ -486,6 +698,9 @@
       alert("No voter selected."); 
       return; 
     }
+    const wantsPulse = !!(optInSmsCheckbox?.checked || pulseOptInCheckbox?.checked);
+    const pulseValidation = wantsPulse ? validatePulsePhone() : { valid: true, digits: '' };
+    if (!pulseValidation.valid) return;
     
     // Check if there's any meaningful data to save
     if (!hasFormData()) {
@@ -501,6 +716,17 @@
       return; 
     }
     
+    if (!validateEmailOptIn()) return;
+
+    if (document.getElementById("requested_info").checked) {
+      const comments = document.getElementById("comments").value.trim();
+      if (!comments) {
+        alert("Add a note describing what information was requested before saving.");
+        document.getElementById("comments").focus();
+        return;
+      }
+    }
+
     const payload = {
       voter_id: voter_id,
       contact_method: 'phone',
@@ -512,9 +738,9 @@
       dnc: +document.getElementById("dnc").checked,
       best_day: document.getElementById("best_day").value || null,
       best_time_window: document.getElementById("best_time_window").value || null,
-      optin_sms: +document.getElementById("optin_sms").checked,
-      optin_email: +document.getElementById("optin_email").checked,
-      email: document.getElementById("email").value || null,
+      optin_sms: wantsPulse ? 1 : 0,
+      optin_email: optInEmailCheckbox?.checked ? 1 : 0,
+      email: emailInput?.value || null,
       wants_volunteer: +document.getElementById("wants_volunteer").checked,
       share_insights_ok: +document.getElementById("share_insights_ok").checked,
       for_term_limits: +document.getElementById("for_term_limits").checked,
@@ -524,10 +750,14 @@
     try {
       setMsg("Saving...");
       await jsonFetch(API("/contact"), { method: "POST", body: JSON.stringify(payload) });
+      if (wantsPulse && pulseValidation.digits) {
+        await recordPulseOptIn(voter_id, pulseValidation.digits);
+      }
       setMsg("Saved.");
       // remember and fetch next (form will be reset in nextVoter)
       const vid = voterCard.dataset.voter;
       if (vid) pushSeen(vid);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
       nextVoter(true); // skipPrompt = true since we just saved
     } catch (e) {
       setMsg(`Save failed: ${e.message}`, "error");
@@ -548,20 +778,129 @@
                         target.tagName === 'TEXTAREA' || 
                         target.isContentEditable;
     
-    if (e.key.toLowerCase() === "n" && !e.metaKey && !e.ctrlKey && !e.altKey && !isInputField) {
+    const key = (e.key || '').toLowerCase();
+    if (key === "n" && !e.metaKey && !e.ctrlKey && !e.altKey && !isInputField) {
       e.preventDefault(); 
       nextVoter(); // Will prompt if data exists
     }
   });
 
-  const filters = getFilters();
-  showFiltersBadge(filters);
-  initDistrictControl();
+const filters = getFilters();
+showFiltersBadge(filters);
+initDistrictControl();
+if (optInSmsCheckbox) {
+  optInSmsCheckbox.addEventListener('change', () => {
+    syncPulseOptIn(!!optInSmsCheckbox.checked, { prefill: true });
+  });
+}
+if (pulseOptInCheckbox) {
+  pulseOptInCheckbox.addEventListener('change', () => {
+    syncPulseOptIn(!!pulseOptInCheckbox.checked, { prefill: true });
+  });
+}
+if (optInEmailCheckbox && emailInput) {
+  optInEmailCheckbox.addEventListener('change', () => {
+    validateEmailOptIn();
+  });
+  emailInput.addEventListener('blur', () => validateEmailOptIn());
+  emailInput.addEventListener('input', () => {
+    if (optInEmailCheckbox.checked) {
+      validateEmailOptIn();
+    } else if (emailError) {
+      emailError.style.display = 'none';
+      emailError.textContent = '';
+    }
+  });
+}
+
+  const dncCheckbox = document.getElementById('dnc');
+  const outcomeSelect = document.getElementById('outcome');
+  const dncNote = document.getElementById('dncNote');
+  const dncSensitiveSelectors = [
+    '#ok_callback',
+    '#requested_info',
+    '#best_day',
+    '#best_time_window',
+    '#optin_sms',
+    '#optin_email',
+    '#email',
+    '#wants_volunteer',
+    '#share_insights_ok',
+    '#for_term_limits',
+    '#issue_public_lands',
+    '#comments',
+    '#pulse-opt-in',
+    '#pulse-phone'
+  ];
+  const dncSensitiveFields = dncSensitiveSelectors
+    .map(sel => document.querySelector(sel))
+    .filter(Boolean);
+
+  function enforceDncMode() {
+    const checked = !!dncCheckbox?.checked;
+    if (!checked) {
+      if (outcomeSelect) {
+        outcomeSelect.disabled = false;
+        if (outcomeSelect.value === 'refused') {
+          outcomeSelect.value = lastOutcomeBeforeDnc || '';
+        }
+      }
+    dncSensitiveFields.forEach(field => {
+      if (!field) return;
+      field.disabled = field.dataset.prevDisabled === '1';
+      delete field.dataset.prevDisabled;
+    });
+      if (dncNote) dncNote.style.display = 'none';
+      return;
+    }
+
+    syncPulseOptIn(false, { resetPhone: true });
+
+    if (outcomeSelect) {
+      if (outcomeSelect.value && outcomeSelect.value !== 'refused') {
+        lastOutcomeBeforeDnc = outcomeSelect.value;
+      }
+      outcomeSelect.value = 'refused';
+      outcomeSelect.disabled = true;
+    }
+
+    dncSensitiveFields.forEach(field => {
+      if (!field.disabled) {
+        field.dataset.prevDisabled = '0';
+      } else {
+        field.dataset.prevDisabled = '1';
+      }
+      field.disabled = true;
+      if (field.type === 'checkbox' || field.type === 'radio') {
+        field.checked = false;
+      } else if (field.tagName === 'SELECT') {
+        field.selectedIndex = 0;
+      } else if (field.tagName === 'TEXTAREA' || field.tagName === 'INPUT') {
+        field.value = '';
+      }
+    });
+
+    if (dncNote) dncNote.style.display = 'block';
+  }
+
+  dncCheckbox?.addEventListener('change', enforceDncMode);
+  enforceDncMode();
+
   (async () => {
     console.log("✅ Ready, loading data...");
     await loadWho();     // don’t block if this fails; loadWho() already swallows errors
     await nextVoter();   // show a voter immediately
   })();
+</script>
+<script type="module">
+  import { mountLogoutButton } from '/shared/logoutButton.js';
+  import { initSessionTimeout } from '/shared/sessionTimeout.js';
+
+  mountLogoutButton({ position: 'top-right' });
+  initSessionTimeout({
+    idleMinutes: 20,
+    graceMinutes: 10,
+  });
 </script>
 <script type="module">
   import { initHelpModal } from '../shared/helpModal.js';

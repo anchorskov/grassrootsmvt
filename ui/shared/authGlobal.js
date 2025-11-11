@@ -2,6 +2,40 @@
   const listeners = new Set();
   let readyDispatched = false;
 
+  function normalizeReturnPath(target) {
+    if (typeof window === 'undefined') return '/';
+    if (!target || typeof target !== 'string') {
+      return '/';
+    }
+    const trimmed = target.trim();
+    if (!trimmed) return '/';
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      try {
+        const candidate = new URL(trimmed);
+        if (candidate.origin === window.location.origin) {
+          return (candidate.pathname || '/') + (candidate.search || '') + (candidate.hash || '');
+        }
+        return '/';
+      } catch {
+        return '/';
+      }
+    }
+    if (trimmed.startsWith('/')) {
+      return trimmed;
+    }
+    return '/';
+  }
+
+  function buildLogoutUrl(returnTo) {
+    const normalized = normalizeReturnPath(returnTo);
+    const params = new URLSearchParams();
+    if (normalized && normalized !== '/') {
+      params.set('return_to', normalized);
+    }
+    const query = params.toString();
+    return `/api/auth/logout${query ? `?${query}` : ''}`;
+  }
+
   function notify() {
     listeners.forEach(listener => {
       try {
@@ -86,6 +120,15 @@
         }
       }
       return () => listeners.delete(listener);
+    },
+    logout(options = {}) {
+      try {
+        const href = buildLogoutUrl(options.returnTo || '/');
+        window.location.href = href;
+      } catch (err) {
+        console.error('[authGlobal] failed to trigger logout', err);
+        window.location.href = '/';
+      }
     },
   };
 

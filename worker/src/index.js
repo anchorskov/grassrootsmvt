@@ -148,6 +148,25 @@ function parseVoterIds(paramValue) {
     .filter(Boolean);
 }
 
+function sanitizeReturnTarget(rawTarget, baseUrl) {
+  if (!rawTarget) return '/';
+  try {
+    const candidate = new URL(rawTarget, baseUrl.origin);
+    if (candidate.origin !== baseUrl.origin) {
+      return '/';
+    }
+    const path = candidate.pathname || '/';
+    const search = candidate.search || '';
+    const hash = candidate.hash || '';
+    return `${path}${search}${hash}` || '/';
+  } catch {
+    if (typeof rawTarget === 'string' && rawTarget.startsWith('/')) {
+      return rawTarget;
+    }
+  }
+  return '/';
+}
+
 async function handleApiRequest(request, env, cfCtx) {
   const config = getEnvironmentConfig(env);
   const allowedOrigin = pickAllowedOrigin(request, env);
@@ -329,6 +348,21 @@ router.get('/whoami', async (request, env, ctx) => {
       ctx.allowedOrigin
     );
   }
+});
+
+router.get('/auth/logout', async (request, env, ctx) => {
+  const url = new URL(request.url);
+  const rawTarget = url.searchParams.get('return_to') || url.searchParams.get('to') || '/';
+  const safeRelative = sanitizeReturnTarget(rawTarget, url);
+  const absoluteTarget = new URL(safeRelative, url.origin).toString();
+
+  if (ctx.config.isLocal) {
+    return Response.redirect(absoluteTarget, 302);
+  }
+
+  const logoutUrl = new URL('/cdn-cgi/access/logout', url.origin);
+  logoutUrl.searchParams.set('return_to', absoluteTarget);
+  return Response.redirect(logoutUrl.toString(), 302);
 });
 
 router.get('/metadata', async (request, env, ctx) => {

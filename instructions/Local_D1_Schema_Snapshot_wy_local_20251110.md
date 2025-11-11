@@ -83,24 +83,58 @@ ORDER BY CAST(district_code AS INTEGER);
 ```
 
 ### `voter_contacts` (NEW)
-**Role:** Tracks all volunteer→voter interactions (calls, canvass, events).
+**Role:** Tracks all volunteer→voter interactions (calls, canvass, events). This is the **final, verified** contact record table used by admin interface.
+
+**Complete Schema:**
+- `id` INTEGER PRIMARY KEY
+- `voter_id` TEXT NOT NULL (links to voters table)
+- `volunteer_id` TEXT NOT NULL (who made contact)
+- `method` TEXT DEFAULT 'door' (contact method)
+- `outcome` TEXT NOT NULL (result: contacted, not_home, wrong_number, etc.)
+- `ok_callback` INTEGER DEFAULT 0 (voter okay with callback)
+- `requested_info` INTEGER DEFAULT 0 (wants more information)
+- `dnc` INTEGER DEFAULT 0 (do not contact flag)
+- `optin_sms` INTEGER DEFAULT 0 (SMS consent)
+- `optin_email` INTEGER DEFAULT 0 (email consent)
+- `email` TEXT (email address if provided)
+- `wants_volunteer` INTEGER DEFAULT 0 (interested in volunteering)
+- `for_term_limits` INTEGER DEFAULT 0 (supports term limits)
+- `issue_public_lands` INTEGER DEFAULT 0 (cares about public lands)
+- `comments` TEXT (free-form notes)
+- `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP
+- `best_day` TEXT (preferred callback day)
+- `best_time_window` TEXT (preferred callback time)
+- `share_insights_ok` INTEGER DEFAULT 0 (okay sharing feedback)
+- `reviewed` INTEGER DEFAULT 0 (admin has reviewed flag)
+
+### `voter_contact_staging` (NEW)
+**Role:** Staging area for new voter contacts requiring verification before integration into `voter_contacts`. Used when volunteers submit contact forms for voters not yet in the system or requiring identity verification.
+
+**Workflow:**
+1. **Submission** → Volunteer submits contact form → Record created in `voter_contact_staging` with status='pending'
+2. **Matching** → System attempts to match based on name/address/county → `potential_matches` populated
+3. **Verification** → Admin reviews and either:
+   - Links to existing voter → Sets `integrated_voter_id` and moves to `voter_contacts`
+   - Creates new voter record → Generates new voter_id and moves to `voter_contacts`
+   - Marks as duplicate/rejected → Updates `status` field
+4. **Integration** → Once verified, data flows to `voter_contacts` with permanent voter_id
 
 **Key Columns:**
-- `id` INTEGER PRIMARY KEY
-- `voter_id` TEXT NOT NULL
-- `contact_method` TEXT (call, canvass, event, etc.)
-- `outcome` TEXT
-- `notes` TEXT
-- `contacted_at` TEXT (ISO8601 timestamp)
-- `contacted_by` TEXT (volunteer email)
-- `best_day` TEXT
-- `best_time_window` TEXT
-- `share_insights_ok` INTEGER (boolean)
-- `reviewed` INTEGER DEFAULT 0 (admin flag)
+- `staging_id` INTEGER PRIMARY KEY
+- `voter_id` TEXT NOT NULL (temporary: 'TEMP-00000000' format)
+- `status` TEXT ('pending', 'verified', 'duplicate', 'rejected')
+- `submitted_at` DATETIME
+- `submitted_by` TEXT NOT NULL (volunteer identifier)
+- `vol_email` TEXT NOT NULL
+- Search fields: `search_county`, `search_city`, `search_street_name`, `search_house_number`
+- Voter info: `fn`, `ln`, `middle_name`, `suffix`
+- Address: `addr1`, `house_number`, `street_name`, `city`, `county`, `zip`
+- Contact: `phone_e164`, `email`, `contact_method`, `interaction_notes`
+- Verification: `potential_matches` (JSON), `integrated_voter_id`, `needs_manual_review`
 
-**Related Tables:**
-- `voter_contact_staging`: Unprocessed contact submissions
-- Views: `voter_contact`, `voter_contact_st` for unified access
+**Related Views:**
+- `voter_contact`: Unified view of `voter_contacts` for admin interface
+- `voter_contact_st`: Unified view of `voter_contact_staging` for review queue
 
 ### `wy_city_county`
 **Role:** Authoritative city/county normalization table used to resolve `city_county_id`.
