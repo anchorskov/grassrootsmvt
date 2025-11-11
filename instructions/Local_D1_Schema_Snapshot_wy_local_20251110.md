@@ -11,6 +11,7 @@
 ### New Since 2025-10-26
 - **Migration 008**: Added `district_coverage` table (549 rows) mapping house/senate districts to counties/cities
 - **Migration 010**: Added `campaign_touchpoints` and `campaign_touchpoint_segments` for scripted volunteer conversations
+- **Migration 011**: Expanded `volunteers` table with first_name, last_name, cell_phone, is_active fields
 - **Contact System**: Added `voter_contacts` and `voter_contact_staging` tables for tracking volunteer interactions
 - **Contact Views**: Added `voter_contact` and `voter_contact_st` views for unified contact data access
 - **Phone Data**: `voter_phones` table populated with 113,358 records; `best_phone` table exists but empty
@@ -47,6 +48,7 @@
 | voter_phones                 | table | Phone numbers (113,358 rows) |
 | voters                       | table | Core voter registration data |
 | voters_addr_norm             | table | Normalized voter addresses |
+| volunteers                   | table | **NEW** Volunteer/organizer contact info |
 | wy_city_county               | table | City/county authority table |
 | city_county                  | view  | Friendly alias for wy_city_county |
 | v_voters_addr_norm           | view  | Voters with resolved city/county |
@@ -288,6 +290,54 @@ WHERE ct.is_active = 1
 ORDER BY ct.priority ASC;
 ```
 
+### `volunteers` (NEW — Migration 011)
+**Role:** Stores volunteer and organizer contact information. Used for campaign staff management, volunteer coordination, and authentication. Links to contact records via `volunteer_id` field in other tables.
+
+**Complete Schema:**
+- `id` TEXT PRIMARY KEY (unique volunteer identifier)
+- `name` TEXT NOT NULL (full name, preserved for backwards compatibility)
+- `first_name` TEXT (parsed from name field when available)
+- `last_name` TEXT (parsed from name field when available)
+- `cell_phone` TEXT (direct contact number for volunteer coordination)
+- `is_active` INTEGER DEFAULT 1 (enable/disable flag for access control)
+
+**Indexes:**
+- `idx_volunteers_cell_phone` ON (cell_phone) - Fast lookups by phone number
+
+**Current State:** Table exists and auto-populates first_name/last_name from existing name values containing spaces.
+
+**Usage Scenarios:**
+- **Authentication**: Link volunteer logins to contact activity records
+- **Coordination**: Direct volunteer outreach via cell_phone for urgent updates
+- **Reporting**: Track which volunteers are active vs inactive in the campaign
+- **Assignment**: Pair volunteers with specific precincts, districts, or voter lists
+
+**Example Queries:**
+```sql
+-- Get all active volunteers with contact info
+SELECT id, first_name, last_name, cell_phone
+FROM volunteers
+WHERE is_active = 1
+ORDER BY last_name, first_name;
+
+-- Find volunteer by phone for quick lookup
+SELECT id, name, is_active
+FROM volunteers
+WHERE cell_phone = '+13075551234';
+
+-- Count active vs inactive volunteers
+SELECT 
+  CASE WHEN is_active = 1 THEN 'Active' ELSE 'Inactive' END as status,
+  COUNT(*) as count
+FROM volunteers
+GROUP BY is_active;
+```
+
+**Data Migration Notes:**
+- Existing names like "Alice Johnson" automatically split to first_name="Alice", last_name="Johnson"
+- Single-word names remain in name field only (first_name and last_name stay NULL)
+- Original name column preserved for backwards compatibility with legacy code
+
 ---
 
 ## Migration History
@@ -302,6 +352,7 @@ Applied migrations (from `d1_migrations` table):
 - 007: Reviewed flag on voter_contacts
 - **008: District coverage table** (applied 2025-11-10)
 - **010: Campaign touchpoints and segments** (applied 2025-11-11)
+- **011: Volunteers table expansion** (applied 2025-11-11)
 
 **Pending:** Migration 004 needs to be fixed (removes invalid view indexes) before it can be properly applied.
 
