@@ -933,16 +933,29 @@
         const result = await window.apiPost('contact-staging', contactData);
         if (result.ok) {
           // Hide form, show success
-          document.querySelector('.step.active').style.display = 'none';
-          document.querySelector('.step-indicator').style.display = 'none';
-          document.getElementById('success-message').style.display = 'block';
+          const activeStep = document.querySelector('.step.active');
+          if (activeStep) {
+            activeStep.style.display = 'none';
+          }
+          const stepIndicator = document.querySelector('.step-indicator');
+          if (stepIndicator) {
+            stepIndicator.style.display = 'none';
+          }
+          
+          const successMessage = document.getElementById('success-message');
+          if (successMessage) {
+            successMessage.style.display = 'block';
+          }
           
           // Update success message with staging info
-          document.getElementById('success-details').innerHTML = `
-            <p><strong>Submission ID:</strong> ${result.staging_id}</p>
-            <p><strong>Temporary Voter ID:</strong> ${result.temp_voter_id}</p>
-            <p>This contact will be reviewed and verified before being added to the main database.</p>
-          `;
+          const successDetails = document.getElementById('success-details');
+          if (successDetails) {
+            successDetails.innerHTML = `
+              <p><strong>Submission ID:</strong> ${result.staging_id}</p>
+              <p><strong>Temporary Voter ID:</strong> ${result.temp_voter_id}</p>
+              <p>This contact will be reviewed and verified before being added to the main database.</p>
+            `;
+          }
         } else {
           alert('Failed to submit contact: ' + (result.error || 'Unknown error'));
         }
