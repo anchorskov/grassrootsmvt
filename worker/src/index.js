@@ -1207,6 +1207,7 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
   const houseNumberFilter = house_number ? String(house_number).trim() : null;
   const countyFilter = normalizeTextValue(filters.county);
   const cityFilter = normalizeTextValue(filters.city);
+  const voterIdFilter = filters.voter_id ? String(filters.voter_id).trim() : null;
   const districtCityFilter = normalizeTextValue(filters.district_city);
   const partiesFilter = Array.isArray(filters.parties) ? filters.parties : [];
 
@@ -1253,6 +1254,12 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
     if (houseNumberFilter) {
       query += ` AND va.addr1 LIKE ?${paramIndex} || ' %'`;
       params.push(houseNumberFilter);
+      paramIndex++;
+    }
+
+    if (voterIdFilter) {
+      query += ` AND v.voter_id = ?${paramIndex}`;
+      params.push(voterIdFilter);
       paramIndex++;
     }
 
@@ -1846,31 +1853,81 @@ router.post('/contact-staging', async (request, env, ctx) => {
 
   try {
     const auth = await ensureAuth(request, env, ctx.config);
-    const payload = {
-      ...body,
-      submitted_by: auth.email || 'unknown@local',
-      vol_email: auth.email || 'unknown@local',
-      volunteer: auth.email || 'unknown@local',
-      received_at: new Date().toISOString(),
-    };
+    const volEmail = body.volEmail || auth.email || 'unknown@local';
+    
+    // Map frontend fields to database columns
+    const needsReview = body.potentialMatches && body.potentialMatches.length > 0 ? 1 : 0;
+    
+    const insertQuery = `
+      INSERT INTO ${stagingTable} (
+        submitted_by, vol_email, search_county, search_city, 
+        search_street_name, search_house_number,
+        fn, ln, middle_name, suffix, 
+        addr1, house_number, street_name, unit_number,
+        city, county, state, zip, 
+        phone_e164, phone_secondary, email,
+        political_party, voting_likelihood, 
+        contact_method, interaction_notes, issues_interested, volunteer_notes,
+        potential_matches, needs_manual_review,
+        pulse_optin, pulse_phone_digits
+      ) VALUES (
+        ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+        ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+        ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28, ?29, ?30, ?31
+      )
+    `;
+    
     const result = await buildStatement(
       db,
-      `INSERT INTO ${stagingTable} (json) VALUES (?1)`,
-      [JSON.stringify(payload)]
+      insertQuery,
+      [
+        volEmail,                           // 1: submitted_by
+        volEmail,                           // 2: vol_email
+        body.county,                        // 3: search_county
+        body.city,                          // 4: search_city
+        body.streetName || null,            // 5: search_street_name
+        body.houseNumber || null,           // 6: search_house_number
+        body.firstName,                     // 7: fn
+        body.lastName,                      // 8: ln
+        body.middleName || null,            // 9: middle_name
+        body.suffix || null,                // 10: suffix
+        body.fullAddress,                   // 11: addr1
+        body.houseNumber || null,           // 12: house_number
+        body.streetName || null,            // 13: street_name
+        body.unitNumber || null,            // 14: unit_number
+        body.city,                          // 15: city
+        body.county,                        // 16: county
+        'WY',                               // 17: state
+        body.zipCode || null,               // 18: zip
+        body.phonePrimary || null,          // 19: phone_e164
+        body.phoneSecondary || null,        // 20: phone_secondary
+        body.email || null,                 // 21: email
+        body.estimatedParty || null,        // 22: political_party
+        body.votingLikelihood || null,      // 23: voting_likelihood
+        body.contactMethod || null,         // 24: contact_method
+        body.interactionNotes || null,      // 25: interaction_notes
+        body.issuesInterested || null,      // 26: issues_interested
+        body.volunteerNotes || null,        // 27: volunteer_notes
+        JSON.stringify(body.potentialMatches || []), // 28: potential_matches
+        needsReview,                        // 29: needs_manual_review
+        body.pulseOptIn ? 1 : 0,            // 30: pulse_optin
+        body.pulsePhoneDigits || null       // 31: pulse_phone_digits
+      ]
     ).run();
+    
     const stagingId = result?.meta?.last_row_id ?? null;
-    const tempVoterId = body?.voter_id && String(body.voter_id).trim()
-      ? String(body.voter_id).trim()
-      : stagingId
-        ? `tmp${String(stagingId).padStart(5, '0')}`
-        : `tmp${Date.now()}`;
+    
+    // Get the auto-generated voter_id from trigger
+    let tempVoterId = null;
     if (stagingId) {
-      await buildStatement(
+      const voterResult = await buildStatement(
         db,
-        `UPDATE ${stagingTable} SET voter_id = ?1 WHERE id = ?2`,
-        [tempVoterId, stagingId]
-      ).run();
+        `SELECT voter_id FROM ${stagingTable} WHERE staging_id = ?1`,
+        [stagingId]
+      ).first();
+      tempVoterId = voterResult?.voter_id || `TEMP-${String(stagingId).padStart(8, '0')}`;
     }
+    
     return ctx.jsonResponse(
       {
         ok: true,

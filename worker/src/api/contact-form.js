@@ -101,14 +101,13 @@ async function searchSimilarNames(db, { county, city, firstName, lastName }) {
     locationParams.push(city);
   }
   const locationSql = locationClauses.length ? locationClauses.join(' AND ') + ' AND ' : '';
-  const nameFilterSql = `
-    (
-      UPPER(a.ln) LIKE UPPER(?) || '%'
-      OR UPPER(a.fn) LIKE UPPER(?) || '%'
-      OR UPPER(a.ln) LIKE '%' || UPPER(?) || '%'
-    )
-  `;
-  const nameFilterParams = [lastName, firstName, lastName];
+  const lastNameClause = `(UPPER(a.ln) LIKE UPPER(?) || '%' OR UPPER(a.ln) LIKE '%' || UPPER(?) || '%')`;
+  const nameFilterParams = [lastName, lastName];
+  let nameFilterSql = lastNameClause;
+  if (firstName) {
+    nameFilterSql += ` AND UPPER(a.fn) LIKE UPPER(?) || '%'`;
+    nameFilterParams.push(firstName);
+  }
   const query = `
     SELECT 
       v.voter_id,
