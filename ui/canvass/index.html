@@ -618,6 +618,7 @@ function restoreCanvassState() {
           try {
             sessionStorage.setItem('voterUpdateData', JSON.stringify(voterRow));
             sessionStorage.setItem(RETURN_PATH_KEY, returnPath);
+            sessionStorage.setItem('contactFormSkipLookup', '1');
           } catch (e) {
             console.warn('⚠️ Unable to cache voter data locally:', e);
           }

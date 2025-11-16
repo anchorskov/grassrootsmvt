@@ -498,6 +498,8 @@
       throw new Error('environmentConfig failed to load for form logic');
     }
 
+    const CANVASS_SKIP_LOOKUP_KEY = 'contactFormSkipLookup';
+
     const state = {
       wyomingData: { counties: [], citiesByCounty: {} },
       voterData: null,
@@ -507,6 +509,7 @@
       formUnlocked: false,
       lookupResults: [],
       lookupQuery: null,
+      skipLookupGate: false,
     };
     const RETURN_PATH_KEY = 'contactFormReturnTo';
 
@@ -539,6 +542,7 @@
     const lookupResultsContainer = document.getElementById('lookup-results');
     const lookupError = document.getElementById('lookup-error');
     const lookupStatus = document.getElementById('lookup-status');
+    const lookupCard = document.getElementById('lookup-card');
 
     function bootstrap() {
       cancelBtn.addEventListener('click', navigateBackToOrigin);
@@ -594,10 +598,22 @@
     }
 
     async function init() {
+      consumeSkipLookupFlag();
       determineReturnPath();
       await loadWyomingData();
       populateCountyOptions();
       await hydrateFromParams();
+    }
+
+    function consumeSkipLookupFlag() {
+      try {
+        if (sessionStorage.getItem(CANVASS_SKIP_LOOKUP_KEY) === '1') {
+          state.skipLookupGate = true;
+          sessionStorage.removeItem(CANVASS_SKIP_LOOKUP_KEY);
+        }
+      } catch (err) {
+        console.warn('Failed to read canvass skip flag', err);
+      }
     }
 
     function handleLookupInputChange() {
@@ -652,6 +668,30 @@
       lookupError.textContent = message || 'Lookup failed. Try again.';
       lookupError.style.display = 'block';
       setLookupStatus('');
+    }
+
+    function maybePrefillLookupFromData(data, { force = false } = {}) {
+      if (!data) return;
+      const first = (valueFromKeys(data, ['first_name', 'first', 'fn']) || '').trim();
+      const last = (valueFromKeys(data, ['last_name', 'last', 'ln']) || '').trim();
+      if (lookupFirstNameInput && (force || !(lookupFirstNameInput.value || '').trim())) {
+        lookupFirstNameInput.value = first;
+      }
+      if (lookupLastNameInput && (force || !(lookupLastNameInput.value || '').trim())) {
+        lookupLastNameInput.value = last;
+      }
+      handleLookupInputChange();
+    }
+
+    function applySkipLookupIfNeeded(data) {
+      if (!state.skipLookupGate) return;
+      if (lookupCard) {
+        lookupCard.classList.add('is-hidden');
+      }
+      setFormVisibility(true);
+      setLookupStatus('Loaded automatically from canvass note.');
+      maybePrefillLookupFromData(data, { force: true });
+      state.skipLookupGate = false;
     }
 
     async function handleLookupSearch() {
@@ -776,6 +816,7 @@
         originalDataInput.value = JSON.stringify(data);
         await populateForm(data);
         updateModeUI();
+        maybePrefillLookupFromData(data);
         setFormVisibility(true);
         setLookupStatus('Existing voter loaded. Review and submit updates.');
         scrollToForm();
@@ -943,8 +984,12 @@
         originalDataInput.value = JSON.stringify(data);
         updateModeUI();
         await populateForm(data);
+        maybePrefillLookupFromData(data, { force: state.skipLookupGate });
+        applySkipLookupIfNeeded(data);
         setFormVisibility(true);
-        setLookupStatus('Loaded a voter from the shared link.');
+        if (!state.skipLookupGate) {
+          setLookupStatus('Loaded a voter from the shared link.');
+        }
       } else {
         state.mode = 'new';
         state.voterData = null;
@@ -953,7 +998,11 @@
         voterIdInput.value = '';
         originalDataInput.value = '';
         updateModeUI();
+        state.skipLookupGate = false;
         setFormVisibility(false);
+        if (lookupCard) {
+          lookupCard.classList.remove('is-hidden');
+        }
       }
     }
 
