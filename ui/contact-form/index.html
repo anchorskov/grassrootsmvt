@@ -4,6 +4,55 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Add New Voter Contact - GrassrootsMVT</title>
+
+  <!-- Auth bootstrap: FIRST in <head> -->
+  <script type="module">
+  import env from '/config/environments.js';
+
+  // For debugging: ensure whoami is SAME-ORIGIN
+  console.log('🔎 whoami URL:', env.getApiUrl('whoami')); // must be https://volunteers.../api/whoami
+
+  function buildKick() {
+    const finish = env.getApiUrl('auth/finish', { to: location.href });
+    return env.getApiUrl('ping', { finish }); // → /api/ping?finish=/api/auth/finish?to=...
+  }
+
+  // Ensure authentication using manual redirect handling to avoid CORS
+  await (async function ensureAccess(){
+    if (env.shouldBypassAuth && env.shouldBypassAuth()) return;
+
+    // Clear any stale authentication flags from previous attempts
+    // This prevents loops when returning from Cloudflare Access
+    const wasKicking = sessionStorage.getItem('access:kicking') === '1';
+    if (wasKicking) {
+      sessionStorage.removeItem('access:kicking');
+    }
+
+    try {
+      const r = await fetch(env.getApiUrl('whoami'), {
+        credentials: 'include',
+        redirect: 'manual',
+        headers: { Accept: 'application/json' }
+      });
+      if (r.status === 200) return; // already authenticated
+    } catch (err) {
+      console.warn('Auth probe failed (still kicking Access):', err);
+    }
+
+    // If we just cleared a kicking flag but still aren't authenticated,
+    // it means we returned from Access but authentication failed
+    if (wasKicking) {
+      console.log('Authentication failed after Access redirect');
+      // Don't immediately re-kick; give user a chance to see any error
+      return;
+    }
+
+    sessionStorage.setItem('access:kicking','1');
+    location.href = buildKick();
+    return new Promise(()=>{});
+  })();
+  </script>
+
   <style>
     /* Similar styling to existing forms */
     :root { color-scheme: light dark; }
@@ -17,8 +66,8 @@
     .step-indicator .step-dot.completed { background: #10b981; color: white; }
     
     .form-group { margin: 1rem 0; }
-    .form-row { display: flex; gap: 1rem; flex-wrap: wrap; }
-    .form-row .form-group { flex: 1 1 240px; }
+    .form-row { display: flex; gap: 1rem; }
+    .form-row .form-group { flex: 1; }
     label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
     input, select, textarea { width: 100%; padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; }
     button { padding: 0.75rem 1.5rem; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; }
@@ -32,73 +81,6 @@
     .match-item { padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; margin: 0.5rem 0; cursor: pointer; }
     .match-item:hover { background: #f3f4f6; }
     .match-score { font-size: 0.875rem; color: #6b7280; }
-    .lookup-card { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 12px; padding: 1.5rem; margin: 1rem 0; }
-    .lookup-results { margin-top: 1rem; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem; background: white; min-height: 60px; }
-    .match-actions { display: flex; gap: .5rem; margin-top: .5rem; flex-wrap: wrap; }
-    .btn-small { padding: .45rem .85rem; font-size: .85rem; border-radius: 6px; border: none; cursor: pointer; }
-    .btn-small.btn-primary { background: #2563eb; color: white; }
-    .btn-small.btn-secondary { background: #e2e8f0; color: #0f172a; }
-    .pulse-optin-block {
-      border: 1px solid #fcd34d;
-      background: #fef9c3;
-      padding: 1rem;
-      border-radius: 8px;
-      margin-top: 1rem;
-    }
-    .pulse-term {
-      position: relative;
-      cursor: help;
-      border-bottom: 1px dotted #b45309;
-    }
-    .pulse-term::after {
-      content: attr(data-tooltip);
-      position: absolute;
-      left: 0;
-      top: calc(100% + 6px);
-      min-width: 220px;
-      max-width: 280px;
-      background: #0f172a;
-      color: #f8fafc;
-      padding: 0.5rem 0.65rem;
-      border-radius: 8px;
-      font-size: 0.85rem;
-      line-height: 1.3;
-      box-shadow: 0 8px 18px rgba(15, 23, 42, 0.35);
-      opacity: 0;
-      transform: translateY(4px);
-      pointer-events: none;
-      transition: opacity 0.15s ease, transform 0.15s ease;
-      z-index: 10;
-    }
-    .pulse-term:hover::after,
-    .pulse-term:focus-visible::after {
-      opacity: 1;
-      transform: translateY(0);
-    }
-    .pulse-optin-label {
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      font-weight: 600;
-      font-size: 1rem;
-    }
-    .pulse-optin-checkbox {
-      width: 1.2rem;
-      height: 1.2rem;
-    }
-    .error-text { color: #b91c1c; margin-top: 0.25rem; }
-
-    @media (max-width: 640px) {
-      .lookup-card, .card {
-        padding: 1.25rem;
-      }
-      .form-row {
-        flex-direction: column;
-      }
-      .form-row .form-group {
-        flex: 1 1 100%;
-      }
-    }
     
     /* Autocomplete styling from canvass form */
     .autocomplete-container { position: relative; }
@@ -129,34 +111,29 @@
   </style>
 </head>
 <body>
-  <h1>Add New Voter Contact</h1>
+  <h1 id="page-title">Add New Voter Contact</h1>
   
-  <div class="lookup-card" id="lookup-card">
-    <h2>Quick Lookup</h2>
-    <p style="margin-top:.25rem;">Start by searching existing records. Choose a match to update, or continue with a new entry.</p>
-    <div class="form-row">
-      <div class="form-group">
-        <label for="lookup-last-name">Last Name</label>
-        <input type="text" id="lookup-last-name" placeholder="e.g. WILSON">
-      </div>
-      <div class="form-group">
-        <label for="lookup-first-name">First Name (optional)</label>
-        <input type="text" id="lookup-first-name" placeholder="e.g. MIA">
-      </div>
-    </div>
-    <button type="button" class="btn-primary" id="name-search-btn">Search by Name</button>
-    <div id="lookup-results" class="lookup-results">
-      <em>Enter a last name, then run a search.</em>
-    </div>
-    <div class="form-row" style="margin-top:1rem;">
-      <button type="button" class="btn-primary" id="start-contact-btn">Add New Contact ↓</button>
-      <button type="button" class="btn-secondary" id="clear-lookup-btn">Clear Lookup</button>
-    </div>
+  <!-- Hidden fields for form state -->
+  <input type="hidden" id="form-mode" value="new">
+  <input type="hidden" id="original-voter-id" value="">
+  
+  <!-- Update mode banner (hidden by default) -->
+  <div class="card" id="update-mode-banner" style="display: none; background: linear-gradient(135deg, #0ea5e9 0%, #06b6d4 100%); color: white; margin-bottom: 1rem;">
+    <h3 style="margin: 0 0 0.5rem 0;">📝 Updating Existing Voter Contact</h3>
+    <p style="margin: 0; opacity: 0.9;">Pre-filled with current information. Modify as needed and submit to update.</p>
   </div>
   
-  <!-- Location -->
-  <div class="card" id="section-location">
-    <h2>Location</h2>
+  <!-- Step Indicator -->
+  <div class="step-indicator">
+    <div class="step-dot active" id="step-dot-1">1</div>
+    <div class="step-dot" id="step-dot-2">2</div>
+    <div class="step-dot" id="step-dot-3">3</div>
+    <div class="step-dot" id="step-dot-4">4</div>
+  </div>
+
+  <!-- Step 1: Location -->
+  <div class="card step active" id="step-1">
+    <h2>Step 1: Location</h2>
     <p>Start by selecting the location where you met this voter.</p>
     
     <div class="form-row">
@@ -173,20 +150,21 @@
         </select>
       </div>
     </div>
+    
+    <button type="button" class="btn-primary" id="next-to-address" disabled>
+      Next: Address →
+    </button>
   </div>
 
-  <!-- Address Check -->
-  <div class="card" id="section-address">
-    <h2>Address</h2>
+  <!-- Step 2: Address Check -->
+  <div class="card step" id="step-2">
+    <h2>Step 2: Address</h2>
     <p>Enter the address to check if this voter is already registered.</p>
     
     <div class="form-row">
       <div class="form-group">
         <label for="house-number">House Number *</label>
-        <div class="autocomplete-container">
-          <input type="text" id="house-number" placeholder="Select street first" required disabled>
-          <div id="house-suggestions" class="autocomplete-suggestions"></div>
-        </div>
+        <input type="text" id="house-number" placeholder="123" required>
       </div>
       <div class="form-group">
         <label for="street-name">Street Name *</label>
@@ -208,11 +186,17 @@
       <p><strong>This voter is already in our database.</strong> You can still record your interaction or update their information.</p>
     </div>
     
+    <div class="form-row">
+      <button type="button" class="btn-secondary" id="back-to-location">← Back</button>
+      <button type="button" class="btn-primary" id="next-to-personal" disabled>
+        Continue: Personal Info →
+      </button>
+    </div>
   </div>
 
-  <!-- Personal Information -->
-  <div class="card" id="section-personal">
-    <h2>Personal Information</h2>
+  <!-- Step 3: Personal Information -->
+  <div class="card step" id="step-3">
+    <h2>Step 3: Personal Information</h2>
     
     <div class="form-row">
       <div class="form-group">
@@ -258,28 +242,18 @@
       <label for="email">Email Address</label>
       <input type="email" id="email" placeholder="voter@example.com">
     </div>
-
-    <div class="form-group pulse-optin-block">
-      <label class="pulse-optin-label">
-        <input type="checkbox" id="pulse-opt-in" class="pulse-optin-checkbox">
-        Opt-in to <span class="pulse-term" tabindex="0" data-tooltip="Pulse is our consented texting list. Only voters who explicitly opt in appear in the Pulse table and can receive SMS reminders.">Pulse text updates</span> (voter permission required)
-      </label>
-      <p class="help-text">
-        Get explicit consent before enabling this. We send occasional reminders (polling place info, early voting, events). Message/data rates may apply. Voters can reply STOP to opt out anytime.
-      </p>
-    </div>
-    <div class="form-group" id="pulse-phone-group" style="display:none;">
-      <label for="pulse-phone">Cell number for Pulse texts</label>
-      <input type="tel" id="pulse-phone" placeholder="e.g. 307-555-1234">
-      <p class="help-text">Use the voter’s preferred mobile number so we log consent correctly.</p>
-      <p class="help-text error-text" id="pulse-phone-error" style="display:none;"></p>
-    </div>
     
+    <div class="form-row">
+      <button type="button" class="btn-secondary" id="back-to-address">← Back</button>
+      <button type="button" class="btn-primary" id="next-to-interaction">
+        Next: Interaction Details →
+      </button>
+    </div>
   </div>
 
-  <!-- Interaction & Political Info -->
-  <div class="card" id="section-interaction">
-    <h2>Interaction Details</h2>
+  <!-- Step 4: Interaction & Political Info -->
+  <div class="card step" id="step-4">
+    <h2>Step 4: Interaction Details</h2>
     
     <div class="form-row">
       <div class="form-group">
@@ -331,6 +305,7 @@
     </div>
     
     <div class="form-row">
+      <button type="button" class="btn-secondary" id="back-to-personal">← Back</button>
       <button type="button" class="btn-success" id="submit-contact">
         Submit Contact ✓
       </button>
@@ -343,7 +318,7 @@
     <p>Thank you for adding this voter contact. The information has been saved and will be reviewed.</p>
     <div id="success-details" style="background: #f0f9ff; padding: 1rem; border-radius: 6px; margin: 1rem 0; font-family: monospace; font-size: 0.9rem;"></div>
     <button type="button" class="btn-primary" onclick="location.reload()">Add Another Contact</button>
-    <button type="button" class="btn-secondary" onclick="location.href='/'">Return to Volunteer Hub</button>
+    <button type="button" class="btn-secondary" onclick="location.href='/canvass/'">Return to Canvassing</button>
   </div>
 
   <!-- Hidden input for volunteer's email -->
@@ -351,36 +326,164 @@
 
   <button class="btn-primary" onclick="location.href='/ui/contact-form/index.html'">New Contact</button>
 
-  <!-- Shared scripts -->
-  <script src="/config/environments.js"></script>
-  <script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
-  <script src="/shared/authGlobal.js"></script>
-  <!-- Import the optimized autocomplete components using streets_index -->
-  <script src="../shared/streetAutocompleteOptimized.js"></script>
-  <script src="../shared/houseAutocomplete.js"></script>
+  <!-- Import the reusable street autocomplete component -->
+  <script src="../shared/streetAutocomplete.js"></script>
   
   <script type="module">
     // Progressive form logic with API integration
-    const environmentConfig = window.environmentConfig;
+    // Import environment configuration (absolute path for nested routes)
+    let environmentConfig;
+    try {
+      const mod = await import('/config/environments.js');
+      environmentConfig = mod.default || mod.environmentConfig || mod;
+    } catch (e) {
+      console.warn('ESM import failed, falling back to global:', e);
+    }
     
+    window.environmentConfig = environmentConfig;
+    
+    let currentStep = 1;
     let formData = {};
     let potentialMatches = [];
     let wyomingData = {}; // Will hold citiesByCounty data
-    let houseAutocomplete; // Declare at module level for access in callbacks
-    let streetAutocomplete; // Declare at module level for access in callbacks
-    let lookupMatches = [];
-    const phonePrimaryInput = document.getElementById('phone-primary');
-    const pulseOptInInput = document.getElementById('pulse-opt-in');
-    const pulsePhoneGroup = document.getElementById('pulse-phone-group');
-    const pulsePhoneInput = document.getElementById('pulse-phone');
-    const pulsePhoneError = document.getElementById('pulse-phone-error');
+
+    // Auto-fill helper function
+    function setFieldValue(elementId, value) {
+      const element = document.getElementById(elementId);
+      if (element && value !== null && value !== undefined && value !== '') {
+        element.value = value;
+        return true;
+      }
+      return false;
+    }
+
+    // Fetch voter data from API
+    async function fetchVoterById(voterId) {
+      try {
+        const response = await window.apiPost('canvass/nearby', {
+          filters: { voter_id: voterId },
+          limit: 1
+        });
+        if (response.ok && response.rows && response.rows.length > 0) {
+          return response.rows[0];
+        }
+        return null;
+      } catch (error) {
+        console.error('Failed to fetch voter data:', error);
+        return null;
+      }
+    }
+
+    // Auto-fill form with voter data
+    async function autoFillForm(voter) {
+      console.log('Auto-filling form with voter data:', voter);
+      
+      // Set form mode to update
+      document.getElementById('form-mode').value = 'update';
+      document.getElementById('original-voter-id').value = voter.voter_id || '';
+      
+      // Show update banner
+      document.getElementById('update-mode-banner').style.display = 'block';
+      document.getElementById('page-title').textContent = 'Update Voter Contact';
+      
+      // Geographic fields
+      if (voter.county) {
+        formData.county = voter.county;
+        const countySelect = document.getElementById('county');
+        countySelect.value = voter.county;
+        
+        // Load cities for this county
+        await loadCities(voter.county);
+        
+        if (voter.city) {
+          formData.city = voter.city;
+          const citySelect = document.getElementById('city');
+          citySelect.value = voter.city;
+          citySelect.disabled = false;
+        }
+      }
+      
+      // Name fields
+      setFieldValue('first-name', voter.first_name || voter.fn || voter.name?.split(' ')[0]);
+      setFieldValue('last-name', voter.last_name || voter.ln || voter.name?.split(' ').slice(-1)[0]);
+      setFieldValue('middle-name', voter.middle_name);
+      setFieldValue('suffix', voter.suffix);
+      
+      // Address fields
+      const address = voter.address || voter.addr1 || '';
+      setFieldValue('full-address', address);
+      
+      // Try to parse street name and house number from address
+      if (address) {
+        const match = address.match(/^(\d+[A-Z]?)\s+(.+)$/);
+        if (match) {
+          setFieldValue('house-number', match[1]);
+          setFieldValue('street-name', match[2]);
+        }
+      }
+      
+      setFieldValue('zip-code', voter.zip);
+      
+      // Contact fields
+      setFieldValue('phone-primary', voter.phone_e164 || voter.phonePrimary || voter.phone);
+      setFieldValue('email', voter.email);
+      
+      // Political fields
+      setFieldValue('estimated-party', voter.political_party || voter.estimated_party || voter.party);
+      setFieldValue('voting-likelihood', voter.voting_likelihood);
+      
+      // Interaction fields (if any)
+      setFieldValue('contact-method', voter.contact_method);
+      setFieldValue('interaction-notes', voter.notes || voter.interaction_notes);
+      
+      // Enable navigation since we have pre-filled data
+      updateButtonStates();
+      
+      console.log('✅ Form auto-filled successfully');
+    }
+
+    // Initialize form with URL parameters
+    async function initializeForm() {
+      const params = new URLSearchParams(window.location.search);
+      const mode = params.get('mode');
+      const voterId = params.get('voter_id');
+      const encodedData = params.get('data');
+      
+      // Check if we should auto-fill
+      if (mode === 'update' || voterId || encodedData) {
+        let voterData = null;
+        
+        // Option A: Data passed in URL
+        if (encodedData) {
+          try {
+            voterData = JSON.parse(decodeURIComponent(encodedData));
+            console.log('Using voter data from URL parameters');
+          } catch (error) {
+            console.error('Failed to parse voter data from URL:', error);
+          }
+        }
+        
+        // Option B: Fetch from API using voter_id
+        if (!voterData && voterId) {
+          console.log('Fetching voter data for ID:', voterId);
+          voterData = await fetchVoterById(voterId);
+        }
+        
+        // Auto-fill if we have data
+        if (voterData) {
+          await autoFillForm(voterData);
+        } else {
+          console.warn('Could not load voter data for auto-fill');
+        }
+      }
+    }
 
     // Initialize form
     async function init() {
       await loadWyomingData();
       await loadCounties();
       setupEventListeners();
-      togglePulsePhoneGroup(pulseOptInInput?.checked, { prefill: true });
+      await initializeForm(); // NEW: Check for auto-fill after setup
     }
 
     // Load Wyoming data (counties, cities by county, etc.)
@@ -412,15 +515,14 @@
     // Load counties from Wyoming data
     async function loadCounties() {
       try {
-        const primarySelect = document.getElementById('county');
-        primarySelect.innerHTML = '<option value="">Select County</option>';
+        const select = document.getElementById('county');
         const counties = wyomingData.counties || [];
         
         counties.forEach(county => {
           const option = document.createElement('option');
           option.value = county;
           option.textContent = county;
-          primarySelect.appendChild(option);
+          select.appendChild(option);
         });
         
         console.log(`Loaded ${counties.length} counties`);
@@ -428,133 +530,9 @@
         console.error('Failed to load counties:', error);
       }
     }
-
-    function populateCityOptions(selectEl, county) {
-      if (!selectEl) return;
-      selectEl.innerHTML = '<option value="">Select City</option>';
-      if (!county) {
-        selectEl.disabled = true;
-        return;
-      }
-      const cities = (wyomingData.citiesByCounty && wyomingData.citiesByCounty[county]) || [];
-      cities.forEach(city => {
-        const option = document.createElement('option');
-        option.value = city;
-        option.textContent = city;
-        selectEl.appendChild(option);
-      });
-      selectEl.disabled = false;
-      if (!cities.length) {
-        const fallback = document.createElement('option');
-        fallback.value = county;
-        fallback.textContent = `${county} County Area`;
-        selectEl.appendChild(fallback);
-      }
-    }
     
     // Setup all event listeners
-    function togglePulsePhoneGroup(show, { prefill = false } = {}) {
-      if (!pulsePhoneGroup) return;
-      pulsePhoneGroup.style.display = show ? '' : 'none';
-      if (show && prefill && pulsePhoneInput && phonePrimaryInput) {
-        if (!pulsePhoneInput.value) {
-          const digits = normalizeTenDigitPhone(phonePrimaryInput.value || '');
-          if (digits) pulsePhoneInput.value = digits;
-        }
-      }
-      if (!show && pulsePhoneError) {
-        pulsePhoneError.style.display = 'none';
-        pulsePhoneError.textContent = '';
-      }
-    }
-
-    function normalizeTenDigitPhone(rawValue) {
-      return (rawValue || '').replace(/\D/g, '').slice(-10);
-    }
-
-    function validatePulseOptIn() {
-      if (!pulseOptInInput || !pulseOptInInput.checked) {
-        if (pulsePhoneError) {
-          pulsePhoneError.style.display = 'none';
-          pulsePhoneError.textContent = '';
-        }
-        return { valid: true, digits: '' };
-      }
-      const digits = normalizeTenDigitPhone(pulsePhoneInput?.value || '');
-      if (!digits) {
-        if (pulsePhoneError) {
-          pulsePhoneError.textContent = 'Enter a 10-digit mobile number before opting in.';
-          pulsePhoneError.style.display = 'block';
-        }
-        pulsePhoneInput?.focus();
-        return { valid: false, digits: '' };
-      }
-      if (pulsePhoneError) {
-        pulsePhoneError.style.display = 'none';
-        pulsePhoneError.textContent = '';
-      }
-      return { valid: true, digits };
-    }
-
     function setupEventListeners() {
-      // Initialize house autocomplete component
-      houseAutocomplete = new HouseAutocomplete({
-        houseInputId: 'house-number',
-        suggestionsId: 'house-suggestions',
-        getCounty: () => formData.county,
-        getCity: () => formData.city,
-        getStreet: () => formData.streetName,
-        onHousesLoaded: (houseNumbers, houseData) => {
-          // Store house data for voter lookup
-          console.log('📦 Storing house data:', houseData.length, 'houses');
-          formData.houseData = houseData;
-        },
-        onHouseSelected: (houseNumber, houseData) => {
-          console.log('🏠 House selected:', houseNumber, houseData);
-          formData.houseNumber = houseNumber;
-          checkExistingVoter(houseNumber);
-        },
-        onHouseInput: (value) => {
-          checkAddress();
-        }
-      });
-      
-      // Initialize street autocomplete
-      streetAutocomplete = new StreetAutocompleteOptimized({
-        streetInputId: 'street-name',
-        houseInputId: 'house-number',
-        suggestionsId: 'street-suggestions',
-        getCounty: () => formData.county,
-        getCity: () => formData.city,
-        onStreetSelected: async (streetName) => {
-          console.log('📍 Street selected:', streetName);
-          formData.streetName = streetName;
-          
-          // Enable house field
-          houseAutocomplete.enable();
-          
-          // Load house numbers
-          await houseAutocomplete.loadHouseNumbers(streetName);
-          
-          checkAddress();
-        },
-        onHouseFieldChange: (enabled) => {
-          if (enabled) {
-            houseAutocomplete.enable();
-          } else {
-            houseAutocomplete.disable();
-          }
-        }
-      });
-      
-      // Initialize house field as disabled
-      houseAutocomplete.disable();
-      
-      document.getElementById('name-search-btn').addEventListener('click', performNameLookup);
-      document.getElementById('clear-lookup-btn').addEventListener('click', clearLookupResults);
-      document.getElementById('start-contact-btn').addEventListener('click', startNewContactFlow);
-      document.getElementById('lookup-results').addEventListener('click', handleLookupResultAction);
-      
       // County selection
       document.getElementById('county').addEventListener('change', async (e) => {
         const county = e.target.value;
@@ -566,6 +544,7 @@
         }
         // Clear street cache when county changes
         streetAutocomplete.clearCache();
+        updateButtonStates();
       });
       
       // City selection  
@@ -573,117 +552,104 @@
         formData.city = e.target.value;
         // Clear street cache when city changes  
         streetAutocomplete.clearCache();
+        updateButtonStates();
       });
       
       // Address fields
       document.getElementById('house-number').addEventListener('input', checkAddress);
+      // Street autocomplete setup using reusable component
+      const streetAutocomplete = new StreetAutocomplete({
+        streetInputId: 'street-name',
+        suggestionsId: 'street-suggestions',
+        getCounty: () => formData.county,
+        getCity: () => formData.city,
+        onStreetSelected: (streetName) => {
+          // Enable house field and trigger address check
+          enableHouseField();
+          populateHouseNumbers(streetName);
+          checkAddress();
+        },
+        onHouseFieldChange: (enabled) => {
+          if (enabled) {
+            enableHouseField();
+          } else {
+            disableHouseField();
+          }
+        }
+      });
+      
+      // Initialize house field as disabled
+      disableHouseField();
       
       // Name fields
       document.getElementById('first-name').addEventListener('input', debounce(searchNames, 500));
       document.getElementById('last-name').addEventListener('input', debounce(searchNames, 500));
-
-      pulseOptInInput?.addEventListener('change', () => {
-        togglePulsePhoneGroup(pulseOptInInput.checked, { prefill: true });
-      });
-      pulsePhoneInput?.addEventListener('input', () => {
-        if (pulsePhoneError) {
-          pulsePhoneError.style.display = 'none';
-          pulsePhoneError.textContent = '';
-        }
-      });
+      
+      // Navigation buttons
+      document.getElementById('next-to-address').addEventListener('click', () => goToStep(2));
+      document.getElementById('next-to-personal').addEventListener('click', () => goToStep(3));
+      document.getElementById('next-to-interaction').addEventListener('click', () => goToStep(4));
+      document.getElementById('back-to-location').addEventListener('click', () => goToStep(1));
+      document.getElementById('back-to-address').addEventListener('click', () => goToStep(2));
+      document.getElementById('back-to-personal').addEventListener('click', () => goToStep(3));
       
       // Submit
       document.getElementById('submit-contact').addEventListener('click', submitContact);
     }
     
-    function renderLookupResults(rows, context = {}) {
-      const container = document.getElementById('lookup-results');
-      lookupMatches = (rows || []).map(row => ({
-        ...row,
-        county: row.county || null,
-        city: row.city || ''
-      }));
-      if (!lookupMatches.length) {
-        container.innerHTML = `<em>No matches found${context.summary ? ` for ${context.summary}` : ''}. Use “Add New Contact” to create a record.</em>`;
-        return;
+    // Navigation functions
+    function goToStep(step) {
+      // Hide current step
+      document.querySelector('.step.active').classList.remove('active');
+      document.getElementById(`step-dot-${currentStep}`).classList.remove('active');
+      
+      // Mark completed steps
+      if (step > currentStep) {
+        document.getElementById(`step-dot-${currentStep}`).classList.add('completed');
       }
-      container.innerHTML = lookupMatches
-        .map((row, idx) => `
-          <div class="match-item">
-            <div>
-              <strong>${row.name || 'Unknown name'}</strong>
-              <span class="match-score">${row.party || 'No party'}</span>
-              <div>${row.address || ''}, ${row.city || ''}${row.zip ? ' ' + row.zip : ''}</div>
-              ${row.county ? `<div class="match-score">County: ${row.county}</div>` : ''}
-              ${row.phone_e164 ? `<div class="match-score">Phone: ${row.phone_e164}</div>` : ''}
-            </div>
-            <div class="match-actions">
-              ${row.voter_id ? `<button class="btn-small btn-primary" data-action="update" data-index="${idx}">Update Record</button>` : ''}
-            </div>
-          </div>
-        `)
-        .join('');
-    }
-    
-    function clearLookupResults() {
-      lookupMatches = [];
-      formData.existingVoter = null;
-      document.getElementById('lookup-results').innerHTML = '<em>Enter a name to search existing voters or add a new contact below.</em>';
-      document.getElementById('lookup-last-name').value = '';
-      document.getElementById('lookup-first-name').value = '';
-    }
-    
-    function handleLookupResultAction(event) {
-      const action = event.target.dataset.action;
-      if (!action) return;
-      const index = Number(event.target.dataset.index || -1);
-      if (index < 0 || !lookupMatches[index]) return;
-      const voter = lookupMatches[index];
-      if (action === 'update') {
-        redirectToUpdateForm(voter);
-      }
-    }
-    
-    async function performNameLookup() {
-      const lastName = document.getElementById('lookup-last-name').value.trim();
-      const firstName = document.getElementById('lookup-first-name').value.trim();
-      if (lastName.length < 2) {
-        document.getElementById('lookup-results').innerHTML = '<em>Enter at least two letters of the last name.</em>';
-        return;
-      }
-      document.getElementById('lookup-results').innerHTML = '<em>Searching records…</em>';
-      try {
-        const data = await window.apiPost('contact-form/search-names', { firstName, lastName });
-        if (!data?.ok) {
-          document.getElementById('lookup-results').innerHTML = `<em>${data?.error || 'Search failed'}.</em>`;
-          return;
-        }
-        renderLookupResults(data.rows || [], { summary: `${firstName ? `${firstName} ` : ''}${lastName}`.trim() });
-      } catch (error) {
-        console.error('Name lookup failed', error);
-        document.getElementById('lookup-results').innerHTML = '<em>Unable to search right now. Try again shortly.</em>';
-      }
-    }
-    
-    async function startNewContactFlow() {
-      formData.existingVoter = null;
-      const locationCard = document.getElementById('section-location');
-      if (locationCard) {
-        locationCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-      document.getElementById('county')?.focus();
+      
+      // Show new step
+      currentStep = step;
+      document.getElementById(`step-${step}`).classList.add('active');
+      document.getElementById(`step-dot-${step}`).classList.add('active');
     }
     
     // Load actual cities for selected county
     async function loadCities(county) {
       try {
         const select = document.getElementById('city');
-        populateCityOptions(select, county);
-        if (formData.city) {
-          select.value = formData.city;
+        
+        select.innerHTML = '<option value="">Select City</option>';
+        
+        // Get actual cities for this county from Wyoming data
+        const cities = (wyomingData.citiesByCounty && wyomingData.citiesByCounty[county]) || [];
+        
+        if (cities.length > 0) {
+          cities.forEach(city => {
+            const option = document.createElement('option');
+            option.value = city;
+            option.textContent = city;
+            select.appendChild(option);
+          });
+          console.log(`Loaded ${cities.length} cities for ${county}`);
+        } else {
+          // Fallback: use county as city option
+          const option = document.createElement('option');
+          option.value = county;
+          option.textContent = `${county} County Area`;
+          select.appendChild(option);
+          console.log(`No cities found for ${county}, using county fallback`);
         }
+        
       } catch (error) {
         console.error('Failed to load cities:', error);
+        // Fallback: just show the county as an option
+        const select = document.getElementById('city');
+        select.innerHTML = '<option value="">Select City</option>';
+        const option = document.createElement('option');
+        option.value = county;
+        option.textContent = `${county} County Area`;
+        select.appendChild(option);
       }
     }
 
@@ -705,130 +671,46 @@
       houseInput.placeholder = "Select street first";
     }
 
-    
-    // Check for existing voter at this address
-    async function checkExistingVoter(houseNumber) {
-      if (!houseNumber || !formData.streetName) {
-        console.log('⚠️ Missing house number or street name');
-        return;
-      }
+    // Function to populate house numbers based on selected street
+    async function populateHouseNumbers(streetName) {
+      console.log('🏠 Loading house numbers for street:', streetName);
       
-      console.log('🔍 Checking for existing voter at:', houseNumber, formData.streetName);
-      
-      // Find matching house in our data
-      if (!formData.houseData) {
-        console.log('⚠️ No house data available yet');
-        return;
-      }
-      
-      const matchingHouse = formData.houseData.find(h => h.house_number === houseNumber);
-      
-      if (matchingHouse && matchingHouse.voter_count > 0) {
-        console.log('✅ Found existing voter(s) at this address:', matchingHouse);
+      try {
+        const filters = {
+          county: formData.county,
+          city: formData.city
+        };
         
-        // Fetch full voter details from the nearby API with house number filter
-        try {
-          const data = await window.apiPost('canvass/nearby', {
-            filters: {
-              county: formData.county,
-              city: formData.city
-            },
-            street: formData.streetName,
-            house_number: houseNumber,  // Filter by house number in DB query
-            limit: 10  // Only need voters at this specific house
-          });
+        // API call to get addresses on this specific street
+        const apiUrl = window.environmentConfig?.getApiUrl('canvass/nearby') || '/api/canvass/nearby';
+        const response = await fetch(apiUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filters, street: streetName, limit: 100 })
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        
+        const data = await response.json();
+        console.log('📡 House numbers API response:', data);
+        
+        if (data.rows && data.rows.length > 0) {
+          // Extract house numbers from addresses
+          const houseNumbers = [...new Set(data.rows.map(r => {
+            const match = r.address.match(/^(\d+)/);
+            return match ? match[1] : null;
+          }).filter(Boolean))].sort((a, b) => parseInt(a) - parseInt(b));
           
-          console.log('📡 Voter lookup response:', data);
+          console.log('🏠 Available house numbers:', houseNumbers);
           
-          if (data.ok && data.rows && data.rows.length > 0) {
-            console.log(`✅ Found ${data.rows.length} voter(s) at ${houseNumber} ${formData.streetName}`);
-            
-            showExistingVoterAlert(data.rows);
-            
-            // Auto-fill first voter's data if only one person at this address
-            if (data.rows.length === 1) {
-              autoFillVoterData(data.rows[0]);
-            }
-          } else {
-            console.log(`ℹ️ No voters found at ${houseNumber} ${formData.streetName}`);
-            document.getElementById('existing-voter-alert').style.display = 'none';
-            formData.existingVoter = null;
-          }
-        } catch (error) {
-          console.error('❌ Failed to fetch voter details:', error);
-          document.getElementById('existing-voter-alert').style.display = 'none';
-          formData.existingVoter = null;
+          // For contact form, we don't need a dropdown - just enable the field
+          // The house numbers are available for validation if needed
         }
-      } else {
-        console.log('ℹ️ No voters found at this address in house data');
-        // Hide alert if no existing voter
-        document.getElementById('existing-voter-alert').style.display = 'none';
-        formData.existingVoter = null;
+      } catch (error) {
+        console.error('❌ Failed to load house numbers:', error);
       }
-    }
-    
-    // Show alert for existing voter(s)
-    function showExistingVoterAlert(voters) {
-      const alert = document.getElementById('existing-voter-alert');
-      const details = document.getElementById('existing-voter-details');
-      
-      details.innerHTML = voters.map(voter => `
-        <div style="margin: 0.5rem 0; padding: 0.5rem; background: white; border-radius: 4px;">
-          <strong>${voter.name}</strong> - ${voter.party || 'Unknown'}
-          <br><small>${voter.address}, ${voter.city} ${voter.zip}</small>
-          ${voter.phone_e164 ? `<br><small>Phone: ${voter.phone_e164}</small>` : ''}
-        </div>
-      `).join('');
-      
-      alert.style.display = 'block';
-    }
-    
-    // Auto-fill form with existing voter data
-    function autoFillVoterData(voter) {
-      console.log('📝 Auto-filling form with voter data:', voter);
-      
-      // Store for later
-      formData.existingVoter = voter;
-      
-      // Parse first and last name from combined name
-      const nameParts = (voter.name || '').split(' ');
-      const firstName = nameParts[0] || '';
-      const lastName = nameParts.slice(1).join(' ') || '';
-      
-      // Auto-advance to step 3 and pre-fill
-      setTimeout(() => {
-        document.getElementById('first-name').value = firstName;
-        document.getElementById('last-name').value = lastName;
-        document.getElementById('full-address').value = voter.address || '';
-        document.getElementById('zip-code').value = voter.zip || '';
-        
-        if (voter.phone_e164) {
-          document.getElementById('phone-primary').value = voter.phone_e164;
-        }
-        
-        if (voter.party) {
-          document.getElementById('estimated-party').value = voter.party;
-        }
-        
-      }, 100);
-    }
-
-    // Redirect to update form for existing voters
-    function redirectToUpdateForm(voter) {
-      console.log('🔄 Redirecting to update form for existing voter:', voter);
-      
-      // Store voter data in sessionStorage for the update page
-      sessionStorage.setItem('voterUpdateData', JSON.stringify(voter));
-      const returnPath = (window.location.pathname + window.location.search) || '/contact-form/';
-      sessionStorage.setItem('contactUpdateReturnTo', returnPath);
-      
-      const params = new URLSearchParams({
-        voter_id: voter.voter_id || '',
-        return_to: returnPath
-      });
-      
-      // Redirect to update form (relative path)
-      window.location.href = `update.html?${params.toString()}`;
     }
 
     async function checkAddress() {
@@ -839,11 +721,40 @@
       
       if (!county || !city || !street || !number) {
         document.getElementById('existing-voter-alert').style.display = 'none';
+        updateButtonStates();
         return;
       }
       
-      // Trigger voter lookup when address is complete
-      await checkExistingVoter(number);
+      try {
+        // Address validation temporarily disabled
+        console.log('Address validation temporarily disabled for:', { county, city, street, number });
+        
+        // Hide any existing voter alerts since we can't check
+        document.getElementById('existing-voter-alert').style.display = 'none';
+        updateButtonStates();
+        
+        return;
+        
+        if (result.exists && result.matches.length > 0) {
+          // Show existing voter alert
+          const alert = document.getElementById('existing-voter-alert');
+          const details = document.getElementById('existing-voter-details');
+          
+          details.innerHTML = result.matches.map(voter => `
+            <div><strong>${voter.first_name} ${voter.last_name}</strong> - ${voter.political_party}</div>
+            <div>${voter.addr1}, ${voter.city}</div>
+            ${voter.phone_e164 ? `<div>Phone: ${voter.phone_e164}</div>` : ''}
+          `).join('<hr>');
+          
+          alert.style.display = 'block';
+        } else {
+          document.getElementById('existing-voter-alert').style.display = 'none';
+        }
+        
+        updateButtonStates();
+      } catch (error) {
+        console.error('Failed to check address:', error);
+      }
     }
     
     async function searchNames() {
@@ -900,10 +811,15 @@
     }
     
     async function submitContact() {
-      const pulseValidation = validatePulseOptIn();
-      if (!pulseValidation.valid) return;
+      // Get form mode and original voter ID
+      const formMode = document.getElementById('form-mode').value;
+      const originalVoterId = document.getElementById('original-voter-id').value;
+      
       // Collect all form data
       const contactData = {
+        // Include original_voter_id if in update mode
+        ...(formMode === 'update' && originalVoterId ? { original_voter_id: originalVoterId } : {}),
+        
         county: formData.county,
         city: formData.city,
         streetName: document.getElementById('street-name').value,
@@ -917,8 +833,6 @@
         zipCode: document.getElementById('zip-code').value,
         phonePrimary: document.getElementById('phone-primary').value,
         email: document.getElementById('email').value,
-        pulseOptIn: !!pulseOptInInput?.checked,
-        pulsePhoneDigits: pulseValidation.digits,
         estimatedParty: document.getElementById('estimated-party').value,
         votingLikelihood: document.getElementById('voting-likelihood').value,
         contactMethod: document.getElementById('contact-method').value,
@@ -929,33 +843,32 @@
         volEmail: document.getElementById('vol-email').value // Add volunteer's email
       };
       
+      console.log(formMode === 'update' ? '🔄 Submitting update for voter:' : '➕ Submitting new contact:', contactData);
+      
       try {
-        const result = await window.apiPost('contact-staging', contactData);
+        const response = await fetch(environmentConfig.getApiUrl('contact-staging'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(contactData)
+        });
+        
+        const result = await response.json();
+        
         if (result.ok) {
           // Hide form, show success
-          const activeStep = document.querySelector('.step.active');
-          if (activeStep) {
-            activeStep.style.display = 'none';
-          }
-          const stepIndicator = document.querySelector('.step-indicator');
-          if (stepIndicator) {
-            stepIndicator.style.display = 'none';
-          }
-          
-          const successMessage = document.getElementById('success-message');
-          if (successMessage) {
-            successMessage.style.display = 'block';
-          }
+          document.querySelector('.step.active').style.display = 'none';
+          document.querySelector('.step-indicator').style.display = 'none';
+          document.getElementById('success-message').style.display = 'block';
           
           // Update success message with staging info
-          const successDetails = document.getElementById('success-details');
-          if (successDetails) {
-            successDetails.innerHTML = `
-              <p><strong>Submission ID:</strong> ${result.staging_id}</p>
-              <p><strong>Temporary Voter ID:</strong> ${result.temp_voter_id}</p>
-              <p>This contact will be reviewed and verified before being added to the main database.</p>
-            `;
-          }
+          const actionText = formMode === 'update' ? 'Update' : 'New Contact';
+          document.getElementById('success-details').innerHTML = `
+            <p><strong>Action:</strong> ${actionText}</p>
+            <p><strong>Submission ID:</strong> ${result.staging_id}</p>
+            <p><strong>Temporary Voter ID:</strong> ${result.temp_voter_id}</p>
+            ${originalVoterId ? `<p><strong>Original Voter ID:</strong> ${originalVoterId}</p>` : ''}
+            <p>This contact will be reviewed and verified before being ${formMode === 'update' ? 'updated in' : 'added to'} the main database.</p>
+          `;
         } else {
           alert('Failed to submit contact: ' + (result.error || 'Unknown error'));
         }
@@ -963,6 +876,17 @@
         console.error('Failed to submit contact:', error);
         alert('Failed to submit contact. Please try again.');
       }
+    }
+    
+    function updateButtonStates() {
+      // Step 1 validation
+      document.getElementById('next-to-address').disabled = 
+        !formData.county || !formData.city;
+      
+      // Step 2 validation  
+      document.getElementById('next-to-personal').disabled = 
+        !document.getElementById('house-number').value || 
+        !document.getElementById('street-name').value;
     }
     
     // Utility functions
@@ -980,6 +904,10 @@
     
     // Initialize when page loads
     document.addEventListener('DOMContentLoaded', init);
+  </script>
+  <script>
+  // Fallback for non-module or failed ESM import: use browser global
+  window.environmentConfig = window.environmentConfig || (window.GrassrootsEnv || {});
   </script>
 </body>
 </html>

@@ -628,7 +628,8 @@ function restoreCanvassState() {
             return_to: returnPath
           });
           
-          window.location.href = `/contact-form/update.html?${params.toString()}`;
+          // Updated to use unified contact form
+          window.location.href = `/contact-form/?${params.toString()}`;
           return;
         }
         
