@@ -142,6 +142,14 @@ LEFT JOIN wy_city_county AS wcc
 **Performance**: ✅ PRIMARY KEY on voter_id  
 **Primary Use**: Contact verification, call assignments
 
+**Important - Database Structure Differences**:
+- **Local (wy_local)**: `best_phone` is a physical table containing the data
+- **Remote (wy)**: `best_phone` is a view that selects from `v_best_phone` table
+  - Actual remote table: `v_best_phone` (same schema as above)
+  - Compatibility view: `CREATE VIEW best_phone AS SELECT * FROM v_best_phone`
+- **Query Compatibility**: Always use `best_phone` in queries - works on both local and remote
+- **Recommendation**: When referencing in code/SQL, use `best_phone` for cross-environment compatibility
+
 ---
 
 ### **v_eligible_call** *(Contact-ready voters)*
