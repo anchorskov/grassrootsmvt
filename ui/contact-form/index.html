@@ -32,6 +32,12 @@
     .match-item { padding: 0.75rem; border: 1px solid #d1d5db; border-radius: 6px; margin: 0.5rem 0; cursor: pointer; }
     .match-item:hover { background: #f3f4f6; }
     .match-score { font-size: 0.875rem; color: #6b7280; }
+    .lookup-card { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 12px; padding: 1.5rem; margin: 1rem 0; }
+    .lookup-results { margin-top: 1rem; border: 1px solid #e5e7eb; border-radius: 10px; padding: 1rem; background: white; min-height: 60px; }
+    .match-actions { display: flex; gap: .5rem; margin-top: .5rem; flex-wrap: wrap; }
+    .btn-small { padding: .45rem .85rem; font-size: .85rem; border-radius: 6px; border: none; cursor: pointer; }
+    .btn-small.btn-primary { background: #2563eb; color: white; }
+    .btn-small.btn-secondary { background: #e2e8f0; color: #0f172a; }
     
     /* Autocomplete styling from canvass form */
     .autocomplete-container { position: relative; }
@@ -63,6 +69,29 @@
 </head>
 <body>
   <h1>Add New Voter Contact</h1>
+  
+  <div class="lookup-card" id="lookup-card">
+    <h2>Quick Lookup</h2>
+    <p style="margin-top:.25rem;">Start by searching existing records. Choose a match to update, or continue with a new entry.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="lookup-last-name">Last Name</label>
+        <input type="text" id="lookup-last-name" placeholder="e.g. WILSON">
+      </div>
+      <div class="form-group">
+        <label for="lookup-first-name">First Name (optional)</label>
+        <input type="text" id="lookup-first-name" placeholder="e.g. MIA">
+      </div>
+    </div>
+    <button type="button" class="btn-primary" id="name-search-btn">Search by Name</button>
+    <div id="lookup-results" class="lookup-results">
+      <em>Enter a last name, then run a search.</em>
+    </div>
+    <div class="form-row" style="margin-top:1rem;">
+      <button type="button" class="btn-primary" id="start-contact-btn">Start New Contact →</button>
+      <button type="button" class="btn-secondary" id="clear-lookup-btn">Clear Lookup</button>
+    </div>
+  </div>
   
   <!-- Step Indicator -->
   <div class="step-indicator">
@@ -288,6 +317,7 @@
     let wyomingData = {}; // Will hold citiesByCounty data
     let houseAutocomplete; // Declare at module level for access in callbacks
     let streetAutocomplete; // Declare at module level for access in callbacks
+    let lookupMatches = [];
 
     // Initialize form
     async function init() {
@@ -325,19 +355,43 @@
     // Load counties from Wyoming data
     async function loadCounties() {
       try {
-        const select = document.getElementById('county');
+        const primarySelect = document.getElementById('county');
+        primarySelect.innerHTML = '<option value="">Select County</option>';
         const counties = wyomingData.counties || [];
         
         counties.forEach(county => {
           const option = document.createElement('option');
           option.value = county;
           option.textContent = county;
-          select.appendChild(option);
+          primarySelect.appendChild(option);
         });
         
         console.log(`Loaded ${counties.length} counties`);
       } catch (error) {
         console.error('Failed to load counties:', error);
+      }
+    }
+
+    function populateCityOptions(selectEl, county) {
+      if (!selectEl) return;
+      selectEl.innerHTML = '<option value="">Select City</option>';
+      if (!county) {
+        selectEl.disabled = true;
+        return;
+      }
+      const cities = (wyomingData.citiesByCounty && wyomingData.citiesByCounty[county]) || [];
+      cities.forEach(city => {
+        const option = document.createElement('option');
+        option.value = city;
+        option.textContent = city;
+        selectEl.appendChild(option);
+      });
+      selectEl.disabled = false;
+      if (!cities.length) {
+        const fallback = document.createElement('option');
+        fallback.value = county;
+        fallback.textContent = `${county} County Area`;
+        selectEl.appendChild(fallback);
       }
     }
     
@@ -397,6 +451,11 @@
       // Initialize house field as disabled
       houseAutocomplete.disable();
       
+      document.getElementById('name-search-btn').addEventListener('click', performNameLookup);
+      document.getElementById('clear-lookup-btn').addEventListener('click', clearLookupResults);
+      document.getElementById('start-contact-btn').addEventListener('click', startNewContactFlow);
+      document.getElementById('lookup-results').addEventListener('click', handleLookupResultAction);
+      
       // County selection
       document.getElementById('county').addEventListener('change', async (e) => {
         const county = e.target.value;
@@ -448,6 +507,134 @@
       document.getElementById('submit-contact').addEventListener('click', submitContact);
     }
     
+    function renderLookupResults(rows, context = {}) {
+      const container = document.getElementById('lookup-results');
+      lookupMatches = (rows || []).map(row => ({
+        ...row,
+        county: row.county || null,
+        city: row.city || ''
+      }));
+      if (!lookupMatches.length) {
+        container.innerHTML = `<em>No matches found${context.summary ? ` for ${context.summary}` : ''}. Try refining your search.</em>`;
+        return;
+      }
+      container.innerHTML = lookupMatches
+        .map((row, idx) => `
+          <div class="match-item">
+            <div>
+              <strong>${row.name || 'Unknown name'}</strong>
+              <span class="match-score">${row.party || 'No party'}</span>
+              <div>${row.address || ''}, ${row.city || ''}${row.zip ? ' ' + row.zip : ''}</div>
+              ${row.county ? `<div class="match-score">County: ${row.county}</div>` : ''}
+              ${row.phone_e164 ? `<div class="match-score">Phone: ${row.phone_e164}</div>` : ''}
+            </div>
+            <div class="match-actions">
+              <button class="btn-small btn-primary" data-action="prefill" data-index="${idx}">Use Info</button>
+              ${row.voter_id ? `<button class="btn-small btn-secondary" data-action="update" data-index="${idx}">Update Record</button>` : ''}
+            </div>
+          </div>
+        `)
+        .join('');
+    }
+    
+    function clearLookupResults() {
+      lookupMatches = [];
+      document.getElementById('lookup-results').innerHTML = '<em>Enter a name to search existing voters.</em>';
+      document.getElementById('lookup-last-name').value = '';
+      document.getElementById('lookup-first-name').value = '';
+    }
+    
+    function handleLookupResultAction(event) {
+      const action = event.target.dataset.action;
+      if (!action) return;
+      const index = Number(event.target.dataset.index || -1);
+      if (index < 0 || !lookupMatches[index]) return;
+      const voter = lookupMatches[index];
+      if (action === 'update') {
+        redirectToUpdateForm(voter);
+      } else if (action === 'prefill') {
+        prefillFromLookup(voter);
+      }
+    }
+    
+    async function performNameLookup() {
+      const lastName = document.getElementById('lookup-last-name').value.trim();
+      const firstName = document.getElementById('lookup-first-name').value.trim();
+      if (lastName.length < 2) {
+        document.getElementById('lookup-results').innerHTML = '<em>Enter at least two letters of the last name.</em>';
+        return;
+      }
+      document.getElementById('lookup-results').innerHTML = '<em>Searching records…</em>';
+      try {
+        const data = await window.apiPost('contact-form/search-names', { firstName, lastName });
+        if (!data?.ok) {
+          document.getElementById('lookup-results').innerHTML = `<em>${data?.error || 'Search failed'}.</em>`;
+          return;
+        }
+        renderLookupResults(data.rows || [], { summary: `${firstName ? `${firstName} ` : ''}${lastName}`.trim() });
+      } catch (error) {
+        console.error('Name lookup failed', error);
+        document.getElementById('lookup-results').innerHTML = '<em>Unable to search right now. Try again shortly.</em>';
+      }
+    }
+    
+    async function prefillFromLookup(voter) {
+      if (!voter) return;
+      const county = voter.county || formData.county;
+      const city = voter.city || null;
+      await syncFormLocation(county, city);
+      const streetName = (voter.address || '').replace(/^\d+\s+/, '').toUpperCase();
+      const houseMatch = (voter.address || '').match(/^\d+/);
+      const houseNum = houseMatch ? houseMatch[0] : '';
+      document.getElementById('street-name').value = streetName || '';
+      document.getElementById('house-number').value = houseNum || '';
+      formData.streetName = streetName;
+      formData.houseNumber = houseNum;
+      if (streetName) {
+        houseAutocomplete.enable();
+        await houseAutocomplete.loadHouseNumbers(streetName);
+      }
+      if (houseNum) {
+        await checkExistingVoter(houseNum);
+      }
+      document.getElementById('full-address').value = voter.address || '';
+      document.getElementById('zip-code').value = voter.zip || '';
+      if (voter.phone_e164) {
+        document.getElementById('phone-primary').value = voter.phone_e164;
+      }
+      if (voter.party) {
+        document.getElementById('estimated-party').value = voter.party;
+      }
+      if (voter.name) {
+        const parts = voter.name.split(' ');
+        document.getElementById('first-name').value = parts.shift() || '';
+        document.getElementById('last-name').value = parts.join(' ') || '';
+      }
+      formData.existingVoter = voter;
+      updateButtonStates();
+      goToStep(3);
+    }
+    
+    async function startNewContactFlow() {
+      goToStep(1);
+      window.scrollTo({ top: document.getElementById('step-1').offsetTop - 20, behavior: 'smooth' });
+    }
+    
+    async function syncFormLocation(county, city) {
+      if (!county) return;
+      formData.county = county;
+      const countySelect = document.getElementById('county');
+      countySelect.value = county;
+      await loadCities(county);
+      if (city) {
+        const citySelect = document.getElementById('city');
+        citySelect.disabled = false;
+        citySelect.value = city;
+        formData.city = city;
+      }
+      updateButtonStates();
+    }
+    
     // Navigation functions
     function goToStep(step) {
       // Hide current step
@@ -469,38 +656,12 @@
     async function loadCities(county) {
       try {
         const select = document.getElementById('city');
-        
-        select.innerHTML = '<option value="">Select City</option>';
-        
-        // Get actual cities for this county from Wyoming data
-        const cities = (wyomingData.citiesByCounty && wyomingData.citiesByCounty[county]) || [];
-        
-        if (cities.length > 0) {
-          cities.forEach(city => {
-            const option = document.createElement('option');
-            option.value = city;
-            option.textContent = city;
-            select.appendChild(option);
-          });
-          console.log(`Loaded ${cities.length} cities for ${county}`);
-        } else {
-          // Fallback: use county as city option
-          const option = document.createElement('option');
-          option.value = county;
-          option.textContent = `${county} County Area`;
-          select.appendChild(option);
-          console.log(`No cities found for ${county}, using county fallback`);
+        populateCityOptions(select, county);
+        if (formData.city) {
+          select.value = formData.city;
         }
-        
       } catch (error) {
         console.error('Failed to load cities:', error);
-        // Fallback: just show the county as an option
-        const select = document.getElementById('city');
-        select.innerHTML = '<option value="">Select City</option>';
-        const option = document.createElement('option');
-        option.value = county;
-        option.textContent = `${county} County Area`;
-        select.appendChild(option);
       }
     }
 

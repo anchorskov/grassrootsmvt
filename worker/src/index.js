@@ -3,10 +3,13 @@ import { router } from './router.js';
 import { getEnvironmentConfig } from './utils/env.js';
 import { pickAllowedOrigin, preflightResponse, parseAllowedOrigins } from './utils/cors.js';
 import { requireAuth, requireAdmin, isAdmin } from './auth.js';
+import { searchSimilarNames } from './api/contact-form.js';
 
 const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
 const tableCache = new Map();
 const tableColumnsCache = new Map();
+const DEFAULT_ICEBREAKER =
+  "Hi, I'm a volunteer with Grassroots MVT. Do you have a minute to chat about the campaign?";
 
 class DependencyMissingError extends Error {
   constructor(table) {
@@ -146,6 +149,119 @@ function parseVoterIds(paramValue) {
     .split(',')
     .map(value => value.trim())
     .filter(Boolean);
+}
+
+function normalizeTextValue(value) {
+  const normalized = (value ?? '')
+    .toString()
+    .trim()
+    .toUpperCase();
+  if (!normalized) return '';
+  if (normalized === 'NULL' || normalized === 'UNDEFINED' || normalized === 'NONE' || normalized === 'ANY' || normalized === 'ALL') {
+    return '';
+  }
+  return normalized;
+}
+
+function normalizeDistrictCode(value) {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  const num = Number(trimmed);
+  if (!Number.isNaN(num)) {
+    return String(Math.abs(num)).padStart(2, '0');
+  }
+  return trimmed.toUpperCase();
+}
+
+function buildDistrictNormalizationExpr(column) {
+  return `CASE
+    WHEN TRIM(${column}) GLOB '[0-9]*' AND TRIM(${column}) <> ''
+      THEN printf('%02d', CAST(TRIM(${column}) AS INTEGER))
+    ELSE UPPER(TRIM(${column}))
+  END`;
+}
+
+async function getCityCountyIdsForDistrict(env, db, districtType, districtCode, districtCity = null) {
+  if (!districtType || !districtCode) return [];
+  const coverageTable = await resolveTableOptional(env, ['district_coverage']);
+  if (coverageTable) {
+    const params = [districtType, districtCode];
+    let cityClause = '';
+    if (districtCity) {
+      cityClause = ` AND dc.city = ?${params.length + 1}`;
+      params.push(districtCity);
+    }
+    const coverageResult = await buildStatement(
+      db,
+      `SELECT DISTINCT cc.id
+       FROM ${coverageTable} dc
+       JOIN wy_city_county cc
+         ON cc.county_norm = dc.county
+        AND (dc.city = '' OR cc.city_norm = dc.city)
+       WHERE dc.district_type = ?1 AND dc.district_code = ?2${cityClause}`,
+      params
+    ).all();
+    const rows = coverageResult.results || [];
+    if (rows.length) {
+      return rows.map(row => row.id);
+    }
+  }
+
+  const votersTable = await resolveTable(env, ['voters']);
+  const addrTable = await resolveTable(env, ['voters_addr_norm', 'voters_addr', 'voter_addresses']);
+  const districtColumn = districtType === 'senate' ? 'va.senate' : 'va.house';
+  const normalizedExpr = buildDistrictNormalizationExpr(districtColumn);
+  const params = [districtCode];
+  let cityClause = '';
+  if (districtCity) {
+    cityClause = ` AND UPPER(TRIM(COALESCE(va.city, ''))) = ?${params.length + 1}`;
+    params.push(districtCity);
+  }
+  const fallbackResult = await buildStatement(
+    db,
+    `SELECT DISTINCT cc.id
+     FROM ${addrTable} va
+     JOIN ${votersTable} v ON v.voter_id = va.voter_id
+     JOIN wy_city_county cc
+       ON cc.county_norm = UPPER(TRIM(v.county))
+      AND cc.city_norm = UPPER(TRIM(COALESCE(va.city, '')))
+     WHERE ${normalizedExpr} = ?1${cityClause}`,
+    params
+  ).all();
+  return (fallbackResult.results || []).map(row => row.id);
+}
+
+async function buildRegionFilterClause(env, db, filters = {}) {
+  const districtTypeRaw = filters.district_type || filters.districtType || null;
+  const normalizedDistrictType = typeof districtTypeRaw === 'string'
+    ? districtTypeRaw.trim().toLowerCase()
+    : null;
+  const districtCode = normalizeDistrictCode(filters.district || filters.district_code);
+  const districtCityValue = normalizeTextValue(filters.district_city);
+  const districtCity = districtCityValue ? districtCityValue : null;
+  const validDistrictType = normalizedDistrictType === 'senate' || normalizedDistrictType === 'house'
+    ? normalizedDistrictType
+    : null;
+
+  if (validDistrictType && districtCode) {
+    const ids = await getCityCountyIdsForDistrict(env, db, validDistrictType, districtCode, districtCity);
+    if (!ids.length) {
+      return { clause: '1 = 0', params: [] };
+    }
+    const placeholders = ids.map(() => '?').join(',');
+    return { clause: `cc.id IN (${placeholders})`, params: ids };
+  }
+
+  const county = normalizeTextValue(filters.county);
+  const city = normalizeTextValue(filters.city);
+  if (!county || !city) {
+    throw new BadRequestError('county/city or district filters required');
+  }
+  return {
+    clause: 'cc.county_norm = ? AND cc.city_norm = ?',
+    params: [county, city],
+  };
 }
 
 function sanitizeReturnTarget(rawTarget, baseUrl) {
@@ -350,6 +466,41 @@ router.get('/whoami', async (request, env, ctx) => {
   }
 });
 
+router.get('/volunteer/me', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const email = (auth.email || '').toLowerCase();
+    const db = getDb(env);
+    let volunteer = null;
+
+    if (db) {
+      try {
+        const volunteerTable = await resolveTableOptional(env, ['volunteers']);
+        if (volunteerTable) {
+          volunteer = await fetchVolunteerById(env, db, volunteerTable, email);
+        }
+      } catch (err) {
+        const message = String(err?.message || '').toLowerCase();
+        if (!message.includes('no such table')) throw err;
+      }
+    }
+
+    const displayName = deriveVolunteerDisplayName(volunteer, email);
+    return ctx.jsonResponse(
+      { ok: true, email: auth.email, volunteer, display_name: displayName },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    const status = err?.status === 401 ? 401 : 500;
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      status,
+      ctx.allowedOrigin
+    );
+  }
+});
+
 router.get('/auth/logout', async (request, env, ctx) => {
   const url = new URL(request.url);
   const rawTarget = url.searchParams.get('return_to') || url.searchParams.get('to') || '/';
@@ -376,17 +527,6 @@ router.get('/metadata', async (request, env, ctx) => {
   const countyParam = url.searchParams.get('city');
   const houseDistrict = url.searchParams.get('house_district');
   const senateDistrict = url.searchParams.get('senate_district');
-  const normalizeDistrictInput = value => {
-    if (!value) return null;
-    const trimmed = value.trim();
-    if (!trimmed) return null;
-    const num = Number(trimmed);
-    if (!Number.isNaN(num)) {
-      return String(Math.abs(num)).padStart(2, '0');
-    }
-    return trimmed.toUpperCase();
-  };
-
   const getCoverageTable = async () => {
     try {
       return await resolveTable(env, ['district_coverage']);
@@ -403,7 +543,7 @@ router.get('/metadata', async (request, env, ctx) => {
     if (coverageTable) {
       if (houseDistrict || senateDistrict) {
         const districtType = houseDistrict ? 'house' : 'senate';
-        const districtCode = normalizeDistrictInput(houseDistrict || senateDistrict);
+        const districtCode = normalizeDistrictCode(houseDistrict || senateDistrict);
         const coverageResult = await buildStatement(
           db,
           `SELECT county, city FROM ${coverageTable}
@@ -1065,8 +1205,9 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
   const limit = Math.min(Math.max(Number(requestedLimit) || 20, 1), 100);
   const streetFilter = String(street || '').toUpperCase().trim();
   const houseNumberFilter = house_number ? String(house_number).trim() : null;
-  const countyFilter = String(filters.county || '').trim();
-  const cityFilter = String(filters.city || '').trim();
+  const countyFilter = normalizeTextValue(filters.county);
+  const cityFilter = normalizeTextValue(filters.city);
+  const districtCityFilter = normalizeTextValue(filters.district_city);
   const partiesFilter = Array.isArray(filters.parties) ? filters.parties : [];
 
   try {
@@ -1136,6 +1277,10 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
       const column = filters.district_type === 'senate' ? 'v.senate' : 'v.house';
       query += ` AND ${column} = ?${paramIndex++}`;
       params.push(filters.district);
+      if (districtCityFilter) {
+        query += ` AND UPPER(TRIM(COALESCE(va.city, ''))) = ?${paramIndex++}`;
+        params.push(districtCityFilter);
+      }
     }
 
     if (house && range) {
@@ -1195,14 +1340,7 @@ router.post('/streets', async (request, env, ctx) => {
     throw err;
   }
 
-  const { county, city } = body || {};
-  if (!county || !city) {
-    return ctx.jsonResponse(
-      { ok: false, error: 'county and city are required' },
-      400,
-      ctx.allowedOrigin
-    );
-  }
+  const { county, city, district_type, district, district_city } = body || {};
 
   const db = getDb(env);
   if (!db) {
@@ -1211,6 +1349,13 @@ router.post('/streets', async (request, env, ctx) => {
 
   try {
     await ensureAuth(request, env, ctx.config);
+    const regionFilter = await buildRegionFilterClause(env, db, {
+      county,
+      city,
+      district_type,
+      district,
+      district_city,
+    });
     
     // Use streets_index for fast, clean street names
     const result = await db.prepare(`
@@ -1219,11 +1364,10 @@ router.post('/streets', async (request, env, ctx) => {
         COUNT(*) AS street_count
       FROM streets_index si
       JOIN wy_city_county cc ON si.city_county_id = cc.id
-      WHERE cc.county_norm = UPPER(?1)
-        AND cc.city_norm = UPPER(?2)
+      WHERE ${regionFilter.clause}
       GROUP BY si.street_canonical
       ORDER BY si.street_canonical
-    `).bind(county, city).all();
+    `).bind(...regionFilter.params).all();
 
     const streets = (result.results || []).map(row => ({
       name: row.street_name,
@@ -1237,6 +1381,9 @@ router.post('/streets', async (request, env, ctx) => {
       { 'Cache-Control': 'max-age=3600' }
     );
   } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, 400, ctx.allowedOrigin);
+    }
     console.error('/streets error', err);
     return ctx.jsonResponse(
       { ok: false, error: String(err?.message || err) },
@@ -1257,10 +1404,11 @@ router.post('/houses', async (request, env, ctx) => {
     throw err;
   }
 
-  const { county, city, street } = body || {};
-  if (!county || !city || !street) {
+  const { county, city, street, district_type, district, district_city } = body || {};
+  const normalizedStreet = (street || '').toString().trim().toUpperCase();
+  if (!normalizedStreet) {
     return ctx.jsonResponse(
-      { ok: false, error: 'county, city, and street are required' },
+      { ok: false, error: 'street is required' },
       400,
       ctx.allowedOrigin
     );
@@ -1274,21 +1422,28 @@ router.post('/houses', async (request, env, ctx) => {
   try {
     await ensureAuth(request, env, ctx.config);
     
-    // Get house numbers from voters_addr_norm using city_county_id for speed
+    const regionFilter = await buildRegionFilterClause(env, db, {
+      county,
+      city,
+      district_type,
+      district,
+      district_city,
+    });
+
+    // Get house numbers from voters_addr_norm using city_county_id/district filters for speed
     const result = await db.prepare(`
       SELECT DISTINCT
         TRIM(SUBSTR(addr1, 1, INSTR(addr1, ' ')-1)) AS house_number,
         COUNT(*) AS voter_count
       FROM voters_addr_norm va
       JOIN wy_city_county cc ON va.city_county_id = cc.id
-      WHERE cc.county_norm = UPPER(?1)
-        AND cc.city_norm = UPPER(?2)
-        AND UPPER(TRIM(SUBSTR(va.addr1, INSTR(va.addr1, ' ')+1))) = UPPER(?3)
+      WHERE ${regionFilter.clause}
+        AND UPPER(TRIM(SUBSTR(va.addr1, INSTR(va.addr1, ' ')+1))) = ?
         AND va.addr1 IS NOT NULL
         AND INSTR(va.addr1, ' ') > 0
       GROUP BY house_number
       ORDER BY CAST(house_number AS INTEGER), house_number
-    `).bind(county, city, street).all();
+    `).bind(...regionFilter.params, normalizedStreet).all();
 
     const houses = (result.results || []).map(row => ({
       house_number: row.house_number,
@@ -1302,6 +1457,9 @@ router.post('/houses', async (request, env, ctx) => {
       { 'Cache-Control': 'max-age=3600' }
     );
   } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, 400, ctx.allowedOrigin);
+    }
     console.error('/houses error', err);
     return ctx.jsonResponse(
       { ok: false, error: String(err?.message || err) },
@@ -1431,6 +1589,218 @@ router.post('/contact', async (request, env, ctx) => {
       return missingTableResponse('voter_contact', ctx.allowedOrigin);
     }
     console.error('/contact error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.post('/script', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    throw err;
+  }
+
+  const { voter_id, channel = 'phone', use_script = true, touchpoint_id } = body || {};
+  if (!voter_id) {
+    return ctx.jsonResponse(
+      { ok: false, error: 'Missing required parameter: voter_id' },
+      400,
+      ctx.allowedOrigin
+    );
+  }
+
+  try {
+    await ensureAuth(request, env, ctx.config);
+  } catch (err) {
+    const status = err?.status === 401 ? 401 : 500;
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      status,
+      ctx.allowedOrigin
+    );
+  }
+
+  const db = getDb(env);
+  if (!db) {
+    return missingTableResponse('campaign_touchpoints', ctx.allowedOrigin);
+  }
+
+  const contactTable = await resolveTableOptional(env, ['voter_contacts', 'voter_contact']);
+  let contactedBefore = false;
+  if (contactTable) {
+    const existingContact = await buildStatement(
+      db,
+      `SELECT id FROM ${contactTable} WHERE voter_id = ?1 LIMIT 1`,
+      [voter_id]
+    ).first();
+    contactedBefore = !!existingContact;
+  }
+
+  let touchpointPayload = null;
+  if (use_script !== false) {
+    const touchpointTable = await resolveTableOptional(env, ['campaign_touchpoints']);
+    const segmentTable = await resolveTableOptional(env, ['campaign_touchpoint_segments']);
+    if (touchpoint_id && touchpointTable) {
+      const explicit = await fetchTouchpointById(env, db, touchpointTable, segmentTable, touchpoint_id);
+      if (explicit && explicit.is_active === 1 && touchpointSupportsChannel(explicit, channel)) {
+        touchpointPayload = explicit;
+      }
+    }
+    if (!touchpointPayload) {
+      const voterProfile = await getVoterProfile(env, db, voter_id);
+      touchpointPayload = await pickTouchpoint(env, db, channel, voterProfile);
+    }
+  }
+
+  return ctx.jsonResponse(
+    {
+      ok: true,
+      voter_id: String(voter_id),
+      contacted_before: contactedBefore,
+      script_enabled: use_script !== false && !!touchpointPayload,
+      icebreaker: touchpointPayload?.icebreaker || DEFAULT_ICEBREAKER,
+      touchpoint: touchpointPayload
+        ? {
+            touchpoint_id: touchpointPayload.touchpoint_id,
+            label: touchpointPayload.label,
+            body: touchpointPayload.body,
+            cta_question: touchpointPayload.cta_question,
+            issue_tag: touchpointPayload.issue_tag,
+            metadata: parseJsonSafe(touchpointPayload.metadata),
+          }
+        : null,
+    },
+    200,
+    ctx.allowedOrigin
+  );
+});
+
+router.get('/script/touchpoints', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    if (!auth?.email) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Unauthorized' },
+        401,
+        ctx.allowedOrigin
+      );
+    }
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('campaign_touchpoints', ctx.allowedOrigin);
+    }
+
+    const touchpointTable = await resolveTableOptional(env, ['campaign_touchpoints']);
+    if (!touchpointTable) {
+      return ctx.jsonResponse(
+        { ok: true, touchpoints: [] },
+        200,
+        ctx.allowedOrigin
+      );
+    }
+
+    const result = await buildStatement(
+      db,
+      `
+        SELECT touchpoint_id, label, issue_tag, channels, priority, is_active
+        FROM ${touchpointTable}
+        WHERE is_active = 1
+        ORDER BY priority ASC, updated_at DESC
+      `
+    ).all();
+
+    return ctx.jsonResponse(
+      { ok: true, touchpoints: result?.results || [] },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err?.status === 401) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Unauthorized' },
+        401,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/script/touchpoints error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.post('/contact-form/search-names', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    throw err;
+  }
+
+  const county = normalizeTextValue(body?.county) || null;
+  const city = normalizeTextValue(body?.city) || null;
+  const lastName = normalizeTextValue(body?.lastName || body?.last_name);
+  const firstName = normalizeTextValue(body?.firstName || body?.first_name || '');
+  if (!lastName) {
+    return ctx.jsonResponse(
+      { ok: false, error: 'lastName is required' },
+      400,
+      ctx.allowedOrigin
+    );
+  }
+
+  try {
+    await ensureAuth(request, env, ctx.config);
+  } catch (err) {
+    const status = err?.status === 401 ? 401 : 500;
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      status,
+      ctx.allowedOrigin
+    );
+  }
+
+  try {
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('voters', ctx.allowedOrigin);
+    }
+    const matches = await searchSimilarNames(db, {
+      county,
+      city,
+      firstName,
+      lastName,
+    });
+    const rows = matches.map(row => ({
+      voter_id: row.voter_id,
+      first_name: row.first_name || '',
+      last_name: row.last_name || '',
+      name: [row.first_name, row.last_name].filter(Boolean).join(' ').trim() || 'Unknown',
+      address: row.addr1 || '',
+      city: row.city || '',
+      county: row.county || '',
+      zip: row.zip || '',
+      party: row.political_party || '',
+      phone_e164: row.phone_e164 || null,
+      match_score: typeof row.match_score === 'number' ? row.match_score : null,
+    }));
+    return ctx.jsonResponse({ ok: true, rows }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    console.error('/contact-form/search-names error', err);
     return ctx.jsonResponse(
       { ok: false, error: String(err?.message || err) },
       500,
@@ -2038,3 +2408,998 @@ router.delete('/admin/contacts/:id', async (request, env, ctx) => {
     );
   }
 });
+
+router.get('/admin/pulse', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('pulse_optins', ctx.allowedOrigin);
+    }
+    
+    const url = new URL(request.url);
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '500'), 1000);
+    const offset = parseInt(url.searchParams.get('offset') || '0');
+    
+    const pulseTable = await resolveTable(env, ['pulse_optins', 'pulse']);
+    
+    const optins = await buildStatement(db, `
+      SELECT 
+        id,
+        voter_id,
+        contact_method,
+        consent_given,
+        consent_source,
+        volunteer_email,
+        created_at
+      FROM ${pulseTable}
+      ORDER BY created_at DESC
+      LIMIT ?1 OFFSET ?2
+    `, [limit, offset]).all();
+    
+    const total = await buildStatement(db, `
+      SELECT COUNT(*) as count FROM ${pulseTable}
+    `).first();
+    
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        optins: optins?.results || [],
+        total: total?.count || 0,
+        limit,
+        offset,
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/pulse error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.delete('/admin/pulse/:id', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('pulse_optins', ctx.allowedOrigin);
+    }
+    
+    const url = new URL(request.url);
+    const id = url.pathname.split('/').pop();
+    
+    const pulseTable = await resolveTable(env, ['pulse_optins', 'pulse']);
+    
+    await buildStatement(db, `
+      DELETE FROM ${pulseTable} WHERE id = ?1
+    `, [id]).run();
+    
+    return ctx.jsonResponse(
+      { ok: true, message: 'Pulse opt-in deleted', id },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/pulse/:id DELETE error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.get('/admin/touchpoints', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('campaign_touchpoints', ctx.allowedOrigin);
+    }
+
+    const touchpointTable = await resolveTable(env, ['campaign_touchpoints']);
+    const segmentTable = await resolveTableOptional(env, ['campaign_touchpoint_segments']);
+
+    const result = await buildStatement(
+      db,
+      `
+        SELECT touchpoint_id, label, icebreaker, body, cta_question,
+               issue_tag, channels, priority, is_active, metadata,
+               created_at, updated_at
+        FROM ${touchpointTable}
+        ORDER BY priority ASC, updated_at DESC
+      `
+    ).all();
+    const rows = result?.results || [];
+
+    const segmentsById = {};
+    if (segmentTable && rows.length) {
+      const params = rows.map(row => row.touchpoint_id);
+      const placeholders = params.map((_, index) => `?${index + 1}`).join(', ');
+      const segmentsResult = await buildStatement(
+        db,
+        `
+          SELECT touchpoint_id, segment_key, segment_value
+          FROM ${segmentTable}
+          WHERE touchpoint_id IN (${placeholders})
+          ORDER BY id ASC
+        `,
+        params
+      ).all();
+      for (const entry of segmentsResult?.results || []) {
+        const list = segmentsById[entry.touchpoint_id] || [];
+        list.push({ segment_key: entry.segment_key, segment_value: entry.segment_value });
+        segmentsById[entry.touchpoint_id] = list;
+      }
+    }
+
+    const payload = rows.map(row => ({
+      ...row,
+      metadata_raw: row.metadata,
+      metadata: parseJsonSafe(row.metadata),
+      segments: segmentsById[row.touchpoint_id] || [],
+    }));
+
+    return ctx.jsonResponse(
+      { ok: true, touchpoints: payload },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/touchpoints GET error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.post('/admin/touchpoints', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+
+    const body = await readJson(request);
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('campaign_touchpoints', ctx.allowedOrigin);
+    }
+
+    const touchpointTable = await resolveTable(env, ['campaign_touchpoints']);
+    const segmentTable = await resolveTableOptional(env, ['campaign_touchpoint_segments']);
+
+    const touchpointId = body.touchpoint_id
+      ? String(body.touchpoint_id).trim()
+      : generateTouchpointId(body.label || '');
+    const label = String(body.label || '').trim();
+    const icebreaker = String(body.icebreaker || '').trim();
+    const scriptBody = String(body.body || '').trim();
+
+    if (!touchpointId || !label || !icebreaker || !scriptBody) {
+      throw new BadRequestError('touchpoint_id, label, icebreaker, and body are required');
+    }
+
+    const metadataValue = serializeMetadataInput(body.metadata ?? body.metadata_raw ?? null);
+    const segments = normalizeSegmentsInput(body.segments);
+
+    await buildStatement(
+      db,
+      `
+        INSERT INTO ${touchpointTable} (
+          touchpoint_id, label, icebreaker, body, cta_question,
+          issue_tag, channels, priority, is_active, metadata
+        )
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+      `,
+      [
+        touchpointId,
+        label,
+        icebreaker,
+        scriptBody,
+        body.cta_question || null,
+        body.issue_tag || null,
+        body.channels || 'phone',
+        Number.isFinite(Number(body.priority)) ? Number(body.priority) : 100,
+        coerceBooleanFlag(body.is_active, 1),
+        metadataValue,
+      ]
+    ).run();
+
+    await replaceTouchpointSegments(db, segmentTable, touchpointId, segments);
+
+    const saved = await fetchTouchpointById(env, db, touchpointTable, segmentTable, touchpointId);
+    return ctx.jsonResponse(
+      { ok: true, touchpoint: saved },
+      201,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    if (String(err?.message || '').includes('UNIQUE constraint failed')) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Touchpoint ID already exists' },
+        409,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/touchpoints POST error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.put('/admin/touchpoints/:id', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+
+    const body = await readJson(request);
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('campaign_touchpoints', ctx.allowedOrigin);
+    }
+
+    const url = new URL(request.url);
+    const id = url.pathname.split('/').pop();
+    if (!id) {
+      throw new BadRequestError('touchpoint id required');
+    }
+
+    const touchpointTable = await resolveTable(env, ['campaign_touchpoints']);
+    const segmentTable = await resolveTableOptional(env, ['campaign_touchpoint_segments']);
+
+    const metadataProvided = body.metadata !== undefined || body.metadata_raw !== undefined;
+    const metadataValue = metadataProvided
+      ? serializeMetadataInput(body.metadata ?? body.metadata_raw ?? null)
+      : undefined;
+
+    const allowedFields = {
+      label: body.label,
+      icebreaker: body.icebreaker,
+      body: body.body,
+      cta_question: body.cta_question,
+      issue_tag: body.issue_tag,
+      channels: body.channels,
+      priority: body.priority,
+      is_active: body.is_active,
+    };
+
+    const updates = [];
+    const params = [];
+    let paramIndex = 1;
+
+    for (const [column, value] of Object.entries(allowedFields)) {
+      if (value === undefined) continue;
+      if (column === 'priority') {
+        updates.push(`priority = ?${paramIndex++}`);
+        params.push(Number.isFinite(Number(value)) ? Number(value) : 100);
+      } else if (column === 'is_active') {
+        updates.push(`is_active = ?${paramIndex++}`);
+        params.push(coerceBooleanFlag(value, 1));
+      } else {
+        updates.push(`${column} = ?${paramIndex++}`);
+        params.push(value);
+      }
+    }
+
+    if (metadataProvided) {
+      updates.push(`metadata = ?${paramIndex++}`);
+      params.push(metadataValue);
+    }
+
+    if (!updates.length && body.segments === undefined) {
+      throw new BadRequestError('No updates provided');
+    }
+
+    if (updates.length) {
+      params.push(id);
+      await buildStatement(
+        db,
+        `
+          UPDATE ${touchpointTable}
+          SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP
+          WHERE touchpoint_id = ?${paramIndex}
+        `,
+        params
+      ).run();
+    }
+
+    if (body.segments !== undefined) {
+      const segments = normalizeSegmentsInput(body.segments);
+      await replaceTouchpointSegments(db, segmentTable, id, segments);
+    }
+
+    const saved = await fetchTouchpointById(env, db, touchpointTable, segmentTable, id);
+    if (!saved) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Touchpoint not found' },
+        404,
+        ctx.allowedOrigin
+      );
+    }
+    return ctx.jsonResponse(
+      { ok: true, touchpoint: saved },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/touchpoints PUT error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.delete('/admin/touchpoints/:id', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('campaign_touchpoints', ctx.allowedOrigin);
+    }
+
+    const url = new URL(request.url);
+    const id = url.pathname.split('/').pop();
+    if (!id) {
+      throw new BadRequestError('touchpoint id required');
+    }
+
+    const touchpointTable = await resolveTable(env, ['campaign_touchpoints']);
+    const segmentTable = await resolveTableOptional(env, ['campaign_touchpoint_segments']);
+
+    await replaceTouchpointSegments(db, segmentTable, id, []);
+    await buildStatement(
+      db,
+      `DELETE FROM ${touchpointTable} WHERE touchpoint_id = ?1`,
+      [id]
+    ).run();
+
+    return ctx.jsonResponse(
+      { ok: true, deleted: id },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/touchpoints DELETE error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.get('/admin/volunteers', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('volunteers', ctx.allowedOrigin);
+    }
+
+    const url = new URL(request.url);
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '200'), 500);
+    const offset = parseInt(url.searchParams.get('offset') || '0');
+    const search = (url.searchParams.get('search') || '').trim().toLowerCase();
+    const onlyActive = url.searchParams.get('active');
+
+    const volunteerTable = await resolveTable(env, ['volunteers']);
+    let whereClause = '1 = 1';
+    const params = [];
+    let paramIndex = 1;
+
+    if (onlyActive === 'true') {
+      whereClause += ` AND is_active = 1`;
+    } else if (onlyActive === 'false') {
+      whereClause += ` AND is_active = 0`;
+    }
+
+    if (search) {
+      whereClause += ` AND (
+        lower(id) LIKE ?${paramIndex} OR
+        lower(name) LIKE ?${paramIndex} OR
+        lower(first_name) LIKE ?${paramIndex} OR
+        lower(last_name) LIKE ?${paramIndex} OR
+        replace(cell_phone, '+', '') LIKE ?${paramIndex}
+      )`;
+      params.push(`%${search}%`);
+      paramIndex += 1;
+    }
+
+    const volunteers = await buildStatement(
+      db,
+      `
+        SELECT id, name, first_name, last_name, cell_phone, is_active
+        FROM ${volunteerTable}
+        WHERE ${whereClause}
+        ORDER BY is_active DESC, COALESCE(last_name, name), COALESCE(first_name, id)
+        LIMIT ?${paramIndex} OFFSET ?${paramIndex + 1}
+      `,
+      [...params, limit, offset]
+    ).all();
+
+    const total = await buildStatement(
+      db,
+      `
+        SELECT COUNT(*) as count
+        FROM ${volunteerTable}
+        WHERE ${whereClause}
+      `,
+      params
+    ).first();
+
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        volunteers: volunteers?.results || [],
+        total: total?.count || 0,
+        limit,
+        offset,
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/volunteers GET error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.post('/admin/volunteers', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+
+    const body = await readJson(request);
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('volunteers', ctx.allowedOrigin);
+    }
+
+    const volunteerTable = await resolveTable(env, ['volunteers']);
+
+    const id = String(body.id || '').trim().toLowerCase();
+    const firstName = body.first_name ? String(body.first_name).trim() : null;
+    const lastName = body.last_name ? String(body.last_name).trim() : null;
+    const displayName = String(body.name || '').trim() || buildVolunteerName(firstName, lastName, id);
+    const cellPhone = normalizeCellPhone(body.cell_phone || '');
+    const isActive = coerceBooleanFlag(body.is_active, 1);
+
+    if (!id || !displayName) {
+      throw new BadRequestError('id and name are required');
+    }
+
+    await buildStatement(
+      db,
+      `
+        INSERT INTO ${volunteerTable} (id, name, first_name, last_name, cell_phone, is_active)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+      `,
+      [id, displayName, firstName, lastName, cellPhone, isActive]
+    ).run();
+
+    const saved = await fetchVolunteerById(env, db, volunteerTable, id);
+    return ctx.jsonResponse(
+      { ok: true, volunteer: saved },
+      201,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    const message = String(err?.message || '');
+    if (message.includes('UNIQUE constraint failed')) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Volunteer already exists' },
+        409,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/volunteers POST error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.put('/admin/volunteers/:id', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+
+    const body = await readJson(request);
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('volunteers', ctx.allowedOrigin);
+    }
+
+    const url = new URL(request.url);
+    const id = url.pathname.split('/').pop();
+    if (!id) {
+      throw new BadRequestError('volunteer id required');
+    }
+
+    const volunteerTable = await resolveTable(env, ['volunteers']);
+
+    const updates = [];
+    const params = [];
+    let paramIndex = 1;
+
+    if (body.name !== undefined) {
+      updates.push(`name = ?${paramIndex++}`);
+      params.push(String(body.name || '').trim() || null);
+    }
+    if (body.first_name !== undefined) {
+      updates.push(`first_name = ?${paramIndex++}`);
+      params.push(body.first_name ? String(body.first_name).trim() : null);
+    }
+    if (body.last_name !== undefined) {
+      updates.push(`last_name = ?${paramIndex++}`);
+      params.push(body.last_name ? String(body.last_name).trim() : null);
+    }
+    if (body.cell_phone !== undefined) {
+      updates.push(`cell_phone = ?${paramIndex++}`);
+      params.push(normalizeCellPhone(body.cell_phone || ''));
+    }
+    if (body.is_active !== undefined) {
+      updates.push(`is_active = ?${paramIndex++}`);
+      params.push(coerceBooleanFlag(body.is_active, 1));
+    }
+
+    if (!updates.length) {
+      throw new BadRequestError('No updates provided');
+    }
+
+    params.push(id);
+    await buildStatement(
+      db,
+      `
+        UPDATE ${volunteerTable}
+        SET ${updates.join(', ')}
+        WHERE id = ?${paramIndex}
+      `,
+      params
+    ).run();
+
+    const saved = await fetchVolunteerById(env, db, volunteerTable, id);
+    if (!saved) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Volunteer not found' },
+        404,
+        ctx.allowedOrigin
+      );
+    }
+    return ctx.jsonResponse(
+      { ok: true, volunteer: saved },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/volunteers PUT error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.delete('/admin/volunteers/:id', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('volunteers', ctx.allowedOrigin);
+    }
+
+    const url = new URL(request.url);
+    const id = url.pathname.split('/').pop();
+    if (!id) {
+      throw new BadRequestError('volunteer id required');
+    }
+
+    const volunteerTable = await resolveTable(env, ['volunteers']);
+    await buildStatement(
+      db,
+      `DELETE FROM ${volunteerTable} WHERE id = ?1`,
+      [id]
+    ).run();
+
+    return ctx.jsonResponse(
+      { ok: true, deleted: id },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin access required' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    console.error('/admin/volunteers DELETE error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+function parseJsonSafe(value) {
+  if (!value || typeof value !== 'string') return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function serializeMetadataInput(input) {
+  if (input === undefined || input === null || input === '') {
+    return null;
+  }
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    JSON.parse(trimmed); // throws if invalid
+    return trimmed;
+  }
+  return JSON.stringify(input);
+}
+
+function normalizeSegmentsInput(rawSegments) {
+  if (!Array.isArray(rawSegments)) return [];
+  return rawSegments
+    .map(segment => ({
+      segment_key: typeof segment?.segment_key === 'string' ? segment.segment_key.trim() : '',
+      segment_value: typeof segment?.segment_value === 'string' ? segment.segment_value.trim() : '',
+    }))
+    .filter(segment => segment.segment_key && segment.segment_value);
+}
+
+async function replaceTouchpointSegments(db, segmentTable, touchpointId, segments) {
+  if (!segmentTable) return;
+  await buildStatement(
+    db,
+    `DELETE FROM ${segmentTable} WHERE touchpoint_id = ?1`,
+    [touchpointId]
+  ).run();
+  if (!segments || !segments.length) return;
+  for (const segment of segments) {
+    await buildStatement(
+      db,
+      `
+        INSERT INTO ${segmentTable} (touchpoint_id, segment_key, segment_value)
+        VALUES (?1, ?2, ?3)
+      `,
+      [touchpointId, segment.segment_key, segment.segment_value]
+    ).run();
+  }
+}
+
+async function fetchTouchpointById(env, db, touchpointTable, segmentTable, touchpointId) {
+  const row = await buildStatement(
+    db,
+    `
+      SELECT touchpoint_id, label, icebreaker, body, cta_question,
+             issue_tag, channels, priority, is_active, metadata,
+             created_at, updated_at
+      FROM ${touchpointTable}
+      WHERE touchpoint_id = ?1
+    `,
+    [touchpointId]
+  ).first();
+  if (!row) return null;
+  let segments = [];
+  if (segmentTable) {
+    const segmentResult = await buildStatement(
+      db,
+      `
+        SELECT segment_key, segment_value
+        FROM ${segmentTable}
+        WHERE touchpoint_id = ?1
+        ORDER BY id ASC
+      `,
+      [touchpointId]
+    ).all();
+    segments = segmentResult?.results || [];
+  }
+  return {
+    ...row,
+    metadata_raw: row.metadata,
+    metadata: parseJsonSafe(row.metadata),
+    segments,
+  };
+}
+
+function generateTouchpointId(label = '') {
+  const base = String(label || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  if (base) return base;
+  return `tp_${Date.now()}`;
+}
+
+function coerceBooleanFlag(value, defaultValue = 1) {
+  if (value === undefined || value === null) return defaultValue;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'active'].includes(normalized)) return 1;
+  if (['0', 'false', 'no', 'inactive'].includes(normalized)) return 0;
+  return defaultValue;
+}
+
+function normalizeCellPhone(value) {
+  if (!value) return null;
+  const digits = String(value).replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return `+${digits}`;
+}
+
+function buildVolunteerName(firstName, lastName, fallback = '') {
+  const parts = [];
+  if (firstName) parts.push(firstName);
+  if (lastName) parts.push(lastName);
+  const joined = parts.join(' ').trim();
+  return joined || fallback;
+}
+
+function deriveVolunteerDisplayName(volunteer, fallbackEmail) {
+  if (!volunteer) {
+    return fallbackEmail ? fallbackEmail.split('@')[0] : 'Volunteer';
+  }
+  const fromNames = buildVolunteerName(volunteer.first_name, volunteer.last_name, '');
+  if (fromNames) return fromNames;
+  if (volunteer.name) return volunteer.name;
+  if (volunteer.id) return volunteer.id.split('@')[0];
+  return fallbackEmail ? fallbackEmail.split('@')[0] : 'Volunteer';
+}
+
+async function fetchVolunteerById(env, db, volunteerTable, id) {
+  const row = await buildStatement(
+    db,
+    `
+      SELECT id, name, first_name, last_name, cell_phone, is_active
+      FROM ${volunteerTable}
+      WHERE id = ?1
+    `,
+    [id]
+  ).first();
+  return row || null;
+}
+
+async function getVoterProfile(env, db, voterId) {
+  if (!voterId) return null;
+  const votersTable = await resolveTableOptional(env, ['voters']);
+  if (!votersTable) return null;
+  const row = await buildStatement(
+    db,
+    `SELECT * FROM ${votersTable} WHERE voter_id = ?1`,
+    [voterId]
+  ).first();
+  return row || null;
+}
+
+function normalizeProfile(profile) {
+  if (!profile || typeof profile !== 'object') return {};
+  const normalized = {};
+  for (const [key, value] of Object.entries(profile)) {
+    if (value === undefined || value === null) continue;
+    normalized[String(key).toLowerCase()] = String(value).toLowerCase();
+  }
+  if (normalized.political_party && !normalized.party) {
+    normalized.party = normalized.political_party;
+  }
+  if (normalized.house && !normalized.house_district) {
+    normalized.house_district = normalized.house;
+  }
+  if (normalized.senate && !normalized.senate_district) {
+    normalized.senate_district = normalized.senate;
+  }
+  return normalized;
+}
+
+function touchpointSupportsChannel(touchpoint, channel) {
+  const rawChannels = String(touchpoint?.channels || '').trim();
+  if (!rawChannels) return true;
+  const tokens = rawChannels
+    .split(',')
+    .map(token => token.trim().toLowerCase())
+    .filter(Boolean);
+  if (!tokens.length) return true;
+  return tokens.includes(channel);
+}
+
+function segmentsMatchProfile(segments, normalizedProfile) {
+  if (!segments || !segments.length) return true;
+  return segments.every(segment => {
+    const key = String(segment.segment_key || '').toLowerCase();
+    if (!key) return true;
+    const expected = String(segment.segment_value || '').toLowerCase();
+    const actual = normalizedProfile[key];
+    if (actual === undefined || actual === null) {
+      return false;
+    }
+    return String(actual).toLowerCase() === expected;
+  });
+}
+
+async function pickTouchpoint(env, db, channel, voterProfile) {
+  const touchpointTable = await resolveTableOptional(env, ['campaign_touchpoints']);
+  if (!touchpointTable) return null;
+
+  const candidatesResult = await buildStatement(
+    db,
+    `
+      SELECT
+        touchpoint_id,
+        label,
+        icebreaker,
+        body,
+        cta_question,
+        issue_tag,
+        channels,
+        priority,
+        metadata
+      FROM ${touchpointTable}
+      WHERE is_active = 1
+      ORDER BY priority ASC, created_at DESC
+      LIMIT 25
+    `
+  ).all();
+
+  const candidates = candidatesResult?.results || [];
+  if (!candidates.length) return null;
+
+  const normalizedChannel = String(channel || 'phone').toLowerCase();
+  const normalizedProfile = normalizeProfile(voterProfile);
+
+  const segmentTable = await resolveTableOptional(env, ['campaign_touchpoint_segments']);
+  const segmentsByTouchpoint = {};
+  if (segmentTable && candidates.length) {
+    const params = candidates.map(candidate => candidate.touchpoint_id);
+    const placeholders = params.map((_, index) => `?${index + 1}`).join(', ');
+    const segmentResult = await buildStatement(
+      db,
+      `
+        SELECT touchpoint_id, segment_key, segment_value
+        FROM ${segmentTable}
+        WHERE touchpoint_id IN (${placeholders})
+      `,
+      params
+    ).all();
+    const segmentRows = segmentResult?.results || [];
+    for (const row of segmentRows) {
+      const list = segmentsByTouchpoint[row.touchpoint_id] || [];
+      list.push(row);
+      segmentsByTouchpoint[row.touchpoint_id] = list;
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (!touchpointSupportsChannel(candidate, normalizedChannel)) continue;
+    const segments = segmentsByTouchpoint[candidate.touchpoint_id] || [];
+    if (!segments.length || segmentsMatchProfile(segments, normalizedProfile)) {
+      return candidate;
+    }
+  }
+
+  return candidates.find(candidate => touchpointSupportsChannel(candidate, normalizedChannel)) || null;
+}

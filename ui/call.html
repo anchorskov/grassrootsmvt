@@ -18,6 +18,13 @@
   .row { display:flex; gap:.75rem; flex-wrap: wrap; }
   .row > * { flex:1 1 200px; }
   .muted { color:#64748b; }
+  .script-controls { margin: 1rem 0 0.5rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+  .script-toggle { display:flex; align-items:center; gap:0.5rem; font-weight:600; color:#0f172a; }
+  .script-card { border:1px solid #cbd5e1; border-radius:10px; padding:0.75rem 1rem; background:#f8fafc; margin:0.5rem 0 1rem; transition: background .2s, border-color .2s; }
+  .script-card.active { background:#ecfdf5; border-color:#86efac; }
+  .script-section { margin-bottom:0.5rem; }
+  .script-section label { display:block; font-size:0.8rem; color:#475569; text-transform:uppercase; letter-spacing:0.04em; margin-bottom:0.25rem; }
+  .script-body-text { margin:0; white-space:pre-wrap; font-size:0.95rem; color:#0f172a; }
   .error { color:#b91c1c; }
   .toolbar { display:flex; gap:.5rem; align-items:center; }
   #voterCard[hidden], #empty[hidden] { display:none; }
@@ -96,6 +103,36 @@
 
 <div class="card" id="voterCard" hidden>
   <div id="voterInfo" class="muted"></div>
+  <div class="script-controls">
+    <label class="script-toggle">
+      <input type="checkbox" id="scriptToggle" checked>
+      Show suggested script
+    </label>
+    <label style="display:flex; align-items:center; gap:0.4rem;">
+      Topic:
+      <select id="scriptSelect">
+        <option value="">Auto</option>
+      </select>
+    </label>
+    <span id="scriptStatus" class="muted"></span>
+  </div>
+  <div class="script-card" id="scriptCard" hidden>
+    <div class="script-section">
+      <label>Icebreaker</label>
+      <p id="scriptIcebreaker" class="script-body-text"></p>
+    </div>
+    <div class="script-section">
+      <label>Talking Points</label>
+      <p id="scriptBody" class="script-body-text"></p>
+    </div>
+    <div class="script-section">
+      <label>Ask</label>
+      <p id="scriptCta" class="script-body-text"></p>
+    </div>
+    <div class="script-section">
+      <span id="scriptMeta" class="muted" style="font-size:0.85rem;"></span>
+    </div>
+  </div>
 
   <h3>Call outcome</h3>
 
@@ -239,10 +276,32 @@ const pulseOptInCheckbox = document.getElementById('pulse-opt-in');
 const pulsePhoneInput = document.getElementById('pulse-phone');
 const pulsePhoneGroup = document.getElementById('pulse-phone-group');
 const pulsePhoneError = document.getElementById('pulse-phone-error');
+const scriptToggle = document.getElementById('scriptToggle');
+const scriptCard = document.getElementById('scriptCard');
+const scriptSelect = document.getElementById('scriptSelect');
+const scriptStatus = document.getElementById('scriptStatus');
+const scriptIcebreaker = document.getElementById('scriptIcebreaker');
+const scriptBody = document.getElementById('scriptBody');
+const scriptCta = document.getElementById('scriptCta');
+const scriptMeta = document.getElementById('scriptMeta');
 const emailInput = document.getElementById('email');
 const emailError = document.getElementById('email-error');
 let districtMetadata = null;
 let currentVoterPhone = '';
+const SCRIPT_TOGGLE_KEY = 'vol.call.use_script';
+const SCRIPT_TOPIC_KEY = 'vol.call.script_topic';
+let currentUserEmail = null;
+let volunteerProfile = null;
+let volunteerDisplayName = '';
+let latestScriptPayload = null;
+let currentTouchpointOverride = null;
+let scriptTopics = [];
+let currentVoterId = null;
+
+currentTouchpointOverride = localStorage.getItem(SCRIPT_TOPIC_KEY) || '';
+if (scriptSelect && currentTouchpointOverride) {
+  scriptSelect.value = currentTouchpointOverride;
+}
 
 function setMsg(text, kind="muted") {
   msg.className = kind;
@@ -290,6 +349,155 @@ function syncPulseOptIn(checked, { prefill = false, resetPhone = false } = {}) {
   if (!checked && resetPhone && pulsePhoneInput) {
     pulsePhoneInput.value = normalizeTenDigitPhone(currentVoterPhone) || currentVoterPhone || '';
   }
+}
+
+function initScriptToggle() {
+  if (!scriptToggle) return;
+  const savedPreference = localStorage.getItem(SCRIPT_TOGGLE_KEY);
+  if (savedPreference === 'false') {
+    scriptToggle.checked = false;
+    hideScriptCard('Scripts hidden');
+  }
+  scriptToggle.addEventListener('change', () => {
+    localStorage.setItem(SCRIPT_TOGGLE_KEY, scriptToggle.checked ? 'true' : 'false');
+    if (!scriptToggle.checked) {
+      hideScriptCard('Scripts hidden');
+    } else if (voterCard?.dataset?.voter) {
+      loadScriptForVoter(voterCard.dataset.voter);
+    }
+  });
+
+  if (scriptSelect) {
+    scriptSelect.addEventListener('change', () => {
+      currentTouchpointOverride = scriptSelect.value || '';
+      localStorage.setItem(SCRIPT_TOPIC_KEY, currentTouchpointOverride);
+      if (scriptToggle?.checked && currentVoterId) {
+        loadScriptForVoter(currentVoterId);
+      }
+    });
+  }
+}
+
+function hideScriptCard(statusText = '') {
+  if (scriptCard) scriptCard.hidden = true;
+  if (scriptIcebreaker) scriptIcebreaker.textContent = '';
+  if (scriptBody) scriptBody.textContent = '';
+  if (scriptCta) scriptCta.textContent = '';
+  if (scriptMeta) scriptMeta.textContent = '';
+  if (scriptStatus) scriptStatus.textContent = statusText || '';
+  latestScriptPayload = null;
+  scriptCard?.classList.remove('active');
+}
+
+async function loadScriptForVoter(voterId) {
+  if (!scriptToggle || !scriptToggle.checked) {
+    hideScriptCard('Scripts hidden');
+    return;
+  }
+  if (!voterId) {
+    hideScriptCard('');
+    return;
+  }
+  if (scriptStatus) {
+    scriptStatus.textContent = 'Loading script…';
+  }
+  try {
+    const payloadBody = { voter_id: voterId, channel: 'phone', use_script: true };
+    if (currentTouchpointOverride) {
+      payloadBody.touchpoint_id = currentTouchpointOverride;
+    }
+    const payload = await jsonFetch(API('/script'), {
+      method: 'POST',
+      body: JSON.stringify(payloadBody)
+    });
+    renderScriptPayload(payload);
+  } catch (err) {
+    hideScriptCard(`Script unavailable: ${err.message}`);
+  }
+}
+
+function renderScriptPayload(payload) {
+  if (!payload) {
+    hideScriptCard('No script available');
+    return;
+  }
+  const touchpoint = payload.touchpoint || null;
+  const hasScript = !!touchpoint || !!payload.icebreaker;
+  if (!hasScript) {
+    hideScriptCard('No script available');
+    return;
+  }
+  if (scriptCard) {
+    scriptCard.hidden = false;
+    scriptCard.classList.add('active');
+  }
+  latestScriptPayload = payload;
+  const icebreakerText = personalizeScript(payload.icebreaker || '');
+  const bodyText = personalizeScript(touchpoint?.body || 'No talking points available.');
+  const ctaText = personalizeScript(touchpoint?.cta_question || '');
+  if (scriptIcebreaker) scriptIcebreaker.textContent = icebreakerText;
+  if (scriptBody) scriptBody.textContent = bodyText;
+  if (scriptCta) scriptCta.textContent = ctaText;
+  if (scriptMeta) {
+    const parts = [];
+    if (touchpoint?.label) parts.push(touchpoint.label);
+    if (payload.contacted_before) parts.push('Previous contact');
+    scriptMeta.textContent = parts.join(' • ');
+  }
+  if (scriptStatus) {
+    scriptStatus.textContent = payload.contacted_before ? 'Previously contacted' : 'First outreach';
+  }
+}
+
+async function loadScriptTopics() {
+  if (!scriptSelect) return;
+  try {
+    const result = await jsonFetch(API('/script/touchpoints'));
+    scriptTopics = result?.touchpoints || [];
+    renderScriptOptions();
+  } catch (err) {
+    console.warn('Failed to load script topics:', err);
+  }
+}
+
+function renderScriptOptions() {
+  if (!scriptSelect) return;
+  const saved = localStorage.getItem(SCRIPT_TOPIC_KEY) || '';
+  currentTouchpointOverride = saved || '';
+  scriptSelect.innerHTML = `<option value="">Auto</option>` + scriptTopics.map(tp => {
+    const label = tp.label || tp.touchpoint_id || 'Untitled';
+    const suffix = tp.issue_tag ? ` (${tp.issue_tag})` : '';
+    return `<option value="${tp.touchpoint_id}">${label}${suffix}</option>`;
+  }).join('');
+  scriptSelect.value = currentTouchpointOverride;
+}
+
+function personalizeScript(text) {
+  if (!text) return '';
+  const name = volunteerDisplayName || deriveNameFromEmail(currentUserEmail);
+  if (!name) return text;
+  return text
+    .replace(/\[your name\]/gi, name)
+    .replace(/\[volunteer name\]/gi, name)
+    .replace(/\{\{\s*volunteer_name\s*\}\}/gi, name)
+    .replace(/\{\s*volunteer_name\s*\}/gi, name)
+    .replace(/VOLUNTEER_NAME/gi, name);
+}
+
+function deriveNameFromEmail(email) {
+  if (!email) return '';
+  const at = email.indexOf('@');
+  return (at > 0 ? email.slice(0, at) : email).replace(/\W+/g, ' ').trim() || email;
+}
+
+function computeVolunteerDisplayName(profile, fallbackEmail) {
+  if (profile) {
+    const parts = [profile.first_name, profile.last_name].filter(Boolean).join(' ').trim();
+    if (parts) return parts;
+    if (profile.name) return profile.name;
+    if (profile.id) return deriveNameFromEmail(profile.id);
+  }
+  return deriveNameFromEmail(fallbackEmail) || 'Volunteer';
 }
 
 function validatePulsePhone() {
@@ -387,14 +595,25 @@ async function recordPulseOptIn(voterId, digits) {
   }
 }
 
+  function normalizeRegionParam(rawValue) {
+    const value = (rawValue || '').toString().trim();
+    if (!value) return null;
+    const lower = value.toLowerCase();
+    if (lower === 'null' || lower === 'undefined' || lower === 'any' || lower === 'all') {
+      return null;
+    }
+    return value.toUpperCase();
+  }
+
   function getUrlFilters() {
     const u = new URL(location.href);
     const parties = u.searchParams.getAll('parties');
     const f = {
-      county: (u.searchParams.get('county')||'').toUpperCase() || null,
-      city:   (u.searchParams.get('city')||'').toUpperCase() || null,
+      county: normalizeRegionParam(u.searchParams.get('county')),
+      city:   normalizeRegionParam(u.searchParams.get('city')),
       district_type: u.searchParams.get('district_type') || null,
       district: u.searchParams.get('district') || null,
+      district_city: normalizeRegionParam(u.searchParams.get('district_city')),
       parties: parties.length ? parties : [],
       limit: Number(u.searchParams.get('limit')||50),
       require_phone: true
@@ -409,13 +628,12 @@ async function recordPulseOptIn(voterId, digits) {
       if (!cleaned.district_type || !cleaned.district) {
         delete cleaned.district_type;
         delete cleaned.district;
+        delete cleaned.district_city;
       }
       return cleaned;
     }
     try {
       const stored = JSON.parse(sessionStorage.getItem('vol.filters') || '{}');
-      delete stored.district_type;
-      delete stored.district;
       return { ...stored, require_phone: true };
     } catch {
       return { require_phone: true };
@@ -451,7 +669,8 @@ async function recordPulseOptIn(voterId, digits) {
   function updateDistrictControlStatus(filters) {
     if (!districtControlStatus) return;
     if (filters?.district_type && filters?.district) {
-      districtControlStatus.textContent = `Targeting ${filters.district_type === 'senate' ? 'Senate' : 'House'} District ${filters.district}.`;
+      const cityInfo = filters.district_city ? ` (City: ${filters.district_city})` : '';
+      districtControlStatus.textContent = `Targeting ${filters.district_type === 'senate' ? 'Senate' : 'House'} District ${filters.district}${cityInfo}.`;
     } else {
       districtControlStatus.textContent = 'No district focus.';
     }
@@ -513,11 +732,15 @@ async function recordPulseOptIn(voterId, digits) {
       filters.district = district;
       url.searchParams.set('district_type', type);
       url.searchParams.set('district', district);
+      delete filters.district_city;
+      url.searchParams.delete('district_city');
     } else {
       delete filters.district_type;
       delete filters.district;
+      delete filters.district_city;
       url.searchParams.delete('district_type');
       url.searchParams.delete('district');
+      url.searchParams.delete('district_city');
     }
     sessionStorage.setItem('vol.filters', JSON.stringify(filters));
     clearSeen();
@@ -547,14 +770,41 @@ async function recordPulseOptIn(voterId, digits) {
     }
   }
 
-  async function loadWho() {
-    try {
-      const j = await jsonFetch(API("/whoami"));
-      who.textContent = j && j.email ? ("Signed in as: " + j.email) : "Not signed in";
-    } catch (e) {
-      who.innerHTML = `<span class="error">Unable to reach API: ${e.message}</span>`;
+async function loadWho() {
+  try {
+    const j = await jsonFetch(API("/whoami"));
+    if (j && j.email) {
+      currentUserEmail = j.email;
+      who.textContent = "Signed in as: " + j.email;
+    } else {
+      who.textContent = "Not signed in";
+    }
+  } catch (e) {
+    who.innerHTML = `<span class="error">Unable to reach API: ${e.message}</span>`;
+  }
+}
+
+async function loadVolunteerProfile() {
+  try {
+    const result = await jsonFetch(API('/volunteer/me'));
+    if (result?.email) {
+      currentUserEmail = result.email;
+    }
+    volunteerProfile = result?.volunteer || null;
+    volunteerDisplayName = computeVolunteerDisplayName(
+      volunteerProfile,
+      result?.email || currentUserEmail
+    );
+    if (latestScriptPayload) {
+      renderScriptPayload(latestScriptPayload);
+    }
+  } catch (err) {
+    console.warn('Volunteer profile unavailable:', err);
+    if (!volunteerDisplayName) {
+      volunteerDisplayName = deriveNameFromEmail(currentUserEmail);
     }
   }
+}
 
   const SEEN_KEY = 'vol.seen_ids';
   function getSeen() {
@@ -628,6 +878,7 @@ async function recordPulseOptIn(voterId, digits) {
     getNextBtn.disabled = true;
     saveBtn.disabled = true;
     setMsg("Loading next voter…");
+    hideScriptCard('Loading script...');
 
     try {
       const filters = getFilters();
@@ -643,6 +894,7 @@ async function recordPulseOptIn(voterId, digits) {
       if (!v || v.empty || !v.voter_id) {
         console.warn('⚠️ No voter data:', {hasData: !!v, isEmpty: v?.empty, hasVoterId: !!v?.voter_id});
         voterCard.hidden = true; empty.hidden = false; setMsg("");
+        hideScriptCard('No eligible voter');
         return;
       }
 
@@ -658,6 +910,7 @@ async function recordPulseOptIn(voterId, digits) {
       // show
       empty.hidden = true; voterCard.hidden = false;
       voterCard.dataset.voter = v.voter_id;
+      currentVoterId = v.voter_id;
       const name = [v.first_name, v.last_name].filter(Boolean).join(" ");
       const phone = v.phone_1 ? ('Phone: ' + v.phone_1) : 'Phone: —';
       const districtBits = [
@@ -673,6 +926,7 @@ async function recordPulseOptIn(voterId, digits) {
       const detailsHtml = details ? `${details}<br/>` : '';
       voterInfo.innerHTML =
         `<strong>${name || "—"}</strong><br/>${detailsHtml}${phone}`;
+      loadScriptForVoter(v.voter_id);
 
       // remember to avoid immediate repeats
       pushSeen(v.voter_id);
@@ -681,6 +935,7 @@ async function recordPulseOptIn(voterId, digits) {
       console.error('❌ nextVoter error:', e);
       voterCard.hidden = true; empty.hidden = false;
       setMsg(`Error: ${e.message}`, "error");
+      hideScriptCard(`Script unavailable: ${e.message}`);
     } finally {
       inFlightNext = false;
       getNextBtn.disabled = false;
@@ -788,6 +1043,8 @@ async function recordPulseOptIn(voterId, digits) {
 const filters = getFilters();
 showFiltersBadge(filters);
 initDistrictControl();
+initScriptToggle();
+hideScriptCard('Waiting for voter...');
 if (optInSmsCheckbox) {
   optInSmsCheckbox.addEventListener('change', () => {
     syncPulseOptIn(!!optInSmsCheckbox.checked, { prefill: true });
@@ -889,6 +1146,8 @@ if (optInEmailCheckbox && emailInput) {
   (async () => {
     console.log("✅ Ready, loading data...");
     await loadWho();     // don’t block if this fails; loadWho() already swallows errors
+    await loadVolunteerProfile();
+    await loadScriptTopics();
     await nextVoter();   // show a voter immediately
   })();
 </script>

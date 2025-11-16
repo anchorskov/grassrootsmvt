@@ -35,6 +35,7 @@ class StreetAutocompleteOptimized {
     // Configuration
     this.getCounty = options.getCounty || (() => null);
     this.getCity = options.getCity || (() => null);
+    this.getDistrictFilters = options.getDistrictFilters || (() => null);
     this.onStreetSelected = options.onStreetSelected || (() => {});
     this.onHouseFieldChange = options.onHouseFieldChange || (() => {});
     this.streetsEndpoint = options.streetsEndpoint || `${window.location.origin}/api/streets`;
@@ -45,10 +46,12 @@ class StreetAutocompleteOptimized {
     
     // State
     this.allStreets = [];
-    this.currentCounty = null;
-    this.currentCity = null;
     this.isLoading = false;
     this.seededStreets = [];
+    this.shortStreets = [];
+    this.shortStreetTokens = new Map();
+    this.currentRegionKey = null;
+    this.seedRegionKey = null;
     
     this.init();
   }
@@ -114,24 +117,40 @@ class StreetAutocompleteOptimized {
     if (!this.streetInput) return;
     const currentValue = (this.streetInput.value || '').trim().toUpperCase();
 
-    if (this.seededStreets.length) {
-      this.showStreetSuggestions(this.seededStreets, currentValue);
+    const region = this.getRegionContext();
+    if (region.mode === 'invalid') {
+      this.onHouseFieldChange(false);
+      this.showRegionPrompt(region.reason);
       return;
     }
 
-    const county = this.getCounty();
-    const city = this.getCity();
-    if (!county || !city) {
-      this.showMessage('Please select county and city first', 'no-results');
-      return;
+    if (this.seededStreets.length && this.seedRegionKey && region.key !== this.seedRegionKey) {
+      this.clearSeededStreets();
+    }
+
+    const hasSeeds = this.seededStreets.length && (!this.seedRegionKey || this.seedRegionKey === region.key);
+    if (hasSeeds && !this.allStreets.length) {
+      this.showStreetSuggestions(this.seededStreets, currentValue);
     }
     
-    if (this.needsReload(county, city)) {
-      await this.loadStreets(county, city);
+    if (this.needsReload(region)) {
+      await this.loadStreets(region);
     }
     
     if (currentValue.length >= this.minCharsToShow) {
       this.showStreetSuggestions(this.allStreets, currentValue);
+    } else if (currentValue.length > 0) {
+      const prefixMatches = this.getPrefixMatches(currentValue, { shortOnly: true });
+      if (prefixMatches.length) {
+        this.onHouseFieldChange(false);
+        this.showStreetSuggestions(prefixMatches, '');
+      } else if (this.allStreets.length > 0) {
+        this.onHouseFieldChange(false);
+        this.showMessage(`Keep typing (${this.minCharsToShow - currentValue.length} more letter${this.minCharsToShow - currentValue.length === 1 ? '' : 's'})`, 'hint');
+      }
+    } else if (this.shortStreets.length > 0) {
+      this.onHouseFieldChange(false);
+      this.showStreetSuggestions(this.shortStreets, '');
     } else if (this.allStreets.length > 0) {
       this.onHouseFieldChange(false);
       this.showMessage(`Start typing at least ${this.minCharsToShow} letters to filter streets`, 'hint');
@@ -140,10 +159,21 @@ class StreetAutocompleteOptimized {
   
   handleInput() {
     const value = this.streetInput.value.toUpperCase().trim();
-    const usingSeeds = this.seededStreets.length > 0;
-    const sourceList = usingSeeds && this.seededStreets.length
-      ? this.seededStreets
-      : this.allStreets;
+    const region = this.getRegionContext();
+    if (region.mode === 'invalid') {
+      this.onHouseFieldChange(false);
+      this.showRegionPrompt(region.reason);
+      return;
+    }
+
+    if (this.seededStreets.length && this.seedRegionKey && region.key !== this.seedRegionKey) {
+      this.clearSeededStreets();
+    }
+
+    const regionHasAll = this.allStreets.length > 0 && (!this.currentRegionKey || this.currentRegionKey === region.key);
+    const seedsMatchRegion = this.seededStreets.length > 0 && (!this.seedRegionKey || this.seedRegionKey === region.key);
+    const usingSeeds = !regionHasAll && seedsMatchRegion;
+    const sourceList = regionHasAll ? this.allStreets : this.seededStreets;
     
     if (usingSeeds && sourceList.length) {
       this.showStreetSuggestions(sourceList, value);
@@ -160,6 +190,11 @@ class StreetAutocompleteOptimized {
     
     if (!usingSeeds && value.length < this.minCharsToShow) {
       this.onHouseFieldChange(false);
+      const prefixMatches = this.getPrefixMatches(value, { shortOnly: true });
+      if (prefixMatches.length) {
+        this.showStreetSuggestions(prefixMatches, '');
+        return;
+      }
       const remaining = this.minCharsToShow - value.length;
       this.showMessage(`Keep typing (${remaining} more letter${remaining === 1 ? '' : 's'})`, 'hint');
       return;
@@ -192,32 +227,34 @@ class StreetAutocompleteOptimized {
     }
   }
   
-  needsReload(county, city) {
-    return this.currentCounty !== county || 
-           this.currentCity !== city || 
-           this.allStreets.length === 0;
+  needsReload(region) {
+    if (!region || region.mode === 'invalid') return false;
+    const key = region.key;
+    if (!key) return false;
+    return this.currentRegionKey !== key || this.allStreets.length === 0;
   }
   
-  async loadStreets(county, city) {
+  async loadStreets(region) {
     if (this.isLoading) return;
     this.isLoading = true;
     this.showMessage('Loading streets...', 'loading');
     
     try {
-      const countyUpper = (county || '').toUpperCase();
-      const cityUpper = (city || '').toUpperCase();
+      const payload = this.buildRegionPayload(region);
+      if (!payload) {
+        throw new Error('Invalid region context for loading streets');
+      }
       
       // Use optimized streets_index endpoint
-      const data = await window.apiPost('streets', {
-        county: countyUpper,
-        city: cityUpper
-      });
+      const data = await window.apiPost('streets', payload);
       
       if (data.streets && data.streets.length > 0) {
         this.allStreets = data.streets.map(s => s.name).sort();
-        this.currentCounty = countyUpper;
-        this.currentCity = cityUpper;
-        console.log(`✅ Loaded ${this.allStreets.length} streets for ${countyUpper}/${cityUpper} (via streets_index)`);
+        const shortData = this.buildShortStreetData(this.allStreets);
+        this.shortStreets = shortData.names;
+        this.shortStreetTokens = shortData.tokenMap;
+        this.currentRegionKey = region?.key || null;
+        console.log(`✅ Loaded ${this.allStreets.length} streets for ${region?.mode || 'unknown'} context`);
         this.showStreetSuggestions(this.allStreets, '');
       } else {
         this.showMessage('No streets found for this area', 'no-results');
@@ -263,10 +300,20 @@ class StreetAutocompleteOptimized {
           .filter(Boolean)
       )
     );
+    const region = this.getRegionContext();
+    const regionKey = region?.key || null;
+    this.seedRegionKey = regionKey;
     this.seededStreets = unique;
     if (unique.length) {
-      const merged = Array.from(new Set([...unique, ...this.allStreets]));
+      if (this.currentRegionKey && regionKey && this.currentRegionKey !== regionKey) {
+        this.allStreets = [];
+        this.currentRegionKey = null;
+      }
+      const merged = Array.from(new Set([...unique, ...this.allStreets])).sort();
       this.allStreets = merged;
+      const shortData = this.buildShortStreetData(this.allStreets);
+      this.shortStreets = shortData.names;
+      this.shortStreetTokens = shortData.tokenMap;
       this.showStreetSuggestions(unique, '');
     } else {
       this.clearSeededStreets();
@@ -275,16 +322,19 @@ class StreetAutocompleteOptimized {
 
   clearSeededStreets() {
     this.seededStreets = [];
+    this.seedRegionKey = null;
     this.hideSuggestions();
   }
   
   // Public methods
   clearCache() {
     this.allStreets = [];
-    this.currentCounty = null;
-    this.currentCity = null;
+    this.currentRegionKey = null;
     this.streetInput.value = '';
     this.seededStreets = [];
+    this.shortStreets = [];
+    this.shortStreetTokens = new Map();
+    this.seedRegionKey = null;
     this.hideSuggestions();
     this.onHouseFieldChange(false);
   }
@@ -303,6 +353,178 @@ class StreetAutocompleteOptimized {
   
   destroy() {
     this.suggestions.style.display = 'none';
+  }
+
+  getPrefixMatches(value, options = {}) {
+    const query = (value || '').toUpperCase();
+    const { shortOnly = false } = options;
+    const source = shortOnly ? this.shortStreets : this.allStreets;
+    if (!source.length) {
+      return [];
+    }
+    if (!query) {
+      return source.slice(0, this.maxSuggestions);
+    }
+    const matches = source.filter(name => {
+      if (!shortOnly) {
+        return name.startsWith(query);
+      }
+      const tokens = this.shortStreetTokens.get(name) || [];
+      return tokens.some(token => token.startsWith(query));
+    });
+    matches.sort((a, b) => {
+      const aLen = shortOnly ? this.getShortestTokenLength(a) : a.length;
+      const bLen = shortOnly ? this.getShortestTokenLength(b) : b.length;
+      if (aLen !== bLen) {
+        return aLen - bLen;
+      }
+      return a.localeCompare(b);
+    });
+    return matches.slice(0, this.maxSuggestions);
+  }
+
+  buildShortStreetData(source = []) {
+    const unique = Array.from(new Set((source || []).filter(Boolean)));
+    const tokenMap = new Map();
+    const names = [];
+    unique.forEach(name => {
+      const tokens = this.getShortTokens(name);
+      if (tokens.length > 0) {
+        tokenMap.set(name, tokens);
+        names.push(name);
+      }
+    });
+    names.sort((a, b) => {
+      const aLen = this.getShortestTokenLength(a, tokenMap);
+      const bLen = this.getShortestTokenLength(b, tokenMap);
+      if (aLen !== bLen) {
+        return aLen - bLen;
+      }
+      return a.localeCompare(b);
+    });
+    return { names, tokenMap };
+  }
+
+  getShortTokens(name) {
+    const value = (name || '').trim().toUpperCase();
+    if (!value) return [];
+    const tokens = value.split(/\s+/).filter(Boolean);
+    return tokens.filter(token => token.length > 0 && token.length <= 3);
+  }
+
+  getShortestTokenLength(name, tokenMap = this.shortStreetTokens) {
+    const tokens = (tokenMap.get(name) || []);
+    if (!tokens.length) {
+      return name.length;
+    }
+    return tokens.reduce((min, token) => Math.min(min, token.length), Infinity);
+  }
+
+  showRegionPrompt(reason) {
+    if (reason === 'district-incomplete') {
+      this.showMessage('Select district type and number to load streets', 'no-results');
+    } else if (reason === 'partial-county') {
+      this.showMessage('County and city are both required', 'no-results');
+    } else {
+      this.showMessage('Select a district or county + city to load streets', 'no-results');
+    }
+  }
+
+  getRegionContext() {
+    const districtInfo = this.getNormalizedDistrictFilters();
+    if (districtInfo?.mode === 'invalid') {
+      return { mode: 'invalid', reason: districtInfo.reason };
+    }
+    if (districtInfo?.mode === 'district') {
+      const key = this.regionKey('district', districtInfo.district_type, districtInfo.district, districtInfo.district_city || 'ALL');
+      return { ...districtInfo, key };
+    }
+
+    const county = (this.getCounty() || '').trim().toUpperCase();
+    const city = (this.getCity() || '').trim().toUpperCase();
+    if (county && city) {
+      const key = this.regionKey('countyCity', county, city);
+      return { mode: 'countyCity', county, city, key };
+    }
+    if (county || city) {
+      return { mode: 'invalid', reason: 'partial-county' };
+    }
+    return { mode: 'invalid', reason: 'missing-region' };
+  }
+
+  getNormalizedDistrictFilters() {
+    const raw = typeof this.getDistrictFilters === 'function' ? this.getDistrictFilters() : null;
+    if (!raw) return null;
+    const type = this.normalizeDistrictType(raw.district_type ?? raw.type ?? raw.districtType ?? raw.mode);
+    const code = this.normalizeDistrictCode(raw.district ?? raw.code ?? raw.districtCode ?? raw.value);
+    const city = this.normalizeCityValue(raw.district_city ?? raw.city ?? raw.cityWithinDistrict);
+    const hasInput = [raw.district_type, raw.type, raw.district, raw.code, raw.districtType, raw.district_city]
+      .some(val => val !== undefined && val !== null && String(val).trim() !== '');
+    if (type && code) {
+      return { mode: 'district', district_type: type, district: code, district_city: city };
+    }
+    if (hasInput) {
+      return { mode: 'invalid', reason: 'district-incomplete' };
+    }
+    return null;
+  }
+
+  normalizeDistrictType(value) {
+    if (!value) return null;
+    const normalized = value.toString().trim().toLowerCase();
+    if (normalized === 'house' || normalized === 'senate') {
+      return normalized;
+    }
+    return null;
+  }
+
+  normalizeDistrictCode(value) {
+    if (value === null || value === undefined) return null;
+    const trimmed = value.toString().trim();
+    if (!trimmed) return null;
+    const num = Number(trimmed);
+    if (!Number.isNaN(num)) {
+      return String(Math.abs(num)).padStart(2, '0');
+    }
+    return trimmed.toUpperCase();
+  }
+
+  regionKey(mode, primary, secondary, extra = '') {
+    if (mode === 'district') {
+      return `district:${primary}:${secondary}:${extra || 'ALL'}`;
+    }
+    if (mode === 'countyCity') {
+      return `county:${primary}|${secondary}`;
+    }
+    return null;
+  }
+
+  buildRegionPayload(region) {
+    if (!region) return null;
+    if (region.mode === 'district') {
+      const payload = {
+        district_type: region.district_type,
+        district: region.district,
+      };
+      if (region.district_city) {
+        payload.district_city = region.district_city;
+      }
+      return payload;
+    }
+    if (region.mode === 'countyCity') {
+      return {
+        county: region.county,
+        city: region.city,
+      };
+    }
+    return null;
+  }
+
+  normalizeCityValue(value) {
+    if (value === null || value === undefined) return null;
+    const trimmed = value.toString().trim();
+    if (!trimmed) return null;
+    return trimmed.toUpperCase();
   }
 }
 

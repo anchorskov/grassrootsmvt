@@ -11,7 +11,7 @@ This document serves as the single source of truth for all database tables, view
 
 ### **Data Flow:**
 1. **Import**: Wyoming voter data → `voters_raw`, `voters_norm` tables
-2. **Enhancement**: Address/phone normalization → `v_voters_addr_norm`, `v_best_phone` views  
+2. **Enhancement**: Address/phone normalization → `v_voters_addr_norm` view, `best_phone` table  
 3. **Operations**: Volunteer assignments → `call_assignments`, `walk_assignments`
 4. **Contact**: New voter contacts → `voter_contact_staging` → verification → integration
 5. **Activity**: Volunteer interactions → `voter_contacts`, `call_followups`
@@ -28,16 +28,17 @@ This document serves as the single source of truth for all database tables, view
 
 ### **voters** *(Core voter registration)*
 | Column | Type | Description | Source |
-|--------|------|-------------|---------|
+|--------|------|-------------|--------|
 | voter_id | TEXT PRIMARY KEY | Unique Wyoming voter identifier | State file |
 | political_party | TEXT | Party affiliation (R/D/U/etc) | State file |
 | county | TEXT | County of registration | State file |
-| house | TEXT | House district number | State file |
 | senate | TEXT | Senate district number | State file |
+| house | TEXT | House district number | State file |
 
-**Purpose**: Core voter registration data from Wyoming Secretary of State  
-**Relationships**: Primary table joined by all voter views and contact tables  
-**Index Status**: ✅ Fully indexed for lookups
+**Purpose**: Core voter political data (party, county, districts)  
+**Note**: Name and address fields are in `voters_addr_norm` table  
+**Relationships**: JOIN with `v_voters_addr_norm` on `voter_id` for complete records  
+**Index Status**: ✅ PRIMARY KEY on voter_id
 
 ---
 
@@ -75,34 +76,77 @@ This document serves as the single source of truth for all database tables, view
 
 ---
 
-## 👁️ **Database Views**
+### **voters_addr_norm** *(Normalized voter addresses)*
+| Column | Type | Description | Source |
+|--------|------|-------------|--------|
+| voter_id | TEXT PRIMARY KEY | Unique voter identifier | Required |
+| ln | TEXT | Last name (normalized) | Cleaned |
+| fn | TEXT | First name (normalized) | Cleaned |
+| addr1 | TEXT | Full normalized address | Cleaned |
+| city | TEXT | City name (normalized) | Cleaned |
+| state | TEXT | State abbreviation | Default 'WY' |
+| zip | TEXT | ZIP code | Validated |
+| senate | TEXT | Senate district | Required |
+| house | TEXT | House district | Required |
+| city_county_id | INTEGER NOT NULL | FK to wy_city_county.id | Geographic mapping |
 
-### **v_voters_addr_norm** *(Complete voter + address)*
-**Purpose**: Joins voter address and geographic details from normalized tables  
-**Performance**: ✅ Fully indexed for GPS and address lookups  
-**Primary Use**: Address validation, geographic searches, contact form lookups
-
-**Key Fields**:
-- `voter_id`, `fn` (first_name), `ln` (last_name)
-- `addr1` (full_address), `city`, `county`, `state`, `zip`
-- `house`, `senate` (districts)
+**Purpose**: Base table for v_voters_addr_norm view with complete normalized address data  
+**Relationships**: Joined with wy_city_county in v_voters_addr_norm view  
+**Index Status**: ✅ PRIMARY KEY on voter_id
 
 ---
 
-### **v_best_phone** *(Validated phone numbers)*
-**Purpose**: Phone numbers with confidence scoring and area validation  
-**Performance**: ✅ Indexed for phone lookups  
-**Primary Use**: Contact verification, call assignments
+## 👁️ **Database Views**
+
+### **v_voters_addr_norm** *(Complete voter + address view)*
+**Purpose**: Provide a single projection of voter name + address + county/district metadata  
+**Definition**:
+```sql
+CREATE VIEW v_voters_addr_norm AS
+SELECT
+  van.voter_id,
+  van.fn,
+  van.ln,
+  van.addr1,
+  van.city,
+  van.state,
+  van.zip,
+  van.house,
+  van.senate,
+  van.city_county_id,
+  wcc.city_norm    AS city_resolved,
+  wcc.county_norm  AS county_resolved
+FROM voters_addr_norm AS van
+LEFT JOIN wy_city_county AS wcc
+  ON wcc.id = van.city_county_id;
+```
+**Performance**: ✅ Backed by PK/FK indexes across `voter_id` and `city_county_id`  
+**Primary Use**: All name/address lookups, canvass street autocomplete, contact-form search
 
 **Key Fields**:
-- `voter_id`, `phone_e164` (standardized format)
-- Confidence scoring and validation flags
+- From `voters_addr_norm`: `voter_id`, `fn`, `ln`, `addr1`, `city`, `state`, `zip`, `house`, `senate`, `city_county_id`
+- From `wy_city_county`: `city_resolved`, `county_resolved`
+
+---
+
+### **best_phone** *(Validated phone numbers)*
+| Column | Type | Description | Source |
+|--------|------|-------------|--------|
+| voter_id | TEXT PRIMARY KEY | Unique voter identifier | FK to voters |
+| phone_e164 | TEXT | Standardized phone format | Normalized |
+| confidence_code | INTEGER | Phone confidence score | Calculated |
+| is_wy_area | INTEGER | Wyoming area code flag | Validated |
+| imported_at | TEXT | Import timestamp | Auto |
+
+**Purpose**: Phone numbers with confidence scoring and area validation  
+**Performance**: ✅ PRIMARY KEY on voter_id  
+**Primary Use**: Contact verification, call assignments
 
 ---
 
 ### **v_eligible_call** *(Contact-ready voters)*
 **Purpose**: Voters eligible for volunteer contact with complete info  
-**Dependencies**: Requires `voters_raw`, `voters_norm`, `v_best_phone`  
+**Dependencies**: Requires `voters`, `v_voters_addr_norm`, `best_phone`  
 **Primary Use**: Call assignment system, volunteer dashboards
 
 ---
@@ -239,7 +283,7 @@ This document serves as the single source of truth for all database tables, view
 | state | TEXT | State | Default 'WY' |
 | zip | TEXT | ZIP code | Matches v_voters_addr_norm.zip |
 | **Contact Information** |
-| phone_e164 | TEXT | Primary phone | Matches v_best_phone.phone_e164 |
+| phone_e164 | TEXT | Primary phone | Matches best_phone.phone_e164 |
 | phone_secondary | TEXT | Secondary phone | Optional |
 | email | TEXT | Email address | Optional |
 | **Political Information** |
@@ -279,6 +323,32 @@ This document serves as the single source of truth for all database tables, view
 | body_html | TEXT NOT NULL | Template content | HTML format |
 
 **Purpose**: Standardized messaging for different channels and audiences
+
+---
+
+## 🔍 **Example Lookup Query**
+Use the normalized address view plus the voters table when matching by name:
+
+```sql
+SELECT
+  v.voter_id,
+  a.fn,
+  a.ln,
+  a.addr1,
+  a.city,
+  v.county,
+  v.house,
+  v.senate,
+  v.political_party
+FROM v_voters_addr_norm a
+JOIN voters v ON a.voter_id = v.voter_id
+WHERE UPPER(a.fn) = 'JIMMY'
+  AND UPPER(a.ln) = 'SKOVGARD'
+LIMIT 25;
+```
+
+Result (Oct 15 2025 import): Jimmy Skovgard — 5685 HANLY ST, CASPER, NATRONA County, HD 59 / SD 29, Republican.  
+Stored at `sql/find_jimmy_skovgard.sql` for quick reuse.
 
 ---
 

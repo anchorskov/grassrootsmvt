@@ -37,7 +37,7 @@ SELECT
   p.phone_e164
 FROM voters v
 JOIN v_voters_addr_norm a ON v.voter_id = a.voter_id
-LEFT JOIN v_best_phone p ON v.voter_id = p.voter_id
+LEFT JOIN best_phone p ON v.voter_id = p.voter_id
 WHERE v.county = :selected_county
   AND a.city = :selected_city
   AND (
@@ -65,7 +65,7 @@ SELECT
   END as match_score
 FROM voters v
 JOIN v_voters_addr_norm a ON v.voter_id = a.voter_id
-LEFT JOIN v_best_phone p ON v.voter_id = p.voter_id
+LEFT JOIN best_phone p ON v.voter_id = p.voter_id
 WHERE v.county = :selected_county
   AND (
     UPPER(a.ln) LIKE UPPER(:last_name) || '%'

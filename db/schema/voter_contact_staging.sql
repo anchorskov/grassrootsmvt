@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS voter_contact_staging (
   zip TEXT, -- matches v_voters_addr_norm.zip
   
   -- Contact information (matching existing schema field names)
-  phone_e164 TEXT, -- primary phone (matches v_best_phone.phone_e164)
+  phone_e164 TEXT, -- primary phone (matches best_phone.phone_e164)
   phone_secondary TEXT,
   email TEXT,
   

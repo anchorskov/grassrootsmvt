@@ -35,6 +35,8 @@ class HouseAutocomplete {
       return;
     }
     
+    this.getDistrictFilters = config.getDistrictFilters || (() => null);
+
     this.setupEventListeners();
     console.log('🏠 HouseAutocomplete initialized');
   }
@@ -89,24 +91,25 @@ class HouseAutocomplete {
       console.log('⚠️ No street name provided');
       return;
     }
-    
-    const county = this.config.getCounty();
-    const city = this.config.getCity();
-    
-    if (!county || !city) {
-      console.log('⚠️ County or city not available');
+
+    const region = this.getRegionContext();
+    if (region.mode === 'invalid') {
+      console.log('⚠️ Region context incomplete:', region.reason);
       return;
     }
+
+    const payload = this.buildRegionPayload(region);
+    if (!payload) {
+      console.warn('⚠️ Unable to build region payload for houses');
+      return;
+    }
+    payload.street = streetName.toUpperCase().trim();
     
-    console.log('🏠 Loading house numbers for:', { county, city, street: streetName });
+    console.log('🏠 Loading house numbers for:', { ...payload });
     
     try {
       // Use the optimized /api/houses endpoint
-      const data = await window.apiPost('houses', {
-        county: county,
-        city: city,
-        street: streetName
-      });
+      const data = await window.apiPost('houses', payload);
       
       console.log('📡 Full API response:', JSON.stringify(data, null, 2));
       console.log('📡 data.ok:', data.ok);
@@ -231,6 +234,91 @@ class HouseAutocomplete {
   
   getHouseData(houseNumber) {
     return this.houseData.find(h => h.house_number === houseNumber);
+  }
+
+  getRegionContext() {
+    const districtInfo = this.getNormalizedDistrictFilters();
+    if (districtInfo?.mode === 'invalid') {
+      return { mode: 'invalid', reason: districtInfo.reason };
+    }
+    if (districtInfo?.mode === 'district') {
+      return districtInfo;
+    }
+
+    const county = (this.config.getCounty?.() || '').toUpperCase().trim();
+    const city = (this.config.getCity?.() || '').toUpperCase().trim();
+    if (county && city) {
+      return { mode: 'countyCity', county, city };
+    }
+    if (county || city) {
+      return { mode: 'invalid', reason: 'partial-county' };
+    }
+    return { mode: 'invalid', reason: 'missing-region' };
+  }
+
+  getNormalizedDistrictFilters() {
+    const raw = typeof this.getDistrictFilters === 'function' ? this.getDistrictFilters() : null;
+    if (!raw) return null;
+    const type = this.normalizeDistrictType(raw.district_type ?? raw.type ?? raw.districtType ?? raw.mode);
+    const code = this.normalizeDistrictCode(raw.district ?? raw.code ?? raw.districtCode ?? raw.value);
+    const city = this.normalizeCityValue(raw.district_city ?? raw.city ?? raw.cityWithinDistrict);
+    const hasInput = [raw.district_type, raw.type, raw.district, raw.code, raw.districtType, raw.district_city]
+      .some(val => val !== undefined && val !== null && String(val).trim() !== '');
+    if (type && code) {
+      return { mode: 'district', district_type: type, district: code, district_city: city };
+    }
+    if (hasInput) {
+      return { mode: 'invalid', reason: 'district-incomplete' };
+    }
+    return null;
+  }
+
+  normalizeDistrictType(value) {
+    if (!value) return null;
+    const normalized = value.toString().trim().toLowerCase();
+    if (normalized === 'house' || normalized === 'senate') {
+      return normalized;
+    }
+    return null;
+  }
+
+  normalizeDistrictCode(value) {
+    if (value === null || value === undefined) return null;
+    const trimmed = value.toString().trim();
+    if (!trimmed) return null;
+    const num = Number(trimmed);
+    if (!Number.isNaN(num)) {
+      return String(Math.abs(num)).padStart(2, '0');
+    }
+    return trimmed.toUpperCase();
+  }
+
+  buildRegionPayload(region) {
+    if (!region) return null;
+    if (region.mode === 'district') {
+      const payload = {
+        district_type: region.district_type,
+        district: region.district,
+      };
+      if (region.district_city) {
+        payload.district_city = region.district_city;
+      }
+      return payload;
+    }
+    if (region.mode === 'countyCity') {
+      return {
+        county: region.county,
+        city: region.city,
+      };
+    }
+    return null;
+  }
+
+  normalizeCityValue(value) {
+    if (value === null || value === undefined) return null;
+    const trimmed = value.toString().trim();
+    if (!trimmed) return null;
+    return trimmed.toUpperCase();
   }
 }
 

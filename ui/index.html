@@ -23,12 +23,17 @@
   a { color: #0ea5e9; }
   .quick-actions { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 1rem; margin: 1rem 0; }
   .quick-actions h3 { margin: 0 0 0.75rem; font-size: 1.1rem; color: #334155; }
-  .btn-contact { background: #059669; color: white; padding: 0.75rem 1.5rem; border: none; border-radius: 8px; font-weight: 600; cursor: pointer; transition: background 0.2s; font-size: 0.95rem; }
-  .btn-contact:hover { background: #047857; }
-  .district-toggle { margin-top: 0.75rem; padding: 0.65rem 0.9rem; border: 1px dashed #cbd5e1; border-radius: 10px; background: #f8fafc; display: flex; flex-direction: column; gap: 0.35rem; }
-  .district-toggle__label { display: flex; align-items: center; gap: 0.5rem; margin: 0; font-weight: 600; }
-  .district-toggle__label input { width: auto; }
+  .quick-action-grid { display:flex; gap:.75rem; flex-wrap:wrap; }
+  .quick-action { display:flex; align-items:center; gap:.5rem; border:1px solid #cbd5e1; border-radius:10px; padding:.65rem 1rem; background:white; color:#0f172a; font-weight:600; font-size:.95rem; cursor:pointer; transition: border-color .2s, box-shadow .2s, background .2s; }
+  .quick-action:hover { border-color:#94a3b8; box-shadow:0 3px 8px rgba(15,23,42,.08); }
+  .quick-action.is-active { border-color:#0ea5e9; box-shadow:0 3px 8px rgba(14,165,233,.25); background:#e0f2fe; }
+  .quick-action-hint { margin-top:.75rem; font-size:.9rem; color:#475569; }
   .district-row { margin-top: 0.5rem; }
+  .district-row.is-hidden { display: none !important; }
+  .district-city { flex:1 1 220px; }
+  .district-city.is-hidden { display: none !important; }
+  .workflow-card.is-hidden { display:none; }
+  .flow-section.is-hidden { display:none !important; }
   .small-text { font-size: 0.85rem; }
 </style>
 </head>
@@ -51,13 +56,26 @@
 <!-- Quick Actions Section -->
 <div class="quick-actions">
   <h3>Quick Actions</h3>
-  <button class="btn-contact" onclick="location.href='contact-form/index.html'">
-    📋 New Contact Entry
-  </button>
+  <div class="quick-action-grid">
+    <button class="quick-action" data-quick-action="contact">
+      📋 Add/Update Voter
+    </button>
+    <button class="quick-action" data-quick-action="county">
+      🏙️ County/City Targeting
+    </button>
+    <button class="quick-action" data-quick-action="district">
+      🏛️ House/Senate Targeting
+    </button>
+  </div>
+  <p class="quick-action-hint" id="quickActionHint">Choose a workflow to display its tools.</p>
 </div>
 
-<div class="card">
-  <div class="row">
+<div class="card workflow-card is-hidden" data-flow-card>
+  <div style="display:flex; flex-direction:column; gap:.25rem; margin-bottom:.5rem;">
+    <h3 id="workflowTitle" style="margin:0; font-size:1.2rem;"></h3>
+    <p id="workflowDescription" class="muted small-text" style="margin:0;"></p>
+  </div>
+  <div class="row flow-section" data-flow-section="county">
     <div>
       <label for="county">County</label>
       <select id="county">
@@ -72,18 +90,10 @@
     </div>
   </div>
 
-  <div class="district-toggle">
-    <label class="district-toggle__label">
-      <input type="checkbox" id="enable_districts" />
-      Focus by state district (optional)
-    </label>
-    <p class="muted small-text">
-      Use this when you need Wyoming House/Senate targeting. Leave it off for county/city work.
-    </p>
-    <p class="muted small-text" data-district-status style="display:none;"></p>
-  </div>
+  <p class="muted small-text" data-district-status style="display:none;"></p>
+  <p class="muted small-text" id="flowModeNote" style="display:none;"></p>
 
-  <div class="row district-row" data-district-row hidden>
+  <div class="row district-row flow-section is-hidden" data-flow-section="district" data-district-row>
     <div>
       <label for="district_type">District type</label>
       <select id="district_type" disabled>
@@ -96,6 +106,12 @@
       <label for="district">District</label>
       <select id="district" disabled>
         <option value="">— select —</option>
+      </select>
+    </div>
+    <div class="district-city is-hidden" data-district-city>
+      <label for="district_city">City within district (optional)</label>
+      <select id="district_city" disabled>
+        <option value="">— any —</option>
       </select>
     </div>
   </div>
@@ -128,9 +144,12 @@
   const selCity   = document.getElementById('city');
   const selType   = document.getElementById('district_type');
   const selDist   = document.getElementById('district');
-  const chkDistricts = document.getElementById('enable_districts');
+  const selDistrictCity = document.getElementById('district_city');
   const districtStatus = document.querySelector('[data-district-status]');
   const districtRow  = document.querySelector('[data-district-row]');
+  const districtCityWrapper = document.querySelector('[data-district-city]');
+  const countyFlowSection = document.querySelector('[data-flow-section="county"]');
+  const districtFlowSection = document.querySelector('[data-flow-section="district"]');
   const chkR      = document.getElementById('p_r');
   const chkD      = document.getElementById('p_d');
   const chkU      = document.getElementById('p_u');
@@ -138,15 +157,97 @@
   const btnCalls  = document.getElementById('startCall');
   const btnCanv   = document.getElementById('startCanvass');
   const hint      = document.getElementById('msg');
+  const quickActionButtons = document.querySelectorAll('[data-quick-action]');
+  const quickActionHint = document.getElementById('quickActionHint');
+  const workflowCard = document.querySelector('[data-flow-card]');
+  const workflowTitle = document.getElementById('workflowTitle');
+  const workflowDescription = document.getElementById('workflowDescription');
+  const flowModeNote = document.getElementById('flowModeNote');
+  const initialUrl = new URL(window.location.href);
+  function normalizeRegionParam(rawValue) {
+    const value = (rawValue || '').toString().trim();
+    if (!value) return null;
+    const lower = value.toLowerCase();
+    if (lower === 'null' || lower === 'undefined' || lower === 'any' || lower === 'all') {
+      return null;
+    }
+    return value.toUpperCase();
+  }
+  let pendingDistrictCity = normalizeRegionParam(initialUrl.searchParams.get('district_city'));
+  let activeFlow = null;
+
+  const FLOW_META = {
+    county: {
+      title: 'County/City Targeting',
+      description: 'Select a county and optional city to pull a blended call or canvass list.',
+      hint: 'County/City targeting enabled — pick a county to continue.',
+      note: 'County/City workflow active. Switch quick actions above to change flows.',
+    },
+    district: {
+      title: 'House/Senate Targeting',
+      description: 'Lock onto a Wyoming House or Senate district for precise turf-based lists.',
+      hint: 'House/Senate targeting enabled — choose a district type and number.',
+      note: 'Choose Call to open the phone list or Canvass to drill into district cities before walking turf.',
+    },
+  };
+
+  function applyFlowUi(flow) {
+    const validFlow = !!(flow && FLOW_META[flow]);
+    if (!validFlow) {
+      workflowCard?.classList.add('is-hidden');
+      if (quickActionHint) quickActionHint.textContent = 'Choose a workflow to display its tools.';
+      if (flowModeNote) {
+        flowModeNote.textContent = '';
+        flowModeNote.style.display = 'none';
+      }
+      syncFlowSections();
+      updateButtons();
+      return;
+    }
+    workflowCard?.classList.remove('is-hidden');
+    if (workflowTitle) workflowTitle.textContent = FLOW_META[flow].title;
+    if (workflowDescription) workflowDescription.textContent = FLOW_META[flow].description;
+    if (quickActionHint) quickActionHint.textContent = FLOW_META[flow].hint;
+    if (flowModeNote) {
+      flowModeNote.textContent = FLOW_META[flow].note;
+      flowModeNote.style.display = 'block';
+    }
+    syncFlowSections();
+    updateButtons();
+  }
+
+  function setActiveFlow(flow) {
+    if (flow === 'contact') {
+      window.location.href = 'contact-form/index.html';
+      return;
+    }
+    activeFlow = flow;
+    quickActionButtons.forEach(btn => {
+      const action = btn.dataset.quickAction;
+      if (action === 'contact') {
+        btn.classList.remove('is-active');
+      } else {
+        btn.classList.toggle('is-active', action === flow);
+      }
+    });
+    applyFlowUi(flow);
+  }
+
+  quickActionButtons.forEach(btn => {
+    btn.addEventListener('click', evt => {
+      evt.preventDefault();
+      const action = btn.dataset.quickAction;
+      setActiveFlow(action);
+    });
+  });
 
   let wyMeta = null;
   let fullCountyList = [];
-  let districtLock = null;
   const districtLists = {
     house: [],
     senate: [],
   };
-  const districtCoverageCache = new Map(); // key: COUNTY, value: { house:[], senate:[] }
+  let currentDistrictCities = [];
 
   // Load wy.json with a fallback path
   async function fetchMeta() {
@@ -225,8 +326,8 @@
     return out;
   }
 
-  function districtFiltersEnabled() {
-    return !!(chkDistricts && chkDistricts.checked);
+  function isDistrictFlow() {
+    return activeFlow === 'district';
   }
 
   function setDistrictStatus(text, tone = 'muted') {
@@ -242,63 +343,91 @@
     districtStatus.textContent = text;
   }
 
-  function clearDistrictLock({ resetCounties = true } = {}) {
-    districtLock = null;
-    setDistrictStatus('');
-    if (resetCounties && fullCountyList.length) {
-      fillSelect(selCounty, fullCountyList);
-    }
-    selCounty.disabled = false;
-  }
-
   function getDistrictOptions(dtype) {
-    if (!dtype) return [];
-    const county = (selCounty.value || '').toUpperCase();
-    if (county && districtCoverageCache.has(county)) {
-      const cached = districtCoverageCache.get(county)?.[dtype] || [];
-      if (cached.length) return cached;
-    }
-    if (wyMeta) {
-      const byCounty = dtype === 'senate' ? wyMeta.senateByCounty : wyMeta.houseByCounty;
-      if (county && byCounty[county]) {
-        const scoped = (byCounty[county] || [])
-          .map(wyMeta.normalizeDistrict)
-          .filter(Boolean);
-        if (scoped.length) return scoped;
-      }
-    }
-    if (districtLists[dtype]?.length) {
-      return districtLists[dtype];
-    }
-    if (wyMeta) {
-      return dtype === 'senate' ? wyMeta.allSenateDistricts : wyMeta.allHouseDistricts;
-    }
+    if (!dtype || !wyMeta) return [];
+    if (dtype === 'house') return wyMeta.allHouseDistricts || [];
+    if (dtype === 'senate') return wyMeta.allSenateDistricts || [];
     return [];
   }
 
   function refreshDistrictOptions() {
-    if (!districtFiltersEnabled()) return;
+    if (!selType || !isDistrictFlow()) return;
     const dtype = selType.value;
-    if (!dtype) return;
     const list = getDistrictOptions(dtype);
-    const formatter = v => `District ${v}`;
+    const formatter = v => `${dtype === 'house' ? 'HD' : 'SD'} ${v}`;
     fillSelect(selDist, list, { formatter });
     selDist.disabled = !list.length;
     if (!list.includes(selDist.value)) {
       selDist.value = '';
-      clearDistrictLock({ resetCounties: false });
     }
   }
 
-  async function applyDistrictLock() {
-    if (!districtFiltersEnabled() || !selType.value || !selDist.value) {
-      clearDistrictLock({ resetCounties: false });
-      updateButtons();
+  function syncFlowSections() {
+    const districtMode = isDistrictFlow();
+    countyFlowSection?.classList.toggle('is-hidden', districtMode);
+    districtFlowSection?.classList.toggle('is-hidden', !districtMode);
+    if (selCounty) selCounty.disabled = districtMode;
+    if (selCity) selCity.disabled = districtMode || !selCounty.value;
+    if (selType) selType.disabled = !districtMode;
+    if (selDist) selDist.disabled = !districtMode || !selType.value;
+    if (!districtMode) {
+      setDistrictStatus('');
+      setDistrictCityOptions([]);
+    } else {
+      refreshDistrictOptions();
+      loadDistrictCities();
+    }
+  }
+
+  function setDistrictCityVisibility(show) {
+    if (!districtCityWrapper) return;
+    districtCityWrapper.classList.toggle('is-hidden', !show);
+    if (selDistrictCity) {
+      selDistrictCity.disabled = !show;
+      if (!show) {
+        selDistrictCity.value = '';
+      }
+    }
+  }
+
+  function setDistrictCityOptions(cities = []) {
+    if (!selDistrictCity) return;
+    currentDistrictCities = Array.from(
+      new Set((cities || []).map(city => (city || '').toUpperCase().trim()).filter(Boolean))
+    );
+    let previous = selDistrictCity.value;
+    selDistrictCity.innerHTML = '<option value="">— any —</option>';
+    currentDistrictCities
+      .slice()
+      .sort()
+      .forEach(city => {
+        const opt = document.createElement('option');
+        opt.value = city;
+        opt.textContent = titleCase(city);
+        selDistrictCity.appendChild(opt);
+      });
+    if (!currentDistrictCities.includes(previous)) {
+      previous = '';
+    }
+    if ((!previous || !previous.length) && pendingDistrictCity && currentDistrictCities.includes(pendingDistrictCity)) {
+      previous = pendingDistrictCity;
+      pendingDistrictCity = null;
+    }
+    selDistrictCity.value = previous;
+    setDistrictCityVisibility(currentDistrictCities.length > 0 || isDistrictFlow());
+  }
+
+  async function loadDistrictCities() {
+    if (!isDistrictFlow() || !selType.value || !selDist.value) {
+      if (!selType.value || !selDist.value) {
+        setDistrictStatus('');
+      }
+      setDistrictCityOptions([]);
       return;
     }
     const dtype = selType.value;
     const code = selDist.value;
-    setDistrictStatus(`Restricting to ${dtype === 'house' ? 'House' : 'Senate'} District ${code}…`);
+    setDistrictStatus(`Loading ${dtype === 'house' ? 'House' : 'Senate'} District ${code} coverage…`);
     const param = dtype === 'house' ? 'house_district' : 'senate_district';
     try {
       const res = await fetch(`/api/metadata?${param}=${encodeURIComponent(code)}`, {
@@ -307,86 +436,53 @@
       });
       if (!res.ok) throw new Error(`metadata ${res.status}`);
       const data = await res.json();
-      const rawListSource = (Array.isArray(data?.counties) && data.counties.length)
-        ? data.counties
-        : (data?.cities || []);
-      const rawList = rawListSource.filter(Boolean);
-      const allowed = rawList
-        .map(item => item.replace('(ALL)', '').trim())
-        .filter(Boolean)
-        .map(str => str.toUpperCase())
-        .sort();
-      districtLock = {
-        type: dtype,
-        code,
-        counties: allowed.length ? allowed : [],
-      };
-      if (districtLock.counties.length) {
-        fillSelect(selCounty, districtLock.counties, { formatter: titleCase });
-        const current = (selCounty.value || '').toUpperCase();
-        if (!districtLock.counties.includes(current)) {
-          selCounty.value = districtLock.counties[0];
-        }
-        handleCountyChange();
-        selCounty.disabled = districtLock.counties.length === 1;
-        setDistrictStatus(`Locked to ${districtLock.counties.length === 1 ? titleCase(districtLock.counties[0]) : `${districtLock.counties.length} counties`} for District ${code}.`);
-      } else {
-        setDistrictStatus(`District ${code} coverage loaded. Select a county.`, 'muted');
-        if (fullCountyList.length) {
-          fillSelect(selCounty, fullCountyList, { formatter: titleCase });
-        }
-        selCounty.disabled = false;
-      }
+      const cities = Array.isArray(data?.cities)
+        ? data.cities
+            .map(item => item.replace('(ALL)', '').trim())
+            .filter(Boolean)
+            .map(str => str.toUpperCase())
+        : [];
+      setDistrictCityOptions(cities);
+      const summary = currentDistrictCities.length
+        ? `${currentDistrictCities.length} city options`
+        : 'No city filter needed';
+      setDistrictStatus(`District ${code} ready — ${summary}.`);
     } catch (err) {
       console.error('Failed to load district metadata', err);
       setDistrictStatus('Unable to load district coverage. Please retry.', 'error');
-      clearDistrictLock({ resetCounties: false });
+      setDistrictCityOptions([]);
     }
-    updateButtons();
-  }
-
-  function syncDistrictVisibility() {
-    const enabled = districtFiltersEnabled();
-    if (districtRow) {
-      districtRow.hidden = !enabled;
-    }
-    if (!enabled) {
-      selType.value = '';
-      selDist.value = '';
-      clearDistrictLock();
-      // Refresh city options based on current county selection
-      if (wyMeta && selCounty.value) {
-        const cty = selCounty.value || '';
-        const cities = (wyMeta.citiesByCounty[cty] || []).slice().sort();
-        fillSelect(selCity, cities, { placeholder: '— any —', anyLabel: '— any —' });
-        selCity.disabled = !cty;
-      }
-    }
-    selType.disabled = !enabled;
-    selDist.disabled = !enabled || !selType.value;
   }
 
   function canProceed() {
-    const county = selCounty.value || '';
-    if (!county) return false;
-    if (districtFiltersEnabled()) {
+    if (isDistrictFlow()) {
       return !!(selType.value && selDist.value);
     }
-    return true;
+    const county = (selCounty.value || '').trim();
+    return Boolean(county);
   }
 
   function updateButtons() {
-    const ok = canProceed();
-    btnCalls.disabled = !ok;
-    btnCanv.disabled  = !ok;
-    hint.textContent = ok ? '' : 'Select County/City and (optionally) District to continue.';
+    const ready = canProceed();
+    btnCalls.disabled = !ready;
+    btnCanv.disabled = !ready;
+    if (!hint) return;
+    if (ready) {
+      hint.textContent = '';
+    } else if (isDistrictFlow()) {
+      hint.textContent = 'Select district type and code to continue.';
+    } else {
+      hint.textContent = 'Select a county to continue.';
+    }
   }
 
-  function persistFilters() {
-    const county = selCounty.value ? selCounty.value.toUpperCase() : null;
-    const city   = selCity.value   ? selCity.value.toUpperCase()   : null;
 
-    const useDistricts = districtFiltersEnabled();
+  function persistFilters() {
+    const useDistricts = isDistrictFlow();
+    const selectedDistrictCity = useDistricts && selDistrictCity.value ? selDistrictCity.value.toUpperCase() : null;
+    const county = useDistricts ? null : (selCounty.value ? selCounty.value.toUpperCase() : null);
+    const city   = useDistricts ? selectedDistrictCity : (selCity.value ? selCity.value.toUpperCase() : null);
+
     const district_type = useDistricts ? (selType.value || null) : null;
     let district = useDistricts ? (selDist.value || null) : null;
     if (district) {
@@ -400,11 +496,14 @@
                       : p;
     const parties = partiesFromUI().map(mapParty);
 
+    const district_city = selectedDistrictCity;
+
     const filters = {
       county,
       city,
       district_type,
       district,
+      district_city,
       parties,
       limit: Math.max(1, Math.min(200, Number(numLimit.value || 50))),
       require_phone: true // calls default; canvass can ignore
@@ -416,10 +515,11 @@
   function go(path) {
     const f = persistFilters();
     const u = new URL(path, location.origin);
-    if (f.county) u.searchParams.set('county', f.county);
-    if (f.city)   u.searchParams.set('city', f.city);
-    if (f.district_type) u.searchParams.set('district_type', f.district_type);
-    if (f.district)      u.searchParams.set('district', f.district);
+    if (f.county) u.searchParams.set('county', f.county); else u.searchParams.delete('county');
+    if (f.city)   u.searchParams.set('city', f.city); else u.searchParams.delete('city');
+    if (f.district_type) u.searchParams.set('district_type', f.district_type); else u.searchParams.delete('district_type');
+    if (f.district)      u.searchParams.set('district', f.district); else u.searchParams.delete('district');
+    if (f.district_city) u.searchParams.set('district_city', f.district_city); else u.searchParams.delete('district_city');
     f.parties?.forEach(p => u.searchParams.append('parties', p));
     if (f.limit) u.searchParams.set('limit', String(f.limit));
     location.href = u.toString();
@@ -428,23 +528,11 @@
   [selCounty, selCity, selType, selDist, chkR, chkD, chkU, numLimit].forEach(el =>
     el && el.addEventListener('change', updateButtons)
   );
+  selDistrictCity?.addEventListener('change', updateButtons);
   btnCalls.addEventListener('click', () => go('/call.html'));
   btnCanv.addEventListener('click',  () => go('/canvass/'));
-  if (chkDistricts) {
-    chkDistricts.addEventListener('change', () => {
-      syncDistrictVisibility();
-      if (districtFiltersEnabled()) {
-        if (selCounty.value) {
-          ensureDistrictCoverageForCounty(selCounty.value);
-        }
-        refreshDistrictOptions();
-      } else {
-        clearDistrictLock();
-      }
-      updateButtons();
-    });
-  }
-  syncDistrictVisibility();
+  setDistrictCityVisibility(false);
+  syncFlowSections();
 
   async function fetchDistrictMetadata() {
     try {
@@ -476,39 +564,6 @@
     }
   }
 
-  async function ensureDistrictCoverageForCounty(rawCounty) {
-    const county = (rawCounty || '').toUpperCase();
-    if (!county || districtCoverageCache.has(county)) return districtCoverageCache.get(county);
-    try {
-      const resp = await fetch(`/api/metadata?city=${encodeURIComponent(county)}`, {
-        headers: { Accept: 'application/json' },
-        credentials: 'include',
-      });
-      if (!resp.ok) throw new Error(`metadata ${resp.status}`);
-      const data = await resp.json();
-      const normalizeCode = code => {
-        if (!code) return '';
-        const trimmed = code.trim();
-        if (!trimmed) return '';
-        const num = Number(trimmed);
-        if (!Number.isNaN(num)) {
-          return String(Math.abs(num)).padStart(2, '0');
-        }
-        return trimmed.toUpperCase();
-      };
-      const entry = {
-        house: (data.house_districts || []).map(normalizeCode).filter(Boolean),
-        senate: (data.senate_districts || []).map(normalizeCode).filter(Boolean),
-      };
-      districtCoverageCache.set(county, entry);
-      refreshDistrictOptions();
-      return entry;
-    } catch (err) {
-      console.warn('district coverage lookup failed', err);
-      return null;
-    }
-  }
-
   fetchMeta().then(raw => {
     wyMeta = normalizeWy(raw);
     const wy = wyMeta;
@@ -522,44 +577,44 @@
       const cities = (wyMeta.citiesByCounty[cty] || []).slice().sort();
       fillSelect(selCity, cities, { placeholder: '— any —', anyLabel: '— any —' });
       selCity.disabled = !cty;
-
-      if (!districtFiltersEnabled()) {
-        selType.value = '';
-        selDist.value = '';
-        fillSelect(selDist, [], { placeholder: '— select —' });
-        clearDistrictLock({ resetCounties: false });
-      } else {
-        refreshDistrictOptions();
-      }
-      syncDistrictVisibility();
       updateButtons();
     }
 
-    selCounty.addEventListener('change', () => {
-      handleCountyChange();
-      if (districtFiltersEnabled() && selCounty.value) {
-        ensureDistrictCoverageForCounty(selCounty.value);
-      }
-    });
+    selCounty.addEventListener('change', handleCountyChange);
 
     selType.addEventListener('change', () => {
       refreshDistrictOptions();
-      clearDistrictLock({ resetCounties: false });
+      loadDistrictCities();
       updateButtons();
     });
 
     selDist.addEventListener('change', () => {
-      applyDistrictLock();
+      loadDistrictCities();
+      updateButtons();
     });
 
     selCity.addEventListener('change', updateButtons);
 
     updateButtons();
     fetchDistrictMetadata();
+    if (isDistrictFlow()) {
+      refreshDistrictOptions();
+      loadDistrictCities();
+    }
   }).catch(err => {
     console.error('Failed to load wy.json', err);
     hint.textContent = 'Failed to load county/city metadata.';
   });
+
+  const hasDistrictParams = !!(initialUrl.searchParams.get('district_type') || initialUrl.searchParams.get('district'));
+  const hasCountyParams = !!initialUrl.searchParams.get('county');
+  if (hasDistrictParams) {
+    setActiveFlow('district');
+  } else if (hasCountyParams) {
+    setActiveFlow('county');
+  } else {
+    setActiveFlow('county');
+  }
 })();
 </script>
 <script src="/config/environments.js"></script>

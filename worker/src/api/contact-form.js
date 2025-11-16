@@ -56,7 +56,7 @@ async function checkExistingAddress(env, county, city, street, houseNumber) {
       p.phone_e164
     FROM voters v
     JOIN v_voters_addr_norm a ON v.voter_id = a.voter_id
-    LEFT JOIN v_best_phone p ON v.voter_id = p.voter_id
+    LEFT JOIN best_phone p ON v.voter_id = p.voter_id
     WHERE v.county = ? AND a.city = ?
       AND (
         UPPER(a.addr1) LIKE UPPER(?) 
@@ -80,7 +80,35 @@ async function checkExistingAddress(env, county, city, street, houseNumber) {
 
 // 5. POST /api/contact-form/search-names
 // Fuzzy search for similar names in area
-async function searchSimilarNames(env, { county, city, firstName, lastName }) {
+async function searchSimilarNames(db, { county, city, firstName, lastName }) {
+  if (!db) {
+    throw new Error('Database connection unavailable');
+  }
+  const caseParams = [
+    lastName, firstName,
+    lastName, firstName,
+    lastName,
+    firstName, lastName,
+  ];
+  const locationClauses = [];
+  const locationParams = [];
+  if (county) {
+    locationClauses.push('v.county = ?');
+    locationParams.push(county);
+  }
+  if (city) {
+    locationClauses.push('a.city = ?');
+    locationParams.push(city);
+  }
+  const locationSql = locationClauses.length ? locationClauses.join(' AND ') + ' AND ' : '';
+  const nameFilterSql = `
+    (
+      UPPER(a.ln) LIKE UPPER(?) || '%'
+      OR UPPER(a.fn) LIKE UPPER(?) || '%'
+      OR UPPER(a.ln) LIKE '%' || UPPER(?) || '%'
+    )
+  `;
+  const nameFilterParams = [lastName, firstName, lastName];
   const query = `
     SELECT 
       v.voter_id,
@@ -88,6 +116,8 @@ async function searchSimilarNames(env, { county, city, firstName, lastName }) {
       a.ln as last_name,
       a.addr1,
       a.city,
+      v.county,
+      a.zip,
       v.political_party,
       p.phone_e164,
       CASE 
@@ -99,28 +129,13 @@ async function searchSimilarNames(env, { county, city, firstName, lastName }) {
       END as match_score
     FROM voters v
     JOIN v_voters_addr_norm a ON v.voter_id = a.voter_id
-    LEFT JOIN v_best_phone p ON v.voter_id = p.voter_id
-    WHERE v.county = ? AND a.city = ?
-      AND (
-        UPPER(a.ln) LIKE UPPER(?) || '%'
-        OR UPPER(a.fn) LIKE UPPER(?) || '%'
-        OR UPPER(a.ln) LIKE '%' || UPPER(?) || '%'
-      )
+    LEFT JOIN best_phone p ON v.voter_id = p.voter_id
+    WHERE ${locationSql}${nameFilterSql}
     ORDER BY match_score DESC, a.ln, a.fn
-    LIMIT 10
+    LIMIT 25
   `;
-  
-  const result = await env.d1.prepare(query)
-    .bind(
-      lastName, firstName, // exact match check
-      lastName, firstName, // last + first initial
-      lastName, // last name only
-      firstName, lastName, // first + partial last
-      county, city, // location filter
-      lastName, firstName, lastName // fuzzy search
-    )
-    .all();
-  
+  const params = [...caseParams, ...locationParams, ...nameFilterParams];
+  const result = await db.prepare(query).bind(...params).all();
   return result.results;
 }
 

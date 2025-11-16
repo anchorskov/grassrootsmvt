@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Manage Icebreakers & Scripts</title>
+  <script src="/config/environments.js"></script>
+  <script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
+  <script src="/shared/authGlobal.js"></script>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    h1 { margin-bottom: 0.25rem; }
+    .muted { color: #6b7280; }
+    .layout { display: grid; grid-template-columns: 280px 1fr; gap: 1rem; align-items: stretch; }
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 1rem; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.07); }
+    .list { max-height: calc(100vh - 200px); overflow-y: auto; }
+    .list-item { padding: 0.75rem; border-radius: 8px; cursor: pointer; margin-bottom: 0.5rem; border: 1px solid transparent; }
+    .list-item.active { border-color: #0ea5e9; background: #e0f2fe; }
+    .list-item h3 { margin: 0; font-size: 1rem; }
+    .list-item .meta { font-size: 0.85rem; color: #475569; margin-top: 0.15rem; }
+    form { display: grid; gap: 0.75rem; }
+    label { font-weight: 600; display: block; margin-bottom: 0.25rem; }
+    input[type=text], input[type=number], textarea { width: 100%; padding: 0.6rem; border: 1px solid #cbd5e1; border-radius: 8px; font-family: inherit; }
+    textarea { min-height: 80px; }
+    .row { display: flex; gap: 1rem; }
+    .row > * { flex: 1; }
+    .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    button { border: none; border-radius: 8px; padding: 0.6rem 1.2rem; font-weight: 600; cursor: pointer; }
+    button.primary { background: #0ea5e9; color: white; }
+    button.secondary { background: #e2e8f0; color: #0f172a; }
+    button.danger { background: #ef4444; color: white; }
+    .badge { padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; display: inline-block; }
+    .badge.active { background: #dcfce7; color: #166534; }
+    .badge.inactive { background: #fee2e2; color: #991b1b; }
+    .hint { font-size: 0.8rem; color: #64748b; margin-top: 0.25rem; }
+    @media (max-width: 960px) {
+      .layout { grid-template-columns: 1fr; }
+      .list { max-height: none; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Script & Icebreaker Manager</h1>
+  <p class="muted">Create and update campaign touchpoints used by the volunteer call tools.</p>
+  <div class="actions" style="margin: 0.5rem 0 1rem;">
+    <button id="newBtn" class="secondary">➕ New Icebreaker</button>
+    <button id="refreshBtn" class="secondary">🔄 Refresh</button>
+    <a href="/admin/" style="margin-left:auto;">
+      <button class="secondary" type="button">← Back to Admin</button>
+    </a>
+  </div>
+
+  <div class="layout">
+    <aside class="card list" id="touchpointList">
+      <div class="muted">Loading touchpoints…</div>
+    </aside>
+
+    <section class="card">
+      <form id="touchpointForm">
+        <div class="row">
+          <div>
+            <label for="tp-id">Touchpoint ID</label>
+            <input id="tp-id" type="text" placeholder="auto-generated for new entries" />
+            <p class="hint">Lowercase letters, numbers, and dashes.</p>
+          </div>
+          <div>
+            <label for="tp-label">Label</label>
+            <input id="tp-label" type="text" required />
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="tp-issue">Issue Tag</label>
+            <input id="tp-issue" type="text" placeholder="property_tax" />
+          </div>
+          <div>
+            <label for="tp-channels">Channels</label>
+            <input id="tp-channels" type="text" placeholder="phone,door" />
+            <p class="hint">Comma-separated list. Leave blank for all.</p>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="tp-priority">Priority</label>
+            <input id="tp-priority" type="number" min="1" value="100" />
+          </div>
+          <div>
+            <label for="tp-active">Status</label>
+            <select id="tp-active">
+              <option value="1">Active</option>
+              <option value="0">Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label for="tp-icebreaker">Icebreaker</label>
+          <textarea id="tp-icebreaker" required></textarea>
+        </div>
+
+        <div>
+          <label for="tp-body">Talking Points</label>
+          <textarea id="tp-body" required></textarea>
+        </div>
+
+        <div>
+          <label for="tp-cta">Closing Question / CTA</label>
+          <textarea id="tp-cta"></textarea>
+        </div>
+
+        <div>
+          <label for="tp-metadata">Metadata (JSON)</label>
+          <textarea id="tp-metadata" placeholder='{"resource":"https://..."}'></textarea>
+          <p class="hint">Optional JSON blob for links or extra config.</p>
+        </div>
+
+        <div>
+          <label for="tp-segments">Targeting Rules</label>
+          <textarea id="tp-segments" placeholder="party=R&#10;county=NATRONA"></textarea>
+          <p class="hint">One key=value per line (e.g., <code>party=R</code>, <code>county=NATRONA</code>). Leave blank for all voters.</p>
+        </div>
+
+        <div class="actions">
+          <button type="button" class="primary" id="saveBtn">💾 Save</button>
+          <button type="button" class="secondary" id="resetBtn">Reset</button>
+          <button type="button" class="danger" id="deleteBtn" disabled>🗑️ Delete</button>
+        </div>
+        <p id="formStatus" class="muted"></p>
+      </form>
+    </section>
+  </div>
+
+  <script>
+    const API = (path = '', params = {}) => {
+      const cleanPath = String(path).replace(/^\/?(api\/)?/, '');
+      if (window.environmentConfig && typeof window.environmentConfig.getApiUrl === 'function') {
+        return window.environmentConfig.getApiUrl(cleanPath, params);
+      }
+      const qs = new URLSearchParams(params);
+      return `/api/${cleanPath}${qs.toString() ? `?${qs}` : ''}`;
+    };
+
+    const state = {
+      touchpoints: [],
+      selectedId: null,
+    };
+
+    const listEl = document.getElementById('touchpointList');
+    const formStatus = document.getElementById('formStatus');
+    const inputs = {
+      id: document.getElementById('tp-id'),
+      label: document.getElementById('tp-label'),
+      issue: document.getElementById('tp-issue'),
+      channels: document.getElementById('tp-channels'),
+      priority: document.getElementById('tp-priority'),
+      active: document.getElementById('tp-active'),
+      icebreaker: document.getElementById('tp-icebreaker'),
+      body: document.getElementById('tp-body'),
+      cta: document.getElementById('tp-cta'),
+      metadata: document.getElementById('tp-metadata'),
+      segments: document.getElementById('tp-segments'),
+    };
+    const saveBtn = document.getElementById('saveBtn');
+    const deleteBtn = document.getElementById('deleteBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const newBtn = document.getElementById('newBtn');
+
+    async function jsonFetch(url, init = {}) {
+      if (typeof window.apiFetch !== 'function') {
+        throw new Error('apiClient not ready');
+      }
+      const path = String(url).replace(/^\/?api\/?/, '');
+      const response = await window.apiFetch(path, init);
+      const text = await response.text().catch(() => '');
+      if (!response.ok) {
+        throw new Error(text || `HTTP ${response.status}`);
+      }
+      return text ? JSON.parse(text) : null;
+    }
+
+    function setStatus(message, isError = false) {
+      if (!formStatus) return;
+      formStatus.textContent = message || '';
+      formStatus.style.color = isError ? '#b91c1c' : '#6b7280';
+    }
+
+    function segmentsToTextarea(segments = []) {
+      return segments.map(seg => `${seg.segment_key}=${seg.segment_value}`).join('\n');
+    }
+
+    function parseSegmentsTextarea(text) {
+      if (!text) return [];
+      return text
+        .split('\n')
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(line => {
+          const [key, ...rest] = line.split('=');
+          return {
+            segment_key: (key || '').trim(),
+            segment_value: rest.join('=').trim(),
+          };
+        })
+        .filter(seg => seg.segment_key && seg.segment_value);
+    }
+
+    function parseMetadata(text) {
+      if (!text || !text.trim()) return null;
+      try {
+        return JSON.parse(text);
+      } catch {
+        throw new Error('Metadata must be valid JSON');
+      }
+    }
+
+    function fillForm(touchpoint = null) {
+      if (!touchpoint) {
+        Object.values(inputs).forEach(input => {
+          if (input.tagName === 'TEXTAREA') input.value = '';
+          else input.value = '';
+        });
+        inputs.priority.value = '100';
+        inputs.active.value = '1';
+        deleteBtn.disabled = true;
+        setStatus('Creating new touchpoint');
+        return;
+      }
+      state.selectedId = touchpoint.touchpoint_id;
+      inputs.id.value = touchpoint.touchpoint_id;
+      inputs.label.value = touchpoint.label || '';
+      inputs.issue.value = touchpoint.issue_tag || '';
+      inputs.channels.value = touchpoint.channels || '';
+      inputs.priority.value = touchpoint.priority ?? 100;
+      inputs.active.value = touchpoint.is_active ? '1' : '0';
+      inputs.icebreaker.value = touchpoint.icebreaker || '';
+      inputs.body.value = touchpoint.body || '';
+      inputs.cta.value = touchpoint.cta_question || '';
+      inputs.metadata.value = touchpoint.metadata_raw
+        ? JSON.stringify(JSON.parse(touchpoint.metadata_raw), null, 2)
+        : '';
+      inputs.segments.value = segmentsToTextarea(touchpoint.segments);
+      deleteBtn.disabled = false;
+      setStatus(`Editing ${touchpoint.label}`);
+    }
+
+    function renderList() {
+      if (!state.touchpoints.length) {
+        listEl.innerHTML = '<p class="muted">No touchpoints yet.</p>';
+        return;
+      }
+      listEl.innerHTML = state.touchpoints
+        .map(tp => {
+          const isActive = tp.is_active === 1;
+          return `
+            <div class="list-item ${state.selectedId === tp.touchpoint_id ? 'active' : ''}" data-id="${tp.touchpoint_id}">
+              <h3>${tp.label || tp.touchpoint_id}</h3>
+              <div class="meta">
+                <span class="badge ${isActive ? 'active' : 'inactive'}">${isActive ? 'Active' : 'Inactive'}</span>
+                ${tp.issue_tag ? `• ${tp.issue_tag}` : ''}
+                • Priority ${tp.priority ?? 100}
+              </div>
+            </div>
+          `;
+        })
+        .join('');
+
+      listEl.querySelectorAll('.list-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const id = item.dataset.id;
+          const tp = state.touchpoints.find(t => t.touchpoint_id === id);
+          fillForm(tp || null);
+          state.selectedId = id;
+          renderList();
+        });
+      });
+    }
+
+    async function loadTouchpoints() {
+      setStatus('Loading…');
+      listEl.innerHTML = '<div class="muted">Loading touchpoints…</div>';
+      try {
+        const result = await jsonFetch(API('/admin/touchpoints'));
+        state.touchpoints = result?.touchpoints || [];
+        renderList();
+        if (state.touchpoints.length) {
+          const selected = state.touchpoints.find(tp => tp.touchpoint_id === state.selectedId) || state.touchpoints[0];
+          fillForm(selected);
+          state.selectedId = selected.touchpoint_id;
+        } else {
+          fillForm(null);
+        }
+        setStatus('Ready');
+      } catch (err) {
+        listEl.innerHTML = `<div class="muted" style="color:#b91c1c;">Error: ${err.message}</div>`;
+        setStatus(err.message, true);
+      }
+    }
+
+    function gatherPayload() {
+      const metadata = inputs.metadata.value ? parseMetadata(inputs.metadata.value) : null;
+      return {
+        touchpoint_id: inputs.id.value.trim() || undefined,
+        label: inputs.label.value.trim(),
+        icebreaker: inputs.icebreaker.value.trim(),
+        body: inputs.body.value.trim(),
+        cta_question: inputs.cta.value.trim() || null,
+        issue_tag: inputs.issue.value.trim() || null,
+        channels: inputs.channels.value.trim() || 'phone',
+        priority: Number(inputs.priority.value) || 100,
+        is_active: inputs.active.value === '1' ? 1 : 0,
+        metadata,
+        segments: parseSegmentsTextarea(inputs.segments.value),
+      };
+    }
+
+    async function saveTouchpoint() {
+      try {
+        setStatus('Saving…');
+        saveBtn.disabled = true;
+        const payload = gatherPayload();
+        let response;
+        if (state.selectedId) {
+          response = await jsonFetch(API(`/admin/touchpoints/${state.selectedId}`), {
+            method: 'PUT',
+            body: JSON.stringify(payload),
+          });
+        } else {
+          response = await jsonFetch(API('/admin/touchpoints'), {
+            method: 'POST',
+            body: JSON.stringify(payload),
+          });
+        }
+        const saved = response?.touchpoint;
+        setStatus('Saved!');
+        state.selectedId = saved?.touchpoint_id || payload.touchpoint_id;
+        await loadTouchpoints();
+      } catch (err) {
+        setStatus(err.message, true);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    }
+
+    async function deleteTouchpoint() {
+      if (!state.selectedId) return;
+      const confirmDelete = confirm(`Delete touchpoint "${state.selectedId}"? This cannot be undone.`);
+      if (!confirmDelete) return;
+      try {
+        setStatus('Deleting…');
+        deleteBtn.disabled = true;
+        await jsonFetch(API(`/admin/touchpoints/${state.selectedId}`), { method: 'DELETE' });
+        state.selectedId = null;
+        await loadTouchpoints();
+        setStatus('Deleted');
+      } catch (err) {
+        setStatus(err.message, true);
+        deleteBtn.disabled = false;
+      }
+    }
+
+    refreshBtn.addEventListener('click', loadTouchpoints);
+    newBtn.addEventListener('click', () => {
+      state.selectedId = null;
+      fillForm(null);
+      renderList();
+    });
+    saveBtn.addEventListener('click', saveTouchpoint);
+    deleteBtn.addEventListener('click', deleteTouchpoint);
+    resetBtn.addEventListener('click', () => {
+      if (state.selectedId) {
+        const tp = state.touchpoints.find(t => t.touchpoint_id === state.selectedId);
+        fillForm(tp || null);
+      } else {
+        fillForm(null);
+      }
+    });
+
+    loadTouchpoints();
+  </script>
+</body>
+</html>

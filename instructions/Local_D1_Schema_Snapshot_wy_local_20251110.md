@@ -141,6 +141,46 @@ ORDER BY CAST(district_code AS INTEGER);
 - `voter_contact`: Unified view of `voter_contacts` for admin interface
 - `voter_contact_st`: Unified view of `voter_contact_staging` for review queue
 
+### `campaign_touchpoints` / `campaign_touchpoint_segments` (NEW — Migrations 010)
+**Role:** Central catalog of volunteer-facing scripts/icebreakers plus optional targeting rules. Backed by new admin UI that lets comms staff publish messaging without redeploys.
+
+**Columns (`campaign_touchpoints`):**
+- `touchpoint_id` TEXT PRIMARY KEY (slug, e.g., `property_tax_relief_intro`)
+- `label` TEXT NOT NULL (admin-facing title)
+- `icebreaker` TEXT NOT NULL (opening line)
+- `body` TEXT NOT NULL (main talking points)
+- `cta_question` TEXT (closing ask)
+- `issue_tag` TEXT (taxonomy for reporting)
+- `channels` TEXT DEFAULT 'phone' (comma-delimited list; blank = all)
+- `priority` INTEGER DEFAULT 100 (lower = served first)
+- `is_active` INTEGER DEFAULT 1 (soft toggle)
+- `metadata` TEXT (JSON blob for links/resources)
+- Timestamps: `created_at`, `updated_at`
+
+**Targeting (`campaign_touchpoint_segments`):**
+- `touchpoint_id` TEXT FK
+- `segment_key` / `segment_value` TEXT (case-insensitive match against voter profile fields like `party`, `county`, `house_district`)
+- Indexes on `(segment_key)` and `(touchpoint_id, segment_key)` support quick lookups
+
+**Usage:** The `/api/script` endpoint resolves an active touchpoint for each voter, honoring channel filters and segments. Admins can CRUD entries via `/admin/touchpoints`.
+
+### `volunteers` (Expanded — Migration 011)
+**Role:** Stores Cloudflare-authenticated users with richer contact metadata for accountability.
+
+**Columns:**
+- `id` TEXT PRIMARY KEY (email/Access ID)
+- `name` TEXT NOT NULL (legacy full name)
+- `first_name` TEXT NULL
+- `last_name` TEXT NULL
+- `cell_phone` TEXT NULL (E.164 recommended)
+- `is_active` INTEGER DEFAULT 1
+
+**Notes:**
+- Existing `name` values were split into first/last where possible during migration.
+- `idx_volunteers_cell_phone` accelerates opt-in lookups and volunteer roster exports.
+
+---
+
 ### `wy_city_county`
 **Role:** Authoritative city/county normalization table used to resolve `city_county_id`.
 

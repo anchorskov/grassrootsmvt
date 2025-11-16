@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Volunteer Directory</title>
+  <script src="/config/environments.js"></script>
+  <script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
+  <script src="/shared/authGlobal.js"></script>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, sans-serif; margin: 1rem; }
+    h1 { margin-bottom: 0; }
+    .muted { color: #6b7280; }
+    .layout { display: grid; grid-template-columns: 320px 1fr; gap: 1rem; }
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 1rem; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .list { max-height: calc(100vh - 180px); overflow-y: auto; }
+    .list-item { border: 1px solid transparent; border-radius: 10px; padding: 0.75rem; margin-bottom: 0.5rem; cursor: pointer; }
+    .list-item.active { border-color: #0ea5e9; background: #e0f2fe; }
+    .list-item h3 { margin: 0; font-size: 1rem; }
+    .list-item span { font-size: 0.85rem; color: #475569; display: block; }
+    label { font-weight: 600; display: block; margin-bottom: 0.25rem; }
+    input, select, textarea { width: 100%; padding: 0.6rem; border-radius: 8px; border: 1px solid #cbd5e1; font-family: inherit; }
+    textarea { min-height: 70px; }
+    .row { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .row > * { flex: 1; }
+    .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
+    button { border: none; border-radius: 8px; padding: 0.6rem 1.2rem; font-weight: 600; cursor: pointer; }
+    button.primary { background: #0ea5e9; color: #fff; }
+    button.secondary { background: #e2e8f0; color: #0f172a; }
+    button.danger { background: #ef4444; color: #fff; }
+    .badge { padding: 0.15rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; }
+    .badge.active { background: #dcfce7; color: #166534; }
+    .badge.inactive { background: #fee2e2; color: #991b1b; }
+    .toolbar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin: 0.75rem 0; }
+    .search-input { flex: 1; min-width: 200px; }
+    @media (max-width: 1024px) {
+      .layout { grid-template-columns: 1fr; }
+      .list { max-height: none; }
+    }
+  </style>
+</head>
+<body>
+  <h1>Volunteer Directory</h1>
+  <p class="muted">Add or update campaign volunteers. Changes sync immediately with authentication records.</p>
+
+  <div class="toolbar">
+    <input id="searchInput" class="search-input" type="text" placeholder="Search by email, name, or phone" />
+    <select id="statusFilter">
+      <option value="all">All statuses</option>
+      <option value="true">Active only</option>
+      <option value="false">Inactive only</option>
+    </select>
+    <button id="filterBtn" class="secondary">Filter</button>
+    <button id="refreshBtn" class="secondary">Refresh</button>
+    <button id="newBtn" class="secondary">➕ New Volunteer</button>
+    <a href="/admin/"><button class="secondary" type="button">← Back</button></a>
+  </div>
+
+  <div class="layout">
+    <aside class="card list" id="volunteerList">
+      <div class="muted">Loading volunteers…</div>
+    </aside>
+
+    <section class="card">
+      <form id="volunteerForm">
+        <div class="row">
+          <div>
+            <label for="vol-id">Email / ID</label>
+            <input id="vol-id" type="email" placeholder="volunteer@example.org" required />
+            <p class="muted" style="font-size:0.8rem;">Must match Cloudflare Access email.</p>
+          </div>
+          <div>
+            <label for="vol-status">Status</label>
+            <select id="vol-status">
+              <option value="1">Active</option>
+              <option value="0">Inactive</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="vol-first">First Name</label>
+            <input id="vol-first" type="text" />
+          </div>
+          <div>
+            <label for="vol-last">Last Name</label>
+            <input id="vol-last" type="text" />
+          </div>
+        </div>
+
+        <div>
+          <label for="vol-name">Display Name</label>
+          <input id="vol-name" type="text" placeholder="Fallback used in call logs" />
+        </div>
+
+        <div>
+          <label for="vol-phone">Cell Phone</label>
+          <input id="vol-phone" type="tel" placeholder="+13075551234" />
+          <p class="muted" style="font-size:0.8rem;">Digits only; stored as E.164.</p>
+        </div>
+
+        <div class="actions">
+          <button type="button" class="primary" id="saveBtn">💾 Save</button>
+          <button type="button" class="secondary" id="resetBtn">Reset</button>
+          <button type="button" class="danger" id="deleteBtn" disabled>🗑️ Delete</button>
+        </div>
+        <p id="formStatus" class="muted"></p>
+      </form>
+    </section>
+  </div>
+
+  <script>
+    const API = (path = '', params = {}) => {
+      const cleanPath = String(path).replace(/^\/?(api\/)?/, '');
+      if (window.environmentConfig && typeof window.environmentConfig.getApiUrl === 'function') {
+        return window.environmentConfig.getApiUrl(cleanPath, params);
+      }
+      const qs = new URLSearchParams(params);
+      return `/api/${cleanPath}${qs.toString() ? `?${qs}` : ''}`;
+    };
+
+    const state = {
+      volunteers: [],
+      selectedId: null,
+      filters: { search: '', active: 'all' },
+    };
+
+    const listEl = document.getElementById('volunteerList');
+    const saveBtn = document.getElementById('saveBtn');
+    const deleteBtn = document.getElementById('deleteBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const newBtn = document.getElementById('newBtn');
+    const formStatus = document.getElementById('formStatus');
+    const searchInput = document.getElementById('searchInput');
+    const statusFilter = document.getElementById('statusFilter');
+    const filterBtn = document.getElementById('filterBtn');
+    const inputs = {
+      id: document.getElementById('vol-id'),
+      first_name: document.getElementById('vol-first'),
+      last_name: document.getElementById('vol-last'),
+      name: document.getElementById('vol-name'),
+      cell_phone: document.getElementById('vol-phone'),
+      is_active: document.getElementById('vol-status'),
+    };
+
+    async function jsonFetch(url, init = {}) {
+      if (typeof window.apiFetch !== 'function') {
+        throw new Error('apiClient not ready');
+      }
+      const path = String(url).replace(/^\/?api\/?/, '');
+      const response = await window.apiFetch(path, init);
+      const text = await response.text().catch(() => '');
+      if (!response.ok) {
+        throw new Error(text || `HTTP ${response.status}`);
+      }
+      return text ? JSON.parse(text) : null;
+    }
+
+    function setStatus(msg, isError = false) {
+      formStatus.textContent = msg || '';
+      formStatus.style.color = isError ? '#b91c1c' : '#6b7280';
+    }
+
+    function renderList() {
+      if (!state.volunteers.length) {
+        listEl.innerHTML = '<p class="muted">No volunteers found.</p>';
+        return;
+      }
+      listEl.innerHTML = state.volunteers
+        .map(v => {
+          const active = v.is_active === 1;
+          return `
+            <div class="list-item ${state.selectedId === v.id ? 'active' : ''}" data-id="${v.id}">
+              <h3>${v.first_name || v.last_name ? `${v.first_name || ''} ${v.last_name || ''}`.trim() : v.name || v.id}</h3>
+              <span>${v.id}</span>
+              <span>
+                <span class="badge ${active ? 'active' : 'inactive'}">${active ? 'Active' : 'Inactive'}</span>
+                ${v.cell_phone ? ' • ' + v.cell_phone : ''}
+              </span>
+            </div>
+          `;
+        })
+        .join('');
+
+      listEl.querySelectorAll('.list-item').forEach(item => {
+        item.addEventListener('click', () => {
+          const volunteer = state.volunteers.find(v => v.id === item.dataset.id);
+          selectVolunteer(volunteer);
+        });
+      });
+    }
+
+    function fillForm(vol) {
+      inputs.id.value = vol?.id || '';
+      inputs.id.disabled = !!vol;
+      inputs.first_name.value = vol?.first_name || '';
+      inputs.last_name.value = vol?.last_name || '';
+      inputs.name.value = vol?.name || '';
+      inputs.cell_phone.value = vol?.cell_phone || '';
+      inputs.is_active.value = vol?.is_active === 0 ? '0' : '1';
+      deleteBtn.disabled = !vol;
+      setStatus(vol ? `Editing ${vol.id}` : 'Creating new volunteer');
+    }
+
+    function selectVolunteer(volunteer) {
+      state.selectedId = volunteer?.id || null;
+      fillForm(volunteer || null);
+      renderList();
+    }
+
+    async function loadVolunteers() {
+      try {
+        setStatus('Loading…');
+        const params = new URLSearchParams();
+        if (state.filters.search) params.set('search', state.filters.search);
+        if (state.filters.active !== 'all') params.set('active', state.filters.active);
+        const result = await jsonFetch(API(`/admin/volunteers?${params}`));
+        state.volunteers = result?.volunteers || [];
+        renderList();
+        if (state.volunteers.length) {
+          const selected =
+            state.volunteers.find(v => v.id === state.selectedId) || state.volunteers[0];
+          selectVolunteer(selected);
+        } else {
+          selectVolunteer(null);
+        }
+        setStatus('Ready');
+      } catch (err) {
+        listEl.innerHTML = `<p class="muted" style="color:#b91c1c;">${err.message}</p>`;
+        setStatus(err.message, true);
+      }
+    }
+
+    function gatherPayload() {
+      return {
+        id: inputs.id.value.trim(),
+        first_name: inputs.first_name.value.trim() || null,
+        last_name: inputs.last_name.value.trim() || null,
+        name: inputs.name.value.trim() || null,
+        cell_phone: inputs.cell_phone.value.trim() || null,
+        is_active: inputs.is_active.value === '1' ? 1 : 0,
+      };
+    }
+
+    async function saveVolunteer() {
+      const payload = gatherPayload();
+      if (!payload.id) {
+        setStatus('Email/ID is required', true);
+        return;
+      }
+      try {
+        setStatus('Saving…');
+        saveBtn.disabled = true;
+        const path = state.selectedId ? `/admin/volunteers/${state.selectedId}` : '/admin/volunteers';
+        const method = state.selectedId ? 'PUT' : 'POST';
+        const result = await jsonFetch(API(path), {
+          method,
+          body: JSON.stringify(payload),
+        });
+        state.selectedId = result?.volunteer?.id || payload.id;
+        await loadVolunteers();
+        setStatus('Saved');
+      } catch (err) {
+        setStatus(err.message, true);
+      } finally {
+        saveBtn.disabled = false;
+      }
+    }
+
+    async function deleteVolunteer() {
+      if (!state.selectedId) return;
+      const ok = confirm(`Delete ${state.selectedId}?`);
+      if (!ok) return;
+      try {
+        setStatus('Deleting…');
+        deleteBtn.disabled = true;
+        await jsonFetch(API(`/admin/volunteers/${state.selectedId}`), { method: 'DELETE' });
+        state.selectedId = null;
+        await loadVolunteers();
+        setStatus('Deleted');
+      } catch (err) {
+        setStatus(err.message, true);
+        deleteBtn.disabled = false;
+      }
+    }
+
+    refreshBtn.addEventListener('click', loadVolunteers);
+    newBtn.addEventListener('click', () => {
+      state.selectedId = null;
+      inputs.id.disabled = false;
+      fillForm(null);
+      renderList();
+    });
+    resetBtn.addEventListener('click', () => {
+      if (state.selectedId) {
+        const vol = state.volunteers.find(v => v.id === state.selectedId);
+        fillForm(vol || null);
+      } else {
+        fillForm(null);
+      }
+    });
+    saveBtn.addEventListener('click', saveVolunteer);
+    deleteBtn.addEventListener('click', deleteVolunteer);
+    filterBtn.addEventListener('click', () => {
+      state.filters.search = searchInput.value.trim();
+      state.filters.active = statusFilter.value;
+      loadVolunteers();
+    });
+
+    loadVolunteers();
+  </script>
+</body>
+</html>

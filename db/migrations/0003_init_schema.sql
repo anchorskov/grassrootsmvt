@@ -21,7 +21,7 @@ CREATE TABLE IF NOT EXISTS voters_addr_norm (
 	house TEXT
 );
 
--- Materialized best phone (from v_best_phone)
+-- Materialized best phone (from best_phone table)
 CREATE TABLE IF NOT EXISTS best_phone (
 	voter_id TEXT PRIMARY KEY,
 	phone_e164 TEXT,

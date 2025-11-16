@@ -158,16 +158,30 @@ let districtStreetSeedPromise = null;
 let streetAutocomplete;
 const districtStreetsStatusEl = document.getElementById('districtStreetsStatus');
 
+function normalizeRegionParam(rawValue) {
+  const value = (rawValue || '').toString().trim();
+  if (!value) return null;
+  const lower = value.toLowerCase();
+  if (lower === 'null' || lower === 'undefined' || lower === 'any' || lower === 'all') {
+    return null;
+  }
+  return value.toUpperCase();
+}
+
 function fromQS() {
   const u = new URL(location.href);
   const parties = u.searchParams.getAll('parties');
     const f = {
-      county: (u.searchParams.get('county')||'').toUpperCase() || null,
-      city:   (u.searchParams.get('city')||'').toUpperCase() || null,
+      county: normalizeRegionParam(u.searchParams.get('county')),
+      city:   normalizeRegionParam(u.searchParams.get('city')),
       district_type: u.searchParams.get('district_type') || null,
       district: u.searchParams.get('district') || null,
+      district_city: normalizeRegionParam(u.searchParams.get('district_city')),
       parties: parties.length ? parties : [],
     };
+    if (!f.city && f.district_city) {
+      f.city = f.district_city;
+    }
     return f;
   }
 
@@ -269,6 +283,7 @@ async function preloadDistrictStreets(filters) {
           city: filters.city || null,
           district_type: filters.district_type,
           district: filters.district,
+          district_city: filters.district_city || null,
           parties: filters.parties || [],
         },
         limit: DISTRICT_STREET_LIMIT,
@@ -741,6 +756,10 @@ window.addEventListener('pagehide', () => persistCanvassState());
     suggestionsId: 'houseSuggestions',
     getCounty: () => fromQS().county,
     getCity: () => fromQS().city,
+    getDistrictFilters: () => {
+      const f = fromQS();
+      return { district_type: f.district_type, district: f.district, district_city: f.district_city };
+    },
     getStreet: () => document.getElementById('street').value,
     onHouseSelected: (houseNumber, houseData) => {
       console.log('🏠 House selected:', houseNumber);
@@ -755,6 +774,10 @@ window.addEventListener('pagehide', () => persistCanvassState());
     suggestionsId: 'streetSuggestions',
     getCounty: () => fromQS().county,
     getCity: () => fromQS().city,
+    getDistrictFilters: () => {
+      const f = fromQS();
+      return { district_type: f.district_type, district: f.district, district_city: f.district_city };
+    },
     onStreetSelected: async (streetName) => {
       // Enable house number field
       houseAutocomplete.enable();

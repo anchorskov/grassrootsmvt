@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Test: Street Autocomplete - Short Names (Albany/Laramie)</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 800px;
+      margin: 40px auto;
+      padding: 20px;
+      background: #f8fafc;
+    }
+    h1 {
+      color: #1e293b;
+      border-bottom: 2px solid #2563eb;
+      padding-bottom: 10px;
+    }
+    .test-section {
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 20px;
+      margin: 20px 0;
+    }
+    .test-title {
+      font-weight: 600;
+      color: #475569;
+      margin-bottom: 10px;
+    }
+    .autocomplete-container {
+      position: relative;
+      margin: 10px 0;
+    }
+    label {
+      display: block;
+      font-size: 0.9rem;
+      color: #334155;
+      margin-bottom: 5px;
+    }
+    input {
+      width: 100%;
+      font-size: 1rem;
+      padding: 0.7rem 0.75rem;
+      border: 1px solid #cbd5e1;
+      border-radius: 10px;
+    }
+    input:disabled {
+      background-color: #f8fafc;
+      color: #64748b;
+      cursor: not-allowed;
+      border-color: #e2e8f0;
+    }
+    input:focus {
+      outline: 2px solid #2563eb;
+      border-color: #2563eb;
+    }
+    .autocomplete-suggestions {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: white;
+      border: 2px solid #2563eb;
+      border-top: none;
+      border-radius: 0 0 10px 10px;
+      max-height: 300px;
+      overflow-y: auto;
+      z-index: 9999;
+      display: none;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    }
+    .autocomplete-suggestion {
+      padding: 12px 16px;
+      cursor: pointer;
+      border-bottom: 1px solid #f1f5f9;
+      font-weight: 500;
+      background: white;
+    }
+    .autocomplete-suggestion:hover {
+      background: #f8fafc;
+      border-color: #e2e8f0;
+    }
+    .autocomplete-suggestion.loading,
+    .autocomplete-suggestion.no-results,
+    .autocomplete-suggestion.hint {
+      color: #6b7280;
+      font-style: italic;
+      cursor: default;
+    }
+    .autocomplete-suggestion.error {
+      color: #dc2626;
+    }
+    .log {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 15px;
+      border-radius: 8px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.85rem;
+      max-height: 400px;
+      overflow-y: auto;
+      margin-top: 20px;
+    }
+    .log-entry {
+      margin: 5px 0;
+      padding: 3px 0;
+    }
+    .log-entry.success { color: #86efac; }
+    .log-entry.error { color: #fca5a5; }
+    .log-entry.info { color: #93c5fd; }
+    .log-entry.warning { color: #fcd34d; }
+    .status {
+      padding: 10px;
+      border-radius: 6px;
+      margin: 10px 0;
+      font-weight: 500;
+    }
+    .status.pass { background: #dcfce7; color: #166534; }
+    .status.fail { background: #fee2e2; color: #991b1b; }
+    .status.pending { background: #fef3c7; color: #92400e; }
+    button {
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      margin: 5px;
+    }
+    button:hover { background: #1d4ed8; }
+    button:disabled {
+      background: #94a3b8;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <h1>🧪 Street Autocomplete Test: Short Street Names</h1>
+  
+  <div class="test-section">
+    <div class="test-title">Test Scenario: Albany County → Laramie</div>
+    <p>This test simulates a user selecting Albany/Laramie, then typing 1-3 character street names.</p>
+    <p><strong>Expected behavior:</strong></p>
+    <ul>
+      <li>Streets with 1-3 char core names (1ST, 2ND, BWJ, etc.) should appear immediately when typing 1 char</li>
+      <li>Longer street names still require 2+ characters before showing</li>
+      <li>House field stays disabled until street input reaches 3 characters (enableHouseAfterChars)</li>
+    </ul>
+  </div>
+
+  <div class="test-section">
+    <div class="test-title">📍 Address Input</div>
+    
+    <div class="autocomplete-container">
+      <label for="street">Street Name</label>
+      <input 
+        id="street" 
+        type="text" 
+        placeholder="Start typing (try '1', '2', 'BWJ', 'FOX', etc.)" 
+        autocomplete="off"
+      />
+      <div id="streetSuggestions" class="autocomplete-suggestions"></div>
+    </div>
+    
+    <div class="autocomplete-container">
+      <label for="house">House Number</label>
+      <input 
+        id="house" 
+        type="text" 
+        placeholder="Select street first" 
+        disabled 
+        autocomplete="off"
+      />
+      <div id="houseSuggestions" class="autocomplete-suggestions"></div>
+    </div>
+    
+    <div style="margin-top: 20px;">
+      <button id="btnLoadStreets">1. Load Streets for Albany/Laramie</button>
+      <button id="btnTest1Char" disabled>2. Test '1' (1 char)</button>
+      <button id="btnTest2Char" disabled>3. Test '2N' (2 chars)</button>
+      <button id="btnTestBWJ" disabled>4. Test 'BWJ' (3 chars)</button>
+      <button id="btnClear">Clear</button>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <div class="test-title">📊 Test Results</div>
+    <div id="testResults"></div>
+  </div>
+
+  <div class="test-section">
+    <div class="test-title">📝 Test Log</div>
+    <div id="testLog" class="log"></div>
+  </div>
+
+  <script src="/config/environments.js"></script>
+  <script src="/src/apiClient.v2.js"></script>
+  <script src="./ui/shared/streetAutocompleteOptimized.js"></script>
+  
+  <script>
+    // Mock County/City selection (simulating Albany/Laramie)
+    const mockFilters = {
+      county: 'ALBANY',
+      city: 'LARAMIE'
+    };
+    
+    const testLog = document.getElementById('testLog');
+    const testResults = document.getElementById('testResults');
+    let streetAutocomplete = null;
+    
+    function log(message, type = 'info') {
+      const timestamp = new Date().toLocaleTimeString();
+      const entry = document.createElement('div');
+      entry.className = `log-entry ${type}`;
+      entry.textContent = `[${timestamp}] ${message}`;
+      testLog.appendChild(entry);
+      testLog.scrollTop = testLog.scrollHeight;
+      console.log(`[${type.toUpperCase()}]`, message);
+    }
+    
+    function addTestResult(testName, passed, details) {
+      const status = document.createElement('div');
+      status.className = `status ${passed ? 'pass' : 'fail'}`;
+      status.innerHTML = `
+        <strong>${passed ? '✅ PASS' : '❌ FAIL'}: ${testName}</strong><br>
+        ${details}
+      `;
+      testResults.appendChild(status);
+    }
+    
+    // Initialize autocomplete
+    async function initAutocomplete() {
+      try {
+        log('Initializing StreetAutocompleteOptimized component...', 'info');
+        
+        streetAutocomplete = new StreetAutocompleteOptimized({
+          streetInputId: 'street',
+          houseInputId: 'house',
+          suggestionsId: 'streetSuggestions',
+          getCounty: () => mockFilters.county,
+          getCity: () => mockFilters.city,
+          onStreetSelected: (streetName) => {
+            log(`✓ Street selected: ${streetName}`, 'success');
+          },
+          onHouseFieldChange: (enabled) => {
+            const houseInput = document.getElementById('house');
+            if (enabled) {
+              houseInput.disabled = false;
+              houseInput.placeholder = 'e.g. 5201';
+              log('✓ House field ENABLED', 'success');
+            } else {
+              houseInput.disabled = true;
+              houseInput.placeholder = 'Select street first';
+              log('⚠ House field DISABLED', 'warning');
+            }
+          },
+          minCharsToShow: 2,
+          enableHouseAfterChars: 3
+        });
+        
+        log('✓ Autocomplete initialized successfully', 'success');
+        return true;
+      } catch (error) {
+        log(`✗ Failed to initialize autocomplete: ${error.message}`, 'error');
+        return false;
+      }
+    }
+    
+    // Test 1: Load streets
+    document.getElementById('btnLoadStreets').addEventListener('click', async () => {
+      log('=== TEST 1: Loading streets for Albany/Laramie ===', 'info');
+      
+      try {
+        await streetAutocomplete.loadStreets('ALBANY', 'LARAMIE');
+        
+        const streetCount = streetAutocomplete.allStreets.length;
+        const shortStreets = streetAutocomplete.shortStreets || [];
+        const shortStreetCount = shortStreets.length;
+        
+        log(`✓ Loaded ${streetCount} total streets`, 'success');
+        log(`✓ Found ${shortStreetCount} streets with 1-3 char names`, 'success');
+        log(`  Short streets: ${shortStreets.slice(0, 10).join(', ')}...`, 'info');
+        
+        addTestResult(
+          'Load Streets',
+          streetCount > 0 && shortStreetCount > 0,
+          `Loaded ${streetCount} streets, including ${shortStreetCount} short names`
+        );
+        
+        // Enable test buttons
+        document.getElementById('btnTest1Char').disabled = false;
+        document.getElementById('btnTest2Char').disabled = false;
+        document.getElementById('btnTestBWJ').disabled = false;
+        
+      } catch (error) {
+        log(`✗ Failed to load streets: ${error.message}`, 'error');
+        addTestResult('Load Streets', false, `Error: ${error.message}`);
+      }
+    });
+    
+    // Test 2: Type '1' (1 character)
+    document.getElementById('btnTest1Char').addEventListener('click', () => {
+      log('=== TEST 2: Typing "1" (1 character) ===', 'info');
+      
+      const streetInput = document.getElementById('street');
+      streetInput.value = '1';
+      streetInput.dispatchEvent(new Event('input'));
+      
+      setTimeout(() => {
+        const suggestions = document.getElementById('streetSuggestions');
+        const suggestionCount = suggestions.querySelectorAll('.autocomplete-suggestion[data-street]').length;
+        const houseDisabled = document.getElementById('house').disabled;
+        
+        log(`  Suggestions shown: ${suggestionCount}`, suggestionCount > 0 ? 'success' : 'error');
+        log(`  House field disabled: ${houseDisabled}`, houseDisabled ? 'success' : 'error');
+        
+        const expectedShortStreets = (streetAutocomplete.shortStreets || []).filter(s => s.startsWith('1'));
+        
+        addTestResult(
+          'Type "1" - Shows short streets immediately',
+          suggestionCount > 0 && houseDisabled,
+          `Found ${suggestionCount} suggestions (expected ~${expectedShortStreets.length}). House field ${houseDisabled ? 'correctly disabled' : 'INCORRECTLY enabled'}.`
+        );
+      }, 100);
+    });
+    
+    // Test 3: Type '2N' (2 characters)
+    document.getElementById('btnTest2Char').addEventListener('click', () => {
+      log('=== TEST 3: Typing "2N" (2 characters) ===', 'info');
+      
+      const streetInput = document.getElementById('street');
+      streetInput.value = '2N';
+      streetInput.dispatchEvent(new Event('input'));
+      
+      setTimeout(() => {
+        const suggestions = document.getElementById('streetSuggestions');
+        const suggestionCount = suggestions.querySelectorAll('.autocomplete-suggestion[data-street]').length;
+        const houseDisabled = document.getElementById('house').disabled;
+        
+        log(`  Suggestions shown: ${suggestionCount}`, suggestionCount > 0 ? 'success' : 'error');
+        log(`  House field disabled: ${houseDisabled}`, houseDisabled ? 'success' : 'error');
+        
+        addTestResult(
+          'Type "2N" - Shows matching streets',
+          suggestionCount > 0 && houseDisabled,
+          `Found ${suggestionCount} suggestions (should include "2ND"). House field ${houseDisabled ? 'correctly disabled' : 'INCORRECTLY enabled'} (needs 3 chars).`
+        );
+      }, 100);
+    });
+    
+    // Test 4: Type 'BWJ' (3 characters - should enable house)
+    document.getElementById('btnTestBWJ').addEventListener('click', () => {
+      log('=== TEST 4: Typing "BWJ" (3 characters) ===', 'info');
+      
+      const streetInput = document.getElementById('street');
+      streetInput.value = 'BWJ';
+      streetInput.dispatchEvent(new Event('input'));
+      
+      setTimeout(() => {
+        const suggestions = document.getElementById('streetSuggestions');
+        const suggestionCount = suggestions.querySelectorAll('.autocomplete-suggestion[data-street]').length;
+        const houseDisabled = document.getElementById('house').disabled;
+        
+        log(`  Suggestions shown: ${suggestionCount}`, suggestionCount > 0 ? 'success' : 'error');
+        log(`  House field enabled: ${!houseDisabled}`, !houseDisabled ? 'success' : 'error');
+        
+        addTestResult(
+          'Type "BWJ" - Enables house field at 3 chars',
+          suggestionCount > 0 && !houseDisabled,
+          `Found ${suggestionCount} suggestion(s) (should include "BWJ RD"). House field ${!houseDisabled ? 'correctly ENABLED' : 'INCORRECTLY disabled'} (3 chars reached).`
+        );
+      }, 100);
+    });
+    
+    // Clear button
+    document.getElementById('btnClear').addEventListener('click', () => {
+      document.getElementById('street').value = '';
+      document.getElementById('house').value = '';
+      document.getElementById('house').disabled = true;
+      document.getElementById('streetSuggestions').style.display = 'none';
+      testResults.innerHTML = '';
+      log('Cleared all inputs and results', 'info');
+    });
+    
+    // Initialize on load
+    window.addEventListener('load', async () => {
+      log('Page loaded, waiting for API client...', 'info');
+      
+      // Wait for API client
+      const maxWait = 5000;
+      const startTime = Date.now();
+      while (typeof window.apiPost !== 'function') {
+        if (Date.now() - startTime > maxWait) {
+          log('✗ API client failed to load', 'error');
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+      log('✓ API client ready', 'success');
+      
+      const initialized = await initAutocomplete();
+      if (initialized) {
+        log('Ready to test! Click "Load Streets" to begin.', 'success');
+      }
+    });
+  </script>
+</body>
+</html>

@@ -1,9 +1,15 @@
 -- Core volunteer tool tables (no voter PII here)
 
 CREATE TABLE IF NOT EXISTS volunteers (
-  id   TEXT PRIMARY KEY,     -- email from Cloudflare Access
-  name TEXT NOT NULL
+  id          TEXT PRIMARY KEY,     -- email from Cloudflare Access
+  name        TEXT NOT NULL,
+  first_name  TEXT,
+  last_name   TEXT,
+  cell_phone  TEXT,
+  is_active   INTEGER DEFAULT 1
 );
+
+CREATE INDEX IF NOT EXISTS idx_volunteers_cell_phone ON volunteers(cell_phone);
 
 CREATE TABLE IF NOT EXISTS voter_contacts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,5 +71,5 @@ CREATE TABLE IF NOT EXISTS message_templates (
   body_html TEXT NOT NULL
 );
 
--- NOTE: v_eligible_call view depends on voters_raw/voters_norm/v_best_phone.
+-- NOTE: v_eligible_call view depends on voters/voters_addr_norm/best_phone tables.
 -- Create that view after you've imported your voter data into D1.
