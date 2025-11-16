@@ -1301,7 +1301,10 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
 
     const rows = (result.results || []).map(row => ({
       voter_id: row.voter_id,
+      first_name: row.first_name || '',
+      last_name: row.last_name || '',
       name: [row.first_name, row.last_name].filter(Boolean).join(' ') || 'Unknown',
+      county: row.county || '',
       address: row.address || '',
       city: row.city || '',
       zip: row.zip || '',
