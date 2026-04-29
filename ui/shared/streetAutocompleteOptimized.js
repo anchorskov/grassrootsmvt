@@ -46,6 +46,7 @@ class StreetAutocompleteOptimized {
     
     // State
     this.allStreets = [];
+    this.streetIdMap = new Map();
     this.isLoading = false;
     this.seededStreets = [];
     this.shortStreets = [];
@@ -174,6 +175,11 @@ class StreetAutocompleteOptimized {
     const seedsMatchRegion = this.seededStreets.length > 0 && (!this.seedRegionKey || this.seedRegionKey === region.key);
     const usingSeeds = !regionHasAll && seedsMatchRegion;
     const sourceList = regionHasAll ? this.allStreets : this.seededStreets;
+    if (!regionHasAll && !usingSeeds) {
+      this.onHouseFieldChange(false);
+      this.showRegionPrompt(region.reason || 'missing-region');
+      return;
+    }
     
     if (usingSeeds && sourceList.length) {
       this.showStreetSuggestions(sourceList, value);
@@ -212,7 +218,8 @@ class StreetAutocompleteOptimized {
       
       // Enable house field
       this.onHouseFieldChange(true);
-      this.onStreetSelected(streetName);
+      const streetId = this.streetIdMap.get(streetName) || null;
+      this.onStreetSelected(streetName, streetId);
       
       // Focus house input if available
       if (this.houseInput) {
@@ -249,7 +256,21 @@ class StreetAutocompleteOptimized {
       const data = await window.apiPost('streets', payload);
       
       if (data.streets && data.streets.length > 0) {
-        this.allStreets = data.streets.map(s => s.name).sort();
+        const normalized = data.streets
+          .map(s => ({
+            name: (s.name || '').toUpperCase().trim(),
+            id: s.streets_index_id ?? s.id ?? null,
+          }))
+          .filter(s => s.name);
+
+        this.streetIdMap.clear();
+        normalized.forEach(({ name, id }) => {
+          if (!this.streetIdMap.has(name)) {
+            this.streetIdMap.set(name, id);
+          }
+        });
+
+        this.allStreets = normalized.map(s => s.name).sort();
         const shortData = this.buildShortStreetData(this.allStreets);
         this.shortStreets = shortData.names;
         this.shortStreetTokens = shortData.tokenMap;
@@ -329,6 +350,7 @@ class StreetAutocompleteOptimized {
   // Public methods
   clearCache() {
     this.allStreets = [];
+    this.streetIdMap = new Map();
     this.currentRegionKey = null;
     this.streetInput.value = '';
     this.seededStreets = [];

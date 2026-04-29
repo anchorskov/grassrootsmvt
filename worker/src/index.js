@@ -182,6 +182,27 @@ function buildDistrictNormalizationExpr(column) {
   END`;
 }
 
+async function getLegislatorByDistrict(db, table, chamber, district) {
+  if (!table || !chamber || !district) return null;
+  const stmt = db.prepare(`
+    SELECT
+      name,
+      chamber,
+      district,
+      party,
+      phone,
+      email,
+      COALESCE(campaign_website, '') AS campaign_website,
+      COALESCE(official_profile_url, '') AS official_profile_url
+    FROM ${table}
+    WHERE chamber = ?1
+      AND UPPER(TRIM(district)) = UPPER(TRIM(?2))
+    LIMIT 1
+  `);
+  const result = await stmt.bind(chamber, district).first();
+  return result || null;
+}
+
 async function getCityCountyIdsForDistrict(env, db, districtType, districtCode, districtCity = null) {
   if (!districtType || !districtCode) return [];
   const coverageTable = await resolveTableOptional(env, ['district_coverage']);
@@ -197,8 +218,8 @@ async function getCityCountyIdsForDistrict(env, db, districtType, districtCode, 
       `SELECT DISTINCT cc.id
        FROM ${coverageTable} dc
        JOIN wy_city_county cc
-         ON cc.county_norm = dc.county
-        AND (dc.city = '' OR cc.city_norm = dc.city)
+         ON cc.county = dc.county
+        AND (dc.city = '' OR cc.city = dc.city)
        WHERE dc.district_type = ?1 AND dc.district_code = ?2${cityClause}`,
       params
     ).all();
@@ -224,8 +245,8 @@ async function getCityCountyIdsForDistrict(env, db, districtType, districtCode, 
      FROM ${addrTable} va
      JOIN ${votersTable} v ON v.voter_id = va.voter_id
      JOIN wy_city_county cc
-       ON cc.county_norm = UPPER(TRIM(v.county))
-      AND cc.city_norm = UPPER(TRIM(COALESCE(va.city, '')))
+       ON cc.county = UPPER(TRIM(v.county))
+      AND cc.city = UPPER(TRIM(COALESCE(va.city, '')))
      WHERE ${normalizedExpr} = ?1${cityClause}`,
     params
   ).all();
@@ -255,13 +276,25 @@ async function buildRegionFilterClause(env, db, filters = {}) {
 
   const county = normalizeTextValue(filters.county);
   const city = normalizeTextValue(filters.city);
-  if (!county || !city) {
-    throw new BadRequestError('county/city or district filters required');
+  if (county && city) {
+    return {
+      clause: 'cc.county = ? AND cc.city = ?',
+      params: [county, city],
+    };
   }
-  return {
-    clause: 'cc.county_norm = ? AND cc.city_norm = ?',
-    params: [county, city],
-  };
+  if (county && !city) {
+    return {
+      clause: 'cc.county = ?',
+      params: [county],
+    };
+  }
+  if (city && !county) {
+    return {
+      clause: 'cc.city = ?',
+      params: [city],
+    };
+  }
+  throw new BadRequestError('county/city or district filters required');
 }
 
 function sanitizeReturnTarget(rawTarget, baseUrl) {
@@ -487,12 +520,67 @@ router.get('/volunteer/me', async (request, env, ctx) => {
 
     const displayName = deriveVolunteerDisplayName(volunteer, email);
     return ctx.jsonResponse(
-      { ok: true, email: auth.email, volunteer, display_name: displayName },
+      { ok: true, email: auth.email, volunteer, display_name: displayName, is_admin: isAdmin(auth.email, env) },
       200,
       ctx.allowedOrigin
     );
   } catch (err) {
     const status = err?.status === 401 ? 401 : 500;
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      status,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.get('/volunteers/options', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    if (!auth?.email) {
+      return ctx.jsonResponse({ ok: false, error: 'Unauthenticated' }, 401, ctx.allowedOrigin);
+    }
+    if (!isAdmin(auth.email, env)) {
+      return ctx.jsonResponse({ ok: false, error: 'Admin access required' }, 403, ctx.allowedOrigin);
+    }
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('volunteers', ctx.allowedOrigin);
+    }
+
+    const volunteerTable = await resolveTable(env, ['volunteers']);
+    const columns = await getTableColumns(env, volunteerTable);
+    const hasState = columns.includes('state');
+    const hasCell = columns.includes('cell_phone');
+    const hasCity = columns.includes('city');
+    const url = new URL(request.url);
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '500'), 1000);
+    const onlyActive = url.searchParams.get('active') === 'true';
+
+    const rows = await buildStatement(
+      db,
+      `
+        SELECT id, name, first_name, last_name, is_active${hasState ? ', state' : ', NULL as state'}${hasCell ? ', cell_phone' : ', NULL as cell_phone'}${hasCity ? ', city' : ', NULL as city'}
+        FROM ${volunteerTable}
+        WHERE 1 = 1 ${onlyActive ? 'AND is_active = 1' : ''}
+        ORDER BY is_active DESC, COALESCE(last_name, name), COALESCE(first_name, id)
+        LIMIT ?1
+      `,
+      [limit]
+    ).all();
+
+    return ctx.jsonResponse(
+      { ok: true, volunteers: rows.results || [] },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof DependencyMissingError) {
+      return missingTableResponse(err.table, ctx.allowedOrigin);
+    }
+    const status = err?.status === 401 ? 401 : 500;
+    console.error('/volunteers/options error', err);
     return ctx.jsonResponse(
       { ok: false, error: String(err?.message || err) },
       status,
@@ -884,7 +972,9 @@ router.post('/call', async (request, env, ctx) => {
   let auth;
   try {
     auth = await ensureAuth(request, env, ctx.config);
+    console.log('[/call] Auth check passed:', { email: auth.email, isLocal: auth.isLocal });
   } catch (err) {
+    console.error('[/call] Auth failed:', { status: err?.status, message: String(err?.message || err) });
     const status = err?.status === 401 ? 401 : 500;
     return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, status, ctx.allowedOrigin);
   }
@@ -1201,15 +1291,44 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
     return missingTableResponse('voters', ctx.allowedOrigin);
   }
 
-  const { filters = {}, house, street, range = 20, limit: requestedLimit = 20, house_number } = body || {};
+  const {
+    filters = {},
+    house,
+    street,
+    range = 20,
+    limit: requestedLimit = 20,
+    house_number,
+    streets_index_id,
+  } = body || {};
   const limit = Math.min(Math.max(Number(requestedLimit) || 20, 1), 100);
   const streetFilter = String(street || '').toUpperCase().trim();
-  const houseNumberFilter = house_number ? String(house_number).trim() : null;
+  const requestedHouseNumber = house_number ?? house ?? null;
+  const houseNumberFilter = requestedHouseNumber ? String(requestedHouseNumber).trim() : null;
+  const numericHouse = houseNumberFilter && !Number.isNaN(Number(houseNumberFilter)) ? Number(houseNumberFilter) : null;
   const countyFilter = normalizeTextValue(filters.county);
   const cityFilter = normalizeTextValue(filters.city);
   const voterIdFilter = filters.voter_id ? String(filters.voter_id).trim() : null;
   const districtCityFilter = normalizeTextValue(filters.district_city);
-  const partiesFilter = Array.isArray(filters.parties) ? filters.parties : [];
+  const rawPartiesFilter = Array.isArray(filters.parties) ? filters.parties : [];
+  const partiesFilter = Array.isArray(filters.parties)
+    ? filters.parties.map(normalizeTextValue).filter(Boolean)
+    : [];
+  const streetId = Number.isFinite(Number(streets_index_id)) ? Number(streets_index_id) : null;
+  const hasStreetId = streetId !== null && !Number.isNaN(streetId);
+  console.log('[/canvass/nearby] request', {
+    filters,
+    countyFilter,
+    cityFilter,
+    districtCityFilter,
+    rawPartiesFilter,
+    partiesFilter,
+    streetFilter,
+    streets_index_id: streetId,
+    useStreetId: hasStreetId,
+    houseNumberFilter,
+    range,
+    limit,
+  });
 
   try {
     const votersTable = await resolveTable(env, ['voters']);
@@ -1221,11 +1340,23 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
     const phoneValueExpr = phoneTable ? "NULLIF(bp.phone_e164, '')" : 'NULL';
     const phoneValueSelectExpr = phoneTable ? `COALESCE(${phoneValueExpr}, '')` : `''`;
     const phoneConfidenceExpr = phoneTable && hasConfidenceColumn ? 'bp.confidence_code' : 'NULL';
+    const useStreetId = hasStreetId;
+    const addrColumns = await getTableColumns(env, addrTable);
+    const fnExpr = addrColumns.includes('fn')
+      ? "COALESCE(va.fn, '')"
+      : addrColumns.includes('first_name')
+        ? "COALESCE(va.first_name, '')"
+        : "''";
+    const lnExpr = addrColumns.includes('ln')
+      ? "COALESCE(va.ln, '')"
+      : addrColumns.includes('last_name')
+        ? "COALESCE(va.last_name, '')"
+        : "''";
 
     let query = `
       SELECT v.voter_id,
-             COALESCE(va.fn, '') AS first_name,
-             COALESCE(va.ln, '') AS last_name,
+             ${fnExpr} AS first_name,
+             ${lnExpr} AS last_name,
              COALESCE(va.addr1, '') AS address,
              COALESCE(va.city, '') AS city,
              COALESCE(va.zip, '') AS zip,
@@ -1244,7 +1375,11 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
     const params = [];
     let paramIndex = 1;
 
-    if (streetFilter) {
+    if (useStreetId) {
+      query += ` AND va.street_index_id = ?${paramIndex}`;
+      params.push(streetId);
+      paramIndex++;
+    } else if (streetFilter) {
       query += ` AND UPPER(va.addr1) LIKE '%' || ?${paramIndex} || '%'`;
       params.push(streetFilter);
       paramIndex++;
@@ -1252,9 +1387,8 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
 
     // Filter by house number if provided (fast exact match)
     if (houseNumberFilter) {
-      query += ` AND va.addr1 LIKE ?${paramIndex} || ' %'`;
-      params.push(houseNumberFilter);
-      paramIndex++;
+      const houseNumberExpr = `TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1))`;
+      query += ` AND va.addr_raw IS NOT NULL`;
     }
 
     if (voterIdFilter) {
@@ -1277,7 +1411,7 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
 
     if (partiesFilter.length > 0) {
       const placeholders = partiesFilter.map(() => `?${paramIndex++}`).join(',');
-      query += ` AND v.political_party IN (${placeholders})`;
+      query += ` AND UPPER(v.political_party) IN (${placeholders})`;
       params.push(...partiesFilter);
     }
     if (filters.district_type && filters.district) {
@@ -1291,13 +1425,109 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
     }
 
     if (house && range) {
-      query += ` AND va.addr1 IS NOT NULL AND va.addr1 != ''`;
+      query += ` AND va.addr_raw IS NOT NULL AND va.addr_raw != ''`;
     }
 
-    query += ` ORDER BY v.voter_id LIMIT ?${paramIndex}`;
-    params.push(limit);
+    if (houseNumberFilter && numericHouse !== null) {
+      const houseNumberExpr = `TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1))`;
+      const houseNumberCasted = `CAST(${houseNumberExpr} AS INTEGER)`;
+      query += ` ORDER BY CASE WHEN ${houseNumberCasted} IS NULL THEN 1 ELSE 0 END, ABS(${houseNumberCasted} - ?${paramIndex}) ASC, ${houseNumberCasted} ASC, v.voter_id LIMIT ?${paramIndex + 1}`;
+      params.push(numericHouse, limit);
+    } else {
+      query += ` ORDER BY v.voter_id LIMIT ?${paramIndex}`;
+      params.push(limit);
+    }
 
-    const result = await buildStatement(db, query, params).all();
+    let result = await buildStatement(db, query, params).all();
+    console.log('[/canvass/nearby] primary result count', result.results ? result.results.length : 0);
+
+    // GUARD: If street_index_id search returns 0 results and we have a street name,
+    // fall back to street name matching. This handles data misalignment where
+    // voters_addr_norm.street_index_id may reference obsolete or cross-city IDs.
+    if (useStreetId && (!result.results || result.results.length === 0) && streetFilter) {
+      console.warn('[/canvass/nearby] No results for street_index_id; falling back to street name match', {
+        county: countyFilter,
+        city: cityFilter,
+        street: streetFilter,
+        streets_index_id: streetId,
+      });
+
+      // Rebuild query and params using street name pattern instead of street_index_id
+      let fallbackQuery = `
+        SELECT v.voter_id,
+               ${fnExpr} AS first_name,
+               ${lnExpr} AS last_name,
+               COALESCE(va.addr1, '') AS address,
+               COALESCE(va.city, '') AS city,
+               COALESCE(va.zip, '') AS zip,
+               v.county,
+               v.political_party AS party,
+               ${phoneValueSelectExpr} AS phone_e164,
+               ${phoneConfidenceExpr} AS phone_confidence,
+               COALESCE(va.house, v.house, '') AS house_district,
+               COALESCE(va.senate, v.senate, '') AS senate_district
+        FROM ${votersTable} v
+        LEFT JOIN ${addrTable} va ON v.voter_id = va.voter_id
+        ${phoneJoinClause}
+        WHERE 1 = 1
+          AND UPPER(va.addr1) LIKE '%' || ?1 || '%'
+      `;
+
+      const fallbackParams = [streetFilter];
+      let fallbackParamIndex = 2;
+
+      // Re-add all filters except street_index_id
+      if (voterIdFilter) {
+        fallbackQuery += ` AND v.voter_id = ?${fallbackParamIndex}`;
+        fallbackParams.push(voterIdFilter);
+        fallbackParamIndex++;
+      }
+
+      if (countyFilter) {
+        fallbackQuery += ` AND v.county = ?${fallbackParamIndex}`;
+        fallbackParams.push(countyFilter);
+        fallbackParamIndex++;
+      }
+
+      if (cityFilter) {
+        fallbackQuery += ` AND va.city = ?${fallbackParamIndex}`;
+        fallbackParams.push(cityFilter);
+        fallbackParamIndex++;
+      }
+
+      if (partiesFilter.length > 0) {
+        const placeholders = partiesFilter.map(() => `?${fallbackParamIndex++}`).join(',');
+        fallbackQuery += ` AND UPPER(v.political_party) IN (${placeholders})`;
+        fallbackParams.push(...partiesFilter);
+      }
+
+      if (filters.district_type && filters.district) {
+        const column = filters.district_type === 'senate' ? 'v.senate' : 'v.house';
+        fallbackQuery += ` AND ${column} = ?${fallbackParamIndex++}`;
+        fallbackParams.push(filters.district);
+        if (districtCityFilter) {
+          fallbackQuery += ` AND UPPER(TRIM(COALESCE(va.city, ''))) = ?${fallbackParamIndex++}`;
+          fallbackParams.push(districtCityFilter);
+        }
+      }
+
+      if (house && range) {
+        fallbackQuery += ` AND va.addr_raw IS NOT NULL AND va.addr_raw != ''`;
+      }
+
+      if (houseNumberFilter && numericHouse !== null) {
+        const houseNumberExpr = `TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1))`;
+        const houseNumberCasted = `CAST(${houseNumberExpr} AS INTEGER)`;
+        fallbackQuery += ` ORDER BY CASE WHEN ${houseNumberCasted} IS NULL THEN 1 ELSE 0 END, ABS(${houseNumberCasted} - ?${fallbackParamIndex}) ASC, ${houseNumberCasted} ASC, v.voter_id LIMIT ?${fallbackParamIndex + 1}`;
+        fallbackParams.push(numericHouse, limit);
+      } else {
+        fallbackQuery += ` ORDER BY v.voter_id LIMIT ?${fallbackParamIndex}`;
+        fallbackParams.push(limit);
+      }
+
+      result = await buildStatement(db, fallbackQuery, fallbackParams).all();
+      console.log('[/canvass/nearby] fallback result count', result.results ? result.results.length : 0);
+    }
 
     const rows = (result.results || []).map(row => ({
       voter_id: row.voter_id,
@@ -1339,6 +1569,49 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
   }
 });
 
+router.post('/legislators', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    throw err;
+  }
+
+  const db = getDb(env);
+  if (!db) {
+    return missingTableResponse('wy_legislature', ctx.allowedOrigin);
+  }
+
+  try {
+    const legislatorTable = await resolveTableOptional(env, [
+      'wy_legislature',
+      'wy_legislators',
+      'legislators',
+      'legislature',
+    ]);
+    if (!legislatorTable) {
+      return ctx.jsonResponse(
+        { ok: true, house: null, senate: null, missing: 'legislator_table' },
+        200,
+        ctx.allowedOrigin
+      );
+    }
+    const houseDistrict = body.house_district ? String(body.house_district).trim() : null;
+    const senateDistrict = body.senate_district ? String(body.senate_district).trim() : null;
+    const [house, senate] = await Promise.all([
+      getLegislatorByDistrict(db, legislatorTable, 'House', houseDistrict),
+      getLegislatorByDistrict(db, legislatorTable, 'Senate', senateDistrict),
+    ]);
+    return ctx.jsonResponse({ ok: true, house, senate }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    console.error('/legislators error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
 router.post('/streets', async (request, env, ctx) => {
   let body;
   try {
@@ -1370,19 +1643,42 @@ router.post('/streets', async (request, env, ctx) => {
     // Use streets_index for fast, clean street names
     const result = await db.prepare(`
       SELECT 
-        si.street_canonical AS street_name,
-        COUNT(*) AS street_count
+        si.id,
+        si.street_canonical AS street_name
       FROM streets_index si
       JOIN wy_city_county cc ON si.city_county_id = cc.id
       WHERE ${regionFilter.clause}
-      GROUP BY si.street_canonical
       ORDER BY si.street_canonical
     `).bind(...regionFilter.params).all();
 
     const streets = (result.results || []).map(row => ({
+      streets_index_id: row.id,
+      id: row.id,
       name: row.street_name,
-      count: row.street_count,
     }));
+
+    // Fallback: if streets_index has no matches, derive street list from voters_addr_norm
+    if (!streets.length) {
+      const addrTable = await resolveTableOptional(env, ['voters_addr_norm', 'voters_addr', 'voter_addresses']);
+      if (addrTable) {
+        const fbResult = await db.prepare(`
+          SELECT DISTINCT
+            TRIM(REPLACE(REPLACE(va.addr1, SUBSTR(va.addr1, 1, INSTR(va.addr1, ' ')-1), ''), '  ', ' ')) AS street_name
+          FROM ${addrTable} va
+          JOIN wy_city_county cc ON va.city_county_id = cc.id
+          WHERE ${regionFilter.clause}
+            AND va.addr1 IS NOT NULL
+            AND INSTR(va.addr1, ' ') > 0
+          ORDER BY street_name
+          LIMIT 400
+        `).bind(...regionFilter.params).all();
+        const fallbackStreets = (fbResult.results || [])
+          .map(row => (row.street_name || '').toUpperCase().trim())
+          .filter(Boolean)
+          .map(name => ({ streets_index_id: null, id: null, name }));
+        streets.push(...fallbackStreets);
+      }
+    }
 
     return ctx.jsonResponse(
       { ok: true, county, city, streets, total: streets.length },
@@ -1414,9 +1710,12 @@ router.post('/houses', async (request, env, ctx) => {
     throw err;
   }
 
-  const { county, city, street, district_type, district, district_city } = body || {};
+  const { county, city, street, district_type, district, district_city, streets_index_id } = body || {};
   const normalizedStreet = (street || '').toString().trim().toUpperCase();
-  if (!normalizedStreet) {
+  const streetId = Number.isFinite(Number(streets_index_id)) ? Number(streets_index_id) : null;
+  const hasStreetId = streetId !== null && !Number.isNaN(streetId);
+
+  if (!normalizedStreet && !hasStreetId) {
     return ctx.jsonResponse(
       { ok: false, error: 'street is required' },
       400,
@@ -1431,7 +1730,7 @@ router.post('/houses', async (request, env, ctx) => {
 
   try {
     await ensureAuth(request, env, ctx.config);
-    
+
     const regionFilter = await buildRegionFilterClause(env, db, {
       county,
       city,
@@ -1440,20 +1739,75 @@ router.post('/houses', async (request, env, ctx) => {
       district_city,
     });
 
-    // Get house numbers from voters_addr_norm using city_county_id/district filters for speed
-    const result = await db.prepare(`
+    const params = [...regionFilter.params];
+
+    // Prefer street_index_id if available, otherwise fall back to street name match
+    let streetWhereClause = '';
+    let fallbackStreetName = normalizedStreet;
+    
+    if (hasStreetId) {
+      streetWhereClause = 'va.street_index_id = ?';
+      params.push(streetId);
+      
+      // If we only have streets_index_id (no street name), look it up for potential fallback
+      if (!normalizedStreet) {
+        const streetLookup = await db.prepare(`
+          SELECT street_canonical FROM streets_index WHERE id = ?
+        `).bind(streetId).first();
+        if (streetLookup?.street_canonical) {
+          fallbackStreetName = streetLookup.street_canonical.toUpperCase().trim();
+        }
+      }
+    } else if (normalizedStreet) {
+      // Match against addr1 using LIKE pattern (addr1 contains house numbers)
+      streetWhereClause = 'va.addr1 LIKE ?';
+      params.push(`%${normalizedStreet}%`);
+    } else {
+      return ctx.jsonResponse(
+        { ok: false, error: 'street_index_id or street name is required' },
+        400,
+        ctx.allowedOrigin
+      );
+    }
+
+    // Get unique voters on this street and extract distinct house numbers
+    // Note: addr_raw contains the full address (e.g., "5201 RAVEN ST")
+    // Extract house number as the first word from addr_raw
+    let result = await db.prepare(`
       SELECT DISTINCT
-        TRIM(SUBSTR(addr1, 1, INSTR(addr1, ' ')-1)) AS house_number,
-        COUNT(*) AS voter_count
+        TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1)) AS house_number,
+        COUNT(*) OVER (PARTITION BY TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1))) AS voter_count
       FROM voters_addr_norm va
       JOIN wy_city_county cc ON va.city_county_id = cc.id
       WHERE ${regionFilter.clause}
-        AND UPPER(TRIM(SUBSTR(va.addr1, INSTR(va.addr1, ' ')+1))) = ?
-        AND va.addr1 IS NOT NULL
-        AND INSTR(va.addr1, ' ') > 0
-      GROUP BY house_number
-      ORDER BY CAST(house_number AS INTEGER), house_number
-    `).bind(...regionFilter.params, normalizedStreet).all();
+        AND ${streetWhereClause}
+        AND va.addr_raw IS NOT NULL
+      ORDER BY CAST(house_number AS NUMERIC) ASC, house_number ASC
+    `).bind(...params).all();
+
+    // GUARD: If street_index_id search returns 0 results and we have a fallback street name,
+    // fall back to street name matching. This handles data misalignment where
+    // voters_addr_norm.street_index_id may reference obsolete or cross-city IDs.
+    if (hasStreetId && (!result.results || result.results.length === 0) && fallbackStreetName) {
+      console.warn('[/houses] No results for street_index_id; falling back to street name match', {
+        county, city, street: fallbackStreetName, streets_index_id: streetId,
+      });
+      
+      // Rebuild params with street name pattern instead of street_index_id
+      // Use LIKE pattern to match street names in addr1 (which include house numbers)
+      const fallbackParams = [...regionFilter.params, `%${fallbackStreetName}%`];
+      result = await db.prepare(`
+        SELECT DISTINCT
+          TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1)) AS house_number,
+          COUNT(*) OVER (PARTITION BY TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1))) AS voter_count
+        FROM voters_addr_norm va
+        JOIN wy_city_county cc ON va.city_county_id = cc.id
+        WHERE ${regionFilter.clause}
+          AND va.addr1 LIKE ?
+          AND va.addr_raw IS NOT NULL
+        ORDER BY CAST(house_number AS NUMERIC) ASC, house_number ASC
+      `).bind(...fallbackParams).all();
+    }
 
     const houses = (result.results || []).map(row => ({
       house_number: row.house_number,
@@ -1811,6 +2165,149 @@ router.post('/contact-form/search-names', async (request, env, ctx) => {
     return ctx.jsonResponse({ ok: true, rows }, 200, ctx.allowedOrigin);
   } catch (err) {
     console.error('/contact-form/search-names error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.post('/volunteer-staging', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    throw err;
+  }
+
+  const db = getDb(env);
+  if (!db) {
+    return missingTableResponse('volunteer_staging', ctx.allowedOrigin);
+  }
+
+  let stagingTable;
+  try {
+    stagingTable = await resolveTable(env, ['volunteer_staging']);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) {
+      return missingTableResponse(err.table, ctx.allowedOrigin);
+    }
+    throw err;
+  }
+
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const actionRaw = (body.action || body.mode || 'new').toString().toLowerCase();
+    const action = actionRaw === 'update' ? 'update' : 'new';
+    const firstName = (body.first_name || body.firstName || '').trim();
+    const lastName = (body.last_name || body.lastName || '').trim();
+    const email = (body.email || body.volunteer_email || '').trim().toLowerCase();
+    const cellPhone = normalizeCellPhone(body.cell_phone || body.phone || body.phone_number);
+    const state = (body.state || 'WY').toString().trim().toUpperCase() || 'WY';
+    const county = (body.county || '').toString().trim().toUpperCase() || null;
+    const city = (body.city || '').toString().trim().toUpperCase() || null;
+    let targetId = (body.target_id || body.volunteer_id || '').toString().trim() || null;
+    const notes = body.notes ? String(body.notes).trim() : null;
+    const isActive = body.is_active === undefined ? null : coerceBooleanFlag(body.is_active, 1);
+
+    const missing = [];
+    if (!firstName && !lastName) missing.push('name');
+    if (!email && !cellPhone) missing.push('email_or_cell_phone');
+    if (missing.length) {
+      return ctx.jsonResponse(
+        { ok: false, error: `Missing required fields: ${missing.join(', ')}` },
+        400,
+        ctx.allowedOrigin
+      );
+    }
+
+    const isSelfTarget = targetId && auth.email && targetId.toLowerCase() === auth.email.toLowerCase();
+    const isUserAdmin = isAdmin(auth.email, env);
+    if (action === 'update' && !isUserAdmin && !isSelfTarget) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin required to update another volunteer' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    if (action === 'update' && !targetId && !isUserAdmin && auth.email) {
+      targetId = auth.email;
+    }
+
+    const stagingColumns = await getTableColumns(env, stagingTable);
+    const hasStateColumn = stagingColumns.includes('state');
+
+    const insertColumns = [
+      'submitted_by',
+      'action',
+      'target_id',
+      'first_name',
+      'last_name',
+      'email',
+      'cell_phone',
+      'county',
+      'city',
+    ];
+    const params = [
+      auth.email || 'unknown@local',
+      action,
+      targetId,
+      firstName || null,
+      lastName || null,
+      email || null,
+      cellPhone || null,
+      county,
+      city,
+    ];
+
+    if (hasStateColumn) {
+      insertColumns.push('state');
+      params.push(state);
+    }
+
+    insertColumns.push('notes', 'is_active', 'review_status', 'created_at');
+    params.push(notes, isActive, 'pending', new Date().toISOString().replace('T', ' ').slice(0, 19));
+
+    const placeholders = insertColumns.map((_, idx) => `?${idx + 1}`).join(', ');
+
+    const result = await buildStatement(
+      db,
+      `INSERT INTO ${stagingTable} (${insertColumns.join(', ')}) VALUES (${placeholders})`,
+      params
+    ).run();
+
+    const stagingId = result?.meta?.last_row_id ?? null;
+    const notification = await maybeSendVolunteerNotification(env, {
+      stagingId,
+      action,
+      targetId,
+      email,
+      firstName,
+      lastName,
+      county,
+      city,
+      state,
+    });
+
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        staging_id: stagingId,
+        review_status: 'pending',
+        notification,
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof DependencyMissingError) {
+      return missingTableResponse(err.table, ctx.allowedOrigin);
+    }
+    console.error('/volunteer-staging error', err);
     return ctx.jsonResponse(
       { ok: false, error: String(err?.message || err) },
       500,
@@ -3008,19 +3505,31 @@ router.post('/admin/volunteers', async (request, env, ctx) => {
     const lastName = body.last_name ? String(body.last_name).trim() : null;
     const displayName = String(body.name || '').trim() || buildVolunteerName(firstName, lastName, id);
     const cellPhone = normalizeCellPhone(body.cell_phone || '');
+    const state = body.state ? String(body.state).trim().toUpperCase() : null;
+    const city = body.city ? String(body.city).trim().toUpperCase() : null;
     const isActive = coerceBooleanFlag(body.is_active, 1);
 
     if (!id || !displayName) {
       throw new BadRequestError('id and name are required');
     }
 
+    // Check if volunteer already exists (case-insensitive)
+    const existing = await fetchVolunteerById(env, db, volunteerTable, id);
+    if (existing) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Volunteer already exists' },
+        409,
+        ctx.allowedOrigin
+      );
+    }
+
     await buildStatement(
       db,
       `
-        INSERT INTO ${volunteerTable} (id, name, first_name, last_name, cell_phone, is_active)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        INSERT INTO ${volunteerTable} (id, name, first_name, last_name, cell_phone, state, city, is_active)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
       `,
-      [id, displayName, firstName, lastName, cellPhone, isActive]
+      [id, displayName, firstName, lastName, cellPhone, state, city, isActive]
     ).run();
 
     const saved = await fetchVolunteerById(env, db, volunteerTable, id);
@@ -3057,6 +3566,44 @@ router.post('/admin/volunteers', async (request, env, ctx) => {
   }
 });
 
+router.get('/admin/volunteers/:id', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('volunteers', ctx.allowedOrigin);
+    }
+
+    const url = new URL(request.url);
+    const rawId = url.pathname.split('/').pop();
+    const id = rawId ? decodeURIComponent(String(rawId)).trim().toLowerCase() : '';
+    if (!id) {
+      throw new BadRequestError('volunteer id required');
+    }
+
+    console.log(`[GET /admin/volunteers/:id] Received id from URL: "${rawId}" -> decoded: "${id}"`);
+
+    const volunteerTable = await resolveTable(env, ['volunteers']);
+    const row = await fetchVolunteerById(env, db, volunteerTable, id);
+    console.log(`[GET /admin/volunteers/:id] fetchVolunteerById returned:`, row ? `found ${row.id}` : 'NOT FOUND');
+    if (!row) {
+      return ctx.jsonResponse({ ok: false, error: 'Volunteer not found' }, 404, ctx.allowedOrigin);
+    }
+    return ctx.jsonResponse({ ok: true, volunteer: row }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse({ ok: false, error: 'Admin access required' }, 403, ctx.allowedOrigin);
+    }
+    console.error('/admin/volunteers/:id GET error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
 router.put('/admin/volunteers/:id', async (request, env, ctx) => {
   try {
     const auth = await ensureAuth(request, env, ctx.config);
@@ -3070,10 +3617,13 @@ router.put('/admin/volunteers/:id', async (request, env, ctx) => {
     }
 
     const url = new URL(request.url);
-    const id = url.pathname.split('/').pop();
+    const rawId = url.pathname.split('/').pop();
+    const id = rawId ? decodeURIComponent(String(rawId)).trim().toLowerCase() : '';
     if (!id) {
       throw new BadRequestError('volunteer id required');
     }
+
+    console.log(`[PUT /admin/volunteers/:id] Received id from URL: "${rawId}" -> decoded: "${id}"`);
 
     const volunteerTable = await resolveTable(env, ['volunteers']);
 
@@ -3097,6 +3647,14 @@ router.put('/admin/volunteers/:id', async (request, env, ctx) => {
       updates.push(`cell_phone = ?${paramIndex++}`);
       params.push(normalizeCellPhone(body.cell_phone || ''));
     }
+    if (body.state !== undefined) {
+      updates.push(`state = ?${paramIndex++}`);
+      params.push(body.state ? String(body.state).trim().toUpperCase() : null);
+    }
+    if (body.city !== undefined) {
+      updates.push(`city = ?${paramIndex++}`);
+      params.push(body.city ? String(body.city).trim().toUpperCase() : null);
+    }
     if (body.is_active !== undefined) {
       updates.push(`is_active = ?${paramIndex++}`);
       params.push(coerceBooleanFlag(body.is_active, 1));
@@ -3112,7 +3670,7 @@ router.put('/admin/volunteers/:id', async (request, env, ctx) => {
       `
         UPDATE ${volunteerTable}
         SET ${updates.join(', ')}
-        WHERE id = ?${paramIndex}
+        WHERE lower(trim(id)) = lower(trim(?${paramIndex}))
       `,
       params
     ).run();
@@ -3161,7 +3719,8 @@ router.delete('/admin/volunteers/:id', async (request, env, ctx) => {
     }
 
     const url = new URL(request.url);
-    const id = url.pathname.split('/').pop();
+    const rawId = url.pathname.split('/').pop();
+    const id = rawId ? decodeURIComponent(String(rawId)).trim().toLowerCase() : '';
     if (!id) {
       throw new BadRequestError('volunteer id required');
     }
@@ -3332,16 +3891,75 @@ function deriveVolunteerDisplayName(volunteer, fallbackEmail) {
   return fallbackEmail ? fallbackEmail.split('@')[0] : 'Volunteer';
 }
 
+function pickVolunteerNotifyRecipient(env) {
+  const raw = env?.VOLUNTEER_NOTIFY_EMAIL || env?.ADMIN_EMAILS || '';
+  return String(raw)
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean)[0] || null;
+}
+
+async function maybeSendVolunteerNotification(env, submission = {}) {
+  const toEmail = pickVolunteerNotifyRecipient(env);
+  if (!toEmail) {
+    return { sent: false, skipped: 'no_recipient_configured' };
+  }
+  const host = (env?.PUBLIC_HOSTNAME || 'volunteers.grassrootsmvt.org').replace(/^https?:\/\//, '');
+  const fromEmail = env?.NOTIFY_FROM_EMAIL || `notifications@${host}`;
+  const action = submission.action || 'submission';
+  const stagingId = submission.stagingId || 'pending';
+  const lines = [
+    'A volunteer submitted a staging record.',
+    `Action: ${action}`,
+    submission.targetId ? `Target: ${submission.targetId}` : null,
+    submission.email ? `Volunteer email: ${submission.email}` : null,
+    submission.firstName || submission.lastName ? `Name: ${buildVolunteerName(submission.firstName, submission.lastName)}` : null,
+    submission.county ? `County: ${submission.county}` : null,
+    submission.city ? `City: ${submission.city}` : null,
+    submission.state ? `State: ${submission.state}` : null,
+    `Staging ID: ${stagingId}`,
+    `Submitted at: ${new Date().toISOString()}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const payload = {
+    personalizations: [{ to: [{ email: toEmail }] }],
+    from: { email: fromEmail, name: 'GrassrootsMVT' },
+    subject: `New volunteer ${action} (${stagingId})`,
+    content: [{ type: 'text/plain', value: lines }],
+  };
+
+  try {
+    const resp = await fetch('https://api.mailchannels.net/tx/v1/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      return { sent: false, status: resp.status, detail };
+    }
+    return { sent: true, status: resp.status };
+  } catch (err) {
+    console.warn('mail notification failed', err);
+    return { sent: false, error: String(err?.message || err) };
+  }
+}
+
 async function fetchVolunteerById(env, db, volunteerTable, id) {
+  const normalizedId = id ? String(id).trim().toLowerCase() : '';
+  console.log(`[fetchVolunteerById] Looking up id="${id}" -> normalized="${normalizedId}" in table=${volunteerTable}`);
   const row = await buildStatement(
     db,
     `
-      SELECT id, name, first_name, last_name, cell_phone, is_active
+      SELECT id, name, first_name, last_name, cell_phone, state, city, is_active
       FROM ${volunteerTable}
-      WHERE id = ?1
+      WHERE lower(trim(id)) = lower(trim(?1))
     `,
-    [id]
+    [normalizedId]
   ).first();
+  console.log(`[fetchVolunteerById] Result:`, row ? `found: ${row.id}` : 'NOT FOUND');
   return row || null;
 }
 

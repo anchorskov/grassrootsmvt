@@ -1,4 +1,31 @@
 // API endpoints for the progressive contact form flow
+const ADDR_TABLE_CANDIDATES = ['voters_addr_norm', 'v_voters_addr_norm'];
+let cachedAddrTable = null;
+
+async function resolveAddrTable(db) {
+  if (cachedAddrTable) return cachedAddrTable;
+  if (!db) throw new Error('Database connection unavailable');
+  for (const name of ADDR_TABLE_CANDIDATES) {
+    try {
+      const result = await db
+        .prepare(`SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name = ?1`)
+        .bind(name)
+        .all();
+      if (result?.results?.some(row => row.name === name)) {
+        cachedAddrTable = name;
+        return name;
+      }
+    } catch (err) {
+      const message = String(err?.message || err).toLowerCase();
+      if (message.includes('no such table') || message.includes('no such function')) {
+        continue;
+      }
+      throw err;
+    }
+  }
+  cachedAddrTable = ADDR_TABLE_CANDIDATES[0];
+  return cachedAddrTable;
+}
 
 // 1. GET /api/contact-form/counties
 // Returns list of all counties
@@ -11,9 +38,10 @@ async function getCounties(env) {
 // 2. GET /api/contact-form/cities?county=ALBANY  
 // Returns cities in specified county
 async function getCitiesByCounty(env, county) {
+  const addrTable = await resolveAddrTable(env.d1);
   const query = `
     SELECT DISTINCT a.city 
-    FROM v_voters_addr_norm a 
+    FROM ${addrTable} a 
     JOIN voters v ON a.voter_id = v.voter_id 
     WHERE v.county = ? 
     ORDER BY a.city
@@ -25,11 +53,12 @@ async function getCitiesByCounty(env, county) {
 // 3. GET /api/contact-form/streets?county=ALBANY&city=LARAMIE
 // Returns street names in specified county/city
 async function getStreetsByLocation(env, county, city) {
+  const addrTable = await resolveAddrTable(env.d1);
   const query = `
     SELECT DISTINCT 
       TRIM(REPLACE(REPLACE(addr1, SUBSTR(addr1, 1, INSTR(addr1, ' ')-1), ''), '  ', ' ')) as street_name,
       COUNT(*) as voter_count
-    FROM v_voters_addr_norm a 
+    FROM ${addrTable} a 
     JOIN voters v ON a.voter_id = v.voter_id 
     WHERE v.county = ? AND a.city = ?
       AND addr1 IS NOT NULL
@@ -45,6 +74,7 @@ async function getStreetsByLocation(env, county, city) {
 // 4. GET /api/contact-form/check-address?county=ALBANY&city=LARAMIE&street=MAIN+ST&number=123
 // Check if specific address exists
 async function checkExistingAddress(env, county, city, street, houseNumber) {
+  const addrTable = await resolveAddrTable(env.d1);
   const query = `
     SELECT 
       v.voter_id,
@@ -55,7 +85,7 @@ async function checkExistingAddress(env, county, city, street, houseNumber) {
       v.political_party,
       p.phone_e164
     FROM voters v
-    JOIN v_voters_addr_norm a ON v.voter_id = a.voter_id
+    JOIN ${addrTable} a ON v.voter_id = a.voter_id
     LEFT JOIN best_phone p ON v.voter_id = p.voter_id
     WHERE v.county = ? AND a.city = ?
       AND (
@@ -84,6 +114,7 @@ async function searchSimilarNames(db, { county, city, firstName, lastName }) {
   if (!db) {
     throw new Error('Database connection unavailable');
   }
+  const addrTable = await resolveAddrTable(db);
   const caseParams = [
     lastName, firstName,
     lastName, firstName,
@@ -127,7 +158,7 @@ async function searchSimilarNames(db, { county, city, firstName, lastName }) {
         ELSE 40
       END as match_score
     FROM voters v
-    JOIN v_voters_addr_norm a ON v.voter_id = a.voter_id
+    JOIN ${addrTable} a ON v.voter_id = a.voter_id
     LEFT JOIN best_phone p ON v.voter_id = p.voter_id
     WHERE ${locationSql}${nameFilterSql}
     ORDER BY match_score DESC, a.ln, a.fn

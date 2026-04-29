@@ -11,7 +11,8 @@
  *   suggestionsId: 'house-suggestions',
  *   getCounty: () => formData.county,
  *   getCity: () => formData.city,
- *   getStreet: () => formData.streetName,
+   *   getStreet: () => formData.streetName,
+   *   getStreetId: () => formData.streets_index_id, // optional
  *   onHouseSelected: (houseNumber, voterData) => {
  *     console.log('House selected:', houseNumber);
  *   }
@@ -86,8 +87,8 @@ class HouseAutocomplete {
     });
   }
   
-  async loadHouseNumbers(streetName) {
-    if (!streetName) {
+  async loadHouseNumbers(streetName, streetsIndexId = null) {
+    if (!streetName && !streetsIndexId) {
       console.log('⚠️ No street name provided');
       return;
     }
@@ -103,7 +104,15 @@ class HouseAutocomplete {
       console.warn('⚠️ Unable to build region payload for houses');
       return;
     }
-    payload.street = streetName.toUpperCase().trim();
+    payload.street = (streetName || '').toString().toUpperCase().trim();
+    if (!payload.street) {
+      delete payload.street;
+    }
+    const streetIdFromConfig = typeof this.config.getStreetId === 'function' ? this.config.getStreetId() : null;
+    const streetId = streetsIndexId || streetIdFromConfig;
+    if (streetId) {
+      payload.streets_index_id = streetId;
+    }
     
     console.log('🏠 Loading house numbers for:', { ...payload });
     

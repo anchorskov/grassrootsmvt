@@ -223,6 +223,7 @@ export function initHelpModal({
   title = 'Instructions',
   toggleLabel = 'Show instructions',
   position = 'top-right',
+  toggleElement = null,
 } = {}) {
   if (!helpPath) {
     console.warn('[helpModal] helpPath is required');
@@ -245,26 +246,30 @@ export function initHelpModal({
     </div>
   `;
 
-  const toggle = document.createElement('label');
-  toggle.className = 'help-toggle';
-  toggle.style.pointerEvents = 'auto';
-  toggle.innerHTML = `
-    <span>${toggleLabel}</span>
-    <input type="checkbox" aria-label="${toggleLabel}">
-  `;
-
   document.body.appendChild(modal);
-  const floatingStack = ensureFloatingStack(position);
-  floatingStack.appendChild(toggle);
+  let checkbox = null;
+  if (toggleElement) {
+    checkbox = { checked: false };
+  } else {
+    const toggle = document.createElement('label');
+    toggle.className = 'help-toggle';
+    toggle.style.pointerEvents = 'auto';
+    toggle.innerHTML = `
+      <span>${toggleLabel}</span>
+      <input type="checkbox" aria-label="${toggleLabel}">
+    `;
+    const floatingStack = ensureFloatingStack(position);
+    floatingStack.appendChild(toggle);
+    checkbox = toggle.querySelector('input');
+  }
 
-  const checkbox = toggle.querySelector('input');
   const closeBtn = modal.querySelector('.help-modal__close');
   const body = modal.querySelector('.help-modal__body');
   let loaded = false;
   let loading = false;
 
   const close = () => {
-    checkbox.checked = false;
+    if (checkbox && 'checked' in checkbox) checkbox.checked = false;
     modal.classList.remove('open');
   };
 
@@ -284,17 +289,33 @@ export function initHelpModal({
     }
   };
 
-  checkbox.addEventListener('change', () => {
-    if (checkbox.checked) {
-      open();
-    } else {
-      close();
-    }
-  });
+  if (toggleElement) {
+    toggleElement.addEventListener('click', () => {
+      if (modal.classList.contains('open')) {
+        close();
+      } else {
+        open();
+      }
+    });
+  } else if (checkbox) {
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) {
+        open();
+      } else {
+        close();
+      }
+    });
+  }
 
   closeBtn.addEventListener('click', close);
   modal.addEventListener('click', event => {
     if (event.target === modal) {
+      close();
+    }
+  });
+
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && modal.classList.contains('open')) {
       close();
     }
   });

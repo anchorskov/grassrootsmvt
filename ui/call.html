@@ -103,6 +103,9 @@
 
 <div class="card" id="voterCard" hidden>
   <div id="voterInfo" class="muted"></div>
+  <div class="toolbar" style="margin: 0.5rem 0 0.25rem; gap: 0.5rem;">
+    <button type="button" class="secondary" id="legislatorBtn">Show current Rep &amp; Senator</button>
+  </div>
   <div class="script-controls">
     <label class="script-toggle">
       <input type="checkbox" id="scriptToggle" checked>
@@ -256,10 +259,11 @@
     return `/api/${cleanPath}${qs.toString() ? `?${qs}` : ''}`;
   };
 
-  const who = document.getElementById("whoami");
-  const voterCard = document.getElementById("voterCard");
-  const voterInfo = document.getElementById("voterInfo");
-  const empty = document.getElementById("empty");
+const who = document.getElementById("whoami");
+const voterCard = document.getElementById("voterCard");
+const voterInfo = document.getElementById("voterInfo");
+const legislatorBtn = document.getElementById("legislatorBtn");
+const empty = document.getElementById("empty");
 const msg = document.getElementById("msg");
 const getNextBtn = document.getElementById('getNextBtn');
 const saveBtn = document.getElementById('saveBtn');
@@ -297,6 +301,8 @@ let latestScriptPayload = null;
 let currentTouchpointOverride = null;
 let scriptTopics = [];
 let currentVoterId = null;
+let currentVoterData = null;
+let legislatorCache = new Map();
 
 currentTouchpointOverride = localStorage.getItem(SCRIPT_TOPIC_KEY) || '';
 if (scriptSelect && currentTouchpointOverride) {
@@ -319,6 +325,22 @@ function normalizeTenDigitPhone(value) {
     digits = digits.slice(1);
   }
   return digits;
+}
+
+function formatLegislatorLine(label, data, district) {
+  if (!data) return '';
+  const parts = [];
+  const name = data.name || 'Unknown';
+  const party = data.party ? `(${data.party})` : '';
+  const phone = data.phone ? `Phone: ${data.phone}` : '';
+  const email = data.email ? `Email: ${data.email}` : '';
+  const site = data.campaign_website || data.official_profile_url || '';
+  const districtText = district ? `${label} ${district}` : label;
+  parts.push(`${districtText}: ${name} ${party}`.trim());
+  if (phone) parts.push(phone);
+  if (email) parts.push(email);
+  if (site) parts.push(site);
+  return parts.join('\n');
 }
 
 function togglePulsePhoneGroup(show, { prefill = false } = {}) {
@@ -772,14 +794,20 @@ async function recordPulseOptIn(voterId, digits) {
 
 async function loadWho() {
   try {
-    const j = await jsonFetch(API("/whoami"));
+    const whoamiUrl = API("/whoami");
+    console.log('🔐 /whoami Request:', { url: whoamiUrl, method: 'GET' });
+    const j = await jsonFetch(whoamiUrl);
+    console.log('🔐 /whoami Response:', { status: j ? 'ok' : 'null', data: j });
     if (j && j.email) {
       currentUserEmail = j.email;
       who.textContent = "Signed in as: " + j.email;
+      console.log('✅ Access token present: true, Email:', j.email);
     } else {
       who.textContent = "Not signed in";
+      console.log('⚠️ Access token present: false');
     }
   } catch (e) {
+    console.error('❌ /whoami error:', { status: e.status, message: e.message, body: e.body });
     who.innerHTML = `<span class="error">Unable to reach API: ${e.message}</span>`;
   }
 }
@@ -884,12 +912,25 @@ async function loadVolunteerProfile() {
       const filters = getFilters();
       const exclude_ids = getSeen();
       console.log('📋 Filters:', filters, 'Excluding:', exclude_ids);
-      const v = await jsonFetch(API('/call'), {
+      const requestUrl = API('/call');
+      const requestBody = { filters, exclude_ids };
+      console.log('🌐 API Request:', {
+        url: requestUrl,
         method: 'POST',
-        body: JSON.stringify({ filters, exclude_ids })
+        body: requestBody
+      });
+      const v = await jsonFetch(requestUrl, {
+        method: 'POST',
+        body: JSON.stringify(requestBody)
       });
 
-      console.log('📨 Received voter data:', v);
+      console.log('📨 API Response received:', {
+        ok: !!v,
+        isEmpty: v?.empty,
+        hasVoterId: !!v?.voter_id,
+        data: v
+      });
+      console.log('📨 Full voter data:', v);
       
       if (!v || v.empty || !v.voter_id) {
         console.warn('⚠️ No voter data:', {hasData: !!v, isEmpty: v?.empty, hasVoterId: !!v?.voter_id});
@@ -911,6 +952,7 @@ async function loadVolunteerProfile() {
       empty.hidden = true; voterCard.hidden = false;
       voterCard.dataset.voter = v.voter_id;
       currentVoterId = v.voter_id;
+      currentVoterData = v;
       const name = [v.first_name, v.last_name].filter(Boolean).join(" ");
       const phone = v.phone_1 ? ('Phone: ' + v.phone_1) : 'Phone: —';
       const districtBits = [
@@ -927,6 +969,7 @@ async function loadVolunteerProfile() {
       voterInfo.innerHTML =
         `<strong>${name || "—"}</strong><br/>${detailsHtml}${phone}`;
       loadScriptForVoter(v.voter_id);
+      if (legislatorBtn) legislatorBtn.disabled = false;
 
       // remember to avoid immediate repeats
       pushSeen(v.voter_id);
@@ -945,6 +988,50 @@ async function loadVolunteerProfile() {
 
   getNextBtn.addEventListener("click", nextVoter);
   saveBtn.addEventListener("click", saveAndNext);
+  legislatorBtn?.addEventListener("click", async () => {
+    if (!currentVoterData) {
+      alert('No voter selected.');
+      return;
+    }
+    const { house_district, senate_district, voter_id } = currentVoterData;
+    if (!house_district && !senate_district) {
+      alert('No district info on file.');
+      return;
+    }
+    const cacheKey = `${voter_id || ''}|${house_district || ''}|${senate_district || ''}`;
+    if (legislatorCache.has(cacheKey)) {
+      alert(legislatorCache.get(cacheKey));
+      return;
+    }
+    try {
+      const payload = { house_district, senate_district };
+      const res = await jsonFetch(API('/legislators'), {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+      if (!res?.ok) {
+        alert('Legislator info unavailable.');
+        return;
+      }
+      const lines = [];
+      if (res.house) {
+        lines.push(formatLegislatorLine('House', res.house, house_district));
+      }
+      if (res.senate) {
+        lines.push(formatLegislatorLine('Senate', res.senate, senate_district));
+      }
+      const message = lines.length
+        ? lines.join('\n\n')
+        : res.missing === 'legislator_table'
+          ? 'Legislator data is not available in this environment.'
+          : 'No legislator found for this district.';
+      legislatorCache.set(cacheKey, message);
+      alert(message);
+    } catch (err) {
+      console.error('Legislator lookup failed:', err);
+      alert('Legislator lookup failed.');
+    }
+  });
 
   async function saveAndNext() {
     const voter_id = voterCard.dataset.voter || "";

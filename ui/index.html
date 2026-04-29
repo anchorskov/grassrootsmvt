@@ -60,6 +60,9 @@
     <button class="quick-action" data-quick-action="contact">
       📋 Add/Update Voter
     </button>
+    <button class="quick-action" data-quick-action="volunteer">
+      🙋 Add/Update Volunteer
+    </button>
     <button class="quick-action" data-quick-action="county">
       🏙️ County/City Targeting
     </button>
@@ -219,6 +222,10 @@
   function setActiveFlow(flow) {
     if (flow === 'contact') {
       window.location.href = 'contact-form/index.html';
+      return;
+    }
+    if (flow === 'volunteer') {
+      window.location.href = 'volunteer-intake/index.html';
       return;
     }
     activeFlow = flow;

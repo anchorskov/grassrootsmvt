@@ -150,6 +150,7 @@ const RETURN_PATH_KEY = 'contactUpdateReturnTo';
 const CANVASS_STATE_KEY = 'canvassPageState';
 const CANVASS_STATE_KEEP_FLAG = 'canvassStateKeep';
 let latestRows = [];
+let selectedStreetId = null;
 const WY_META_PATHS = ['/admin/wy.json', '/ui/admin/wy.json'];
 let wyMetaCache = null;
 const DISTRICT_STREET_LIMIT = 400;
@@ -660,10 +661,11 @@ function restoreCanvassState() {
     const filters = fromQS();
     
     console.log('🔍 Making API call with filters:', filters);
+    console.log('🔍 Party filter values:', Array.isArray(filters.parties) ? filters.parties : []);
     console.log('🔍 API URL will be:', API('/canvass/nearby'));
     
   try {
-    const requestBody = { filters, house, street, range, limit };
+    const requestBody = { filters, house, street, range, limit, streets_index_id: selectedStreetId };
     console.log('🔍 Request body:', requestBody);
     
     const j = await jsonFetch(API('/canvass/nearby'), {
@@ -673,6 +675,12 @@ function restoreCanvassState() {
     
     console.log('🔍 API response:', j);
     console.log('🔍 Response rows:', j.rows);
+    if (!j?.rows || j.rows.length === 0) {
+      console.warn('⚠️ No rows returned from /api/canvass/nearby', {
+        request: requestBody,
+        response: j,
+      });
+    }
     
     await renderList(j.rows || []);
     setMsg(`Found ${j.rows?.length||0} nearby addresses.`);
@@ -745,6 +753,7 @@ window.addEventListener('pagehide', () => persistCanvassState());
   });
   // Auto-uppercase input to reduce mismatches
   streetEl.addEventListener('input', () => {
+    selectedStreetId = null;
     const pos = streetEl.selectionStart;
     streetEl.value = (streetEl.value || '').toUpperCase();
     streetEl.selectionStart = streetEl.selectionEnd = pos;
@@ -762,6 +771,7 @@ window.addEventListener('pagehide', () => persistCanvassState());
       const f = fromQS();
       return { district_type: f.district_type, district: f.district, district_city: f.district_city };
     },
+    getStreetId: () => selectedStreetId,
     getStreet: () => document.getElementById('street').value,
     onHouseSelected: (houseNumber, houseData) => {
       console.log('🏠 House selected:', houseNumber);
@@ -780,7 +790,8 @@ window.addEventListener('pagehide', () => persistCanvassState());
       const f = fromQS();
       return { district_type: f.district_type, district: f.district, district_city: f.district_city };
     },
-    onStreetSelected: async (streetName) => {
+    onStreetSelected: async (streetName, streetId) => {
+      selectedStreetId = streetId || null;
       // Enable house number field
       houseAutocomplete.enable();
       
@@ -788,7 +799,7 @@ window.addEventListener('pagehide', () => persistCanvassState());
       updateInstruction('streetSelected');
       
       // Load house numbers for this street
-      await houseAutocomplete.loadHouseNumbers(streetName);
+      await houseAutocomplete.loadHouseNumbers(streetName, streetId);
     },
     onHouseFieldChange: (enabled) => {
       if (enabled) {
