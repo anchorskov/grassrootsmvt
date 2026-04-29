@@ -15,7 +15,7 @@ ALTER TABLE call_activity ADD COLUMN followup_date TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_call_activity_voter_id ON call_activity(voter_id);
 CREATE INDEX IF NOT EXISTS idx_call_activity_volunteer_email ON call_activity(volunteer_email);
-CREATE INDEX IF NOT EXISTS idx_call_activity_result ON call_activity(outcome);
+CREATE INDEX IF NOT EXISTS idx_call_activity_result ON call_activity(call_result);
 
 -- 🆕 Create canvass_activity table
 CREATE TABLE IF NOT EXISTS canvass_activity (
