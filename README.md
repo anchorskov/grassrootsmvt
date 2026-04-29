@@ -9,6 +9,29 @@ The Worker serves the static UI, exposes JSON APIs, and talks to a Cloudflare D1
 - Store data in a D1 database (binding `d1`), with migrations under `worker/db/migrations`.
 - Rely on Cloudflare Access for authentication; local dev bypasses Access automatically.
 
+## AI Contract (Drift Control)
+This repo uses a lightweight AI contract to lock in tooling and prevent drift.
+
+- Contract: `AI_CONTRACT.md`
+- Read it at the start of every session:
+  ```bash
+  ./scripts/read_contract.sh
+  ```
+- Optional auto-read utility: `direnv` can run the script on `cd` into the repo (ask if you want a `.envrc` added).
+
+## GrassrootsMVT.org Site (Vanilla JS)
+- The public site is built with vanilla JavaScript, HTML, and CSS.
+- Static assets live under `ui/` and deploy via Cloudflare tooling.
+- Toolchain decisions for the site are listed in `AI_CONTRACT.md`.
+
+## Selected Frontend Tooling
+- UnoCSS + Open Props + modern-css-reset for styling.
+- Vite for local dev and builds.
+- ESLint + Prettier for linting/formatting.
+- Vitest + Playwright for testing.
+- Lucide icons + Fontsource for UI assets.
+- Husky + lint-staged for commit hygiene (optional but preferred).
+
 ## Key Components
 - `worker/`: Cloudflare Worker source. `src/index.js` wires routing, auth, and static asset handling. `worker/wrangler.toml` defines assets, D1 bindings, and environments.
 - `ui/`: static assets (HTML/CSS/JS). Mounted as Worker assets (see `[assets]` in `worker/wrangler.toml`), so every request hits the Worker first.
@@ -37,6 +60,7 @@ npm run dev          # runs scripts/dev_start.sh
 - Uses local D1 state via `--persist-to worker/.wrangler/state`.
 - Auth is bypassed automatically (see `scripts/dev_start.sh`).
 - UI + API are reachable at `http://localhost:8787`.
+- `scripts/dev_start.sh` sets local dev env flags, frees port 8787, launches `wrangler dev` with local D1 persistence, writes logs to `logs/worker-dev.log`, and tails logs for quick feedback.
 
 Stop the dev processes with:
 ```bash
@@ -49,6 +73,29 @@ curl http://localhost:8787/api/ping
 curl http://localhost:8787/api/auth/config
 curl http://localhost:8787/api/whoami        # returns mocked user when auth is bypassed
 ```
+
+### Direct D1 Commands (Local & Remote)
+To query the D1 database directly (bypassing the Worker), use the `./bin/wrangler-root` helper script. It ensures all commands execute from the correct `worker/` folder and identifies which environment (local vs remote) you're hitting.
+
+**Local D1 (wrangler dev state):**
+```bash
+./bin/wrangler-root d1 execute wy --local --command "SELECT COUNT(*) FROM legislature"
+./bin/wrangler-root d1 execute wy --local --command "SELECT name, chamber FROM legislature LIMIT 5"
+```
+
+**Remote D1 (Cloudflare):**
+```bash
+./bin/wrangler-root d1 execute wy --remote --command "SELECT COUNT(*) FROM legislature"
+./bin/wrangler-root d1 execute wy --remote --command "SELECT name, chamber FROM legislature LIMIT 5"
+```
+
+The script automatically:
+- Validates that `worker/wrangler.toml` exists
+- Detects `--local` vs `--remote` and prints the environment
+- Routes all commands to the correct database
+- Fails fast if the project structure is invalid
+
+For ad-hoc queries during development, use `./bin/wrangler-root` instead of manually `cd`-ing into `worker/`.
 
 ## Where to Look
 - `ui/index.html` – volunteer landing page and shared layout.

@@ -58,7 +58,7 @@
     "express": "^5.1.0",
     "linkedom": "^0.18.12",
     "miniflare": "^4.20251004.0",
-    "wrangler": "latest"
+    "wrangler": "^4.83.0"
   },
   "dependencies": {
     "jose": "^6.1.0"

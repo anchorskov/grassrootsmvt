@@ -1,0 +1,50 @@
+#!/bin/bash
+
+################################################################################
+# wrangler-root: D1 Command Router
+#
+# Ensures all wrangler d1 commands execute from the worker folder where
+# wrangler.toml is located, preventing path-related database access errors.
+#
+# Usage:
+#   ./bin/wrangler-root d1 execute wy --local --command "SELECT ..."
+#   ./bin/wrangler-root d1 execute wy --remote --command "SELECT ..."
+#
+################################################################################
+
+set -e
+
+# Get the root project directory (one level up from bin/)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+WORKER_DIR="$PROJECT_ROOT/worker"
+
+# Verify we're in the right project structure
+if [[ ! -d "$WORKER_DIR" ]]; then
+  echo "❌ ERROR: worker folder not found at $WORKER_DIR"
+  echo "   This script must be run from the grassrootsmvt project root."
+  exit 1
+fi
+
+# Verify wrangler.toml exists
+if [[ ! -f "$WORKER_DIR/wrangler.toml" ]]; then
+  echo "❌ ERROR: wrangler.toml not found at $WORKER_DIR/wrangler.toml"
+  echo "   Cannot proceed without wrangler configuration."
+  exit 1
+fi
+
+# Detect environment from arguments
+if [[ "$@" == *"--remote"* ]]; then
+  ENV_TYPE="REMOTE (Cloudflare D1)"
+else
+  ENV_TYPE="LOCAL (Worker D1)"
+fi
+
+# Print environment info
+echo "🌐 Running wrangler from: $WORKER_DIR"
+echo "📍 Environment: $ENV_TYPE"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# Change to worker directory and execute wrangler
+cd "$WORKER_DIR"
+exec wrangler "$@"
