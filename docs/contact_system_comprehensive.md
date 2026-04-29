@@ -315,8 +315,8 @@ const endpointMap = {
 
 ### **Backend Files**
 - `worker/src/api/contact-form.js` - Contact API endpoint
-- `db/schema/voter_contact_staging.sql` - Database schema
-- `db/queries/progressive_search.sql` - Contact-related queries
+- `worker/db/migrations/023_add_voter_contact_staging.sql` - Contact staging schema
+- `worker/src/index.js` - Contact-related routes and shared D1 helpers
 
 ### **Documentation**
 - This comprehensive guide

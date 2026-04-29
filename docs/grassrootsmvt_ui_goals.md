@@ -830,7 +830,7 @@ Ready for deployment with:
 - `.github/workflows/verify-production.yml` - **NEW**: CI/CD verification workflow
 - `.github/copilot-verification-prompt.md` - **NEW**: Continuous validation prompts
 - `docs/contact_system_comprehensive.md` - **NEW**: Complete contact management documentation
-- `db/schema/voter_contact_staging.sql` - **NEW**: Contact staging table schema
+- `worker/db/migrations/023_add_voter_contact_staging.sql` - **NEW**: Contact staging table schema
 - `worker/src/api/contact-form.js` - **NEW**: Contact form API endpoint
 
 *Last verified: October 12, 2025*

@@ -383,9 +383,9 @@ Stored at `sql/find_jimmy_skovgard.sql` for quick reuse.
 ## 📁 **Related Files**
 
 ### **Schema Files:**
-- `db/schema/volunteer_schema.sql` - Volunteer and contact tables
-- `db/schema/voter_contact_staging.sql` - Contact staging system
-- `db/schema/eligible_view_stub.sql` - Development stub tables
+- `worker/db/migrations/013_create_volunteer_staging.sql` - Volunteer staging system
+- `worker/db/migrations/023_add_voter_contact_staging.sql` - Contact staging system
+- `worker/db/migrations/001_create_base_schema.sql` - Base voter/contact tables
 
 ### **API Integration:**
 - `worker/src/api/contact-form.js` - Contact form API endpoints

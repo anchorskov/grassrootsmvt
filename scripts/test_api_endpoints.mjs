@@ -16,7 +16,7 @@ const WRANGLER_ARGS = ['wrangler@4.42.0', 'pages', 'dev', UI_DIR, '--port=' + PO
 const START_TIMEOUT_MS = 60_000; // 60s
 const PROBE_METHODS = ['GET', 'OPTIONS', 'POST'];
 const ORIGIN = `http://localhost:${PORT}`;
-const OUT_MD = path.join(ROOT, 'api-verification.md');
+const OUT_MD = path.join(ROOT, '.test-results', 'api-verification.md');
 
 let wranglerProc = null;
 let started = false;
