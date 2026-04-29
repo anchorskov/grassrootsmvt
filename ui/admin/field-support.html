@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Field Support | GrassrootsMVT</title>
+  <script src="/config/environments.js"></script>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 1rem; color: #0f172a; }
+    .muted { color: #64748b; }
+    .toolbar { display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; margin: 1rem 0; }
+    button, a.button {
+      border: 0;
+      border-radius: 8px;
+      padding: .65rem .9rem;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .primary { background: #0ea5e9; color: #fff; }
+    .secondary { background: #e2e8f0; color: #0f172a; }
+    .card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 1rem; margin: 1rem 0; background: #fff; }
+    .session-head { display: flex; gap: 1rem; justify-content: space-between; flex-wrap: wrap; }
+    .status { font-weight: 700; }
+    .ok { color: #15803d; }
+    .warn { color: #b45309; }
+    .error { color: #b91c1c; }
+    .task { border-top: 1px solid #e2e8f0; padding-top: .75rem; margin-top: .75rem; }
+    .task-actions { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .5rem; }
+    .empty { padding: 1rem; border: 1px dashed #cbd5e1; border-radius: 8px; color: #64748b; }
+  </style>
+</head>
+<body>
+  <h1>Field Support</h1>
+  <p class="muted">Active field sessions with latest shared location and support tasks.</p>
+
+  <div class="toolbar">
+    <button id="refreshBtn" class="primary" type="button">Refresh</button>
+    <a class="button secondary" href="/admin/index.html">Back to admin</a>
+  </div>
+
+  <p id="status" class="status muted">Loading...</p>
+  <div id="sessions"></div>
+
+  <script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
+  <script src="/shared/authGlobal.js"></script>
+  <script>
+    const statusEl = document.getElementById('status');
+    const sessionsEl = document.getElementById('sessions');
+    const refreshBtn = document.getElementById('refreshBtn');
+
+    function setStatus(message, kind = 'muted') {
+      statusEl.textContent = message;
+      statusEl.className = `status ${kind}`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function formatDate(value) {
+      if (!value) return 'None';
+      const date = new Date(String(value).replace(' ', 'T') + 'Z');
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    }
+
+    function minutesSince(value) {
+      if (!value) return null;
+      const date = new Date(String(value).replace(' ', 'T') + 'Z');
+      if (Number.isNaN(date.getTime())) return null;
+      return Math.floor((Date.now() - date.getTime()) / 60000);
+    }
+
+    function mapUrl(session) {
+      if (session.latest_lat == null || session.latest_lng == null) return '';
+      return `https://maps.google.com/?q=${encodeURIComponent(`${session.latest_lat},${session.latest_lng}`)}`;
+    }
+
+    function taskLabel(task) {
+      const type = task.task_type === 'next_stop' ? 'Next stop' : 'Call ahead';
+      return `${type}: ${task.title}`;
+    }
+
+    function renderTask(task) {
+      return `
+        <div class="task">
+          <strong>${escapeHtml(taskLabel(task))}</strong>
+          <div class="muted">Status: ${escapeHtml(task.status)}${task.scheduled_for ? ` | Scheduled: ${escapeHtml(task.scheduled_for)}` : ''}</div>
+          ${task.notes ? `<div>${escapeHtml(task.notes)}</div>` : ''}
+          <div class="task-actions">
+            <button class="secondary" type="button" data-task-status="confirmed" data-task-id="${task.id}">Confirm</button>
+            <button class="secondary" type="button" data-task-status="done" data-task-id="${task.id}">Done</button>
+            <button class="secondary" type="button" data-task-status="cancelled" data-task-id="${task.id}">Cancel</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderSession(session) {
+      const staleMinutes = minutesSince(session.latest_location_at);
+      const isStale = staleMinutes !== null && staleMinutes > 30;
+      const locationText = session.sharing_enabled
+        ? `${session.latest_lat ?? '-'}, ${session.latest_lng ?? '-'}`
+        : 'Not sharing';
+      const url = mapUrl(session);
+      const tasks = Array.isArray(session.tasks) ? session.tasks : [];
+      return `
+        <section class="card" data-session-id="${session.id}">
+          <div class="session-head">
+            <div>
+              <h2>${escapeHtml(session.volunteer_name || session.volunteer_email)}</h2>
+              <div class="muted">${escapeHtml(session.volunteer_email)}</div>
+            </div>
+            <div class="${isStale ? 'warn' : 'ok'}">
+              ${session.sharing_enabled ? (isStale ? 'Location stale' : 'Location current') : 'Sharing off'}
+            </div>
+          </div>
+          <p><strong>Location:</strong> ${escapeHtml(locationText)} ${url ? `<a href="${url}" target="_blank" rel="noopener">Open map</a>` : ''}</p>
+          <p class="muted">Started: ${formatDate(session.started_at)} | Last location: ${formatDate(session.latest_location_at)}</p>
+          <div class="toolbar">
+            <button class="primary" type="button" data-add-task="call_ahead" data-session-id="${session.id}">Add call-ahead</button>
+            <button class="secondary" type="button" data-add-task="next_stop" data-session-id="${session.id}">Add next stop</button>
+          </div>
+          <h3>Tasks</h3>
+          ${tasks.length ? tasks.map(renderTask).join('') : '<div class="empty">No tasks yet.</div>'}
+        </section>
+      `;
+    }
+
+    async function loadSessions() {
+      try {
+        setStatus('Loading...', 'muted');
+        const data = await window.apiGet('admin/field-sessions');
+        const sessions = data.sessions || [];
+        sessionsEl.innerHTML = sessions.length
+          ? sessions.map(renderSession).join('')
+          : '<div class="empty">No active field sessions.</div>';
+        setStatus(`Loaded ${sessions.length} active session${sessions.length === 1 ? '' : 's'}.`, 'ok');
+      } catch (err) {
+        setStatus(`Unable to load field sessions: ${err.message}`, 'error');
+      }
+    }
+
+    async function addTask(sessionId, taskType) {
+      const label = taskType === 'next_stop' ? 'confirmed next stop' : 'call-ahead task';
+      const title = prompt(`Enter ${label}`);
+      if (!title) return;
+      const notes = prompt('Notes or timing details (optional)') || '';
+      try {
+        await window.apiPost(`admin/field-sessions/${sessionId}/tasks`, {
+          task_type: taskType,
+          title,
+          notes,
+          status: taskType === 'next_stop' ? 'confirmed' : 'open',
+        });
+        await loadSessions();
+      } catch (err) {
+        setStatus(`Unable to add task: ${err.message}`, 'error');
+      }
+    }
+
+    async function updateTask(taskId, status) {
+      try {
+        await window.apiFetch(`admin/field-session-tasks/${taskId}`, {
+          method: 'PATCH',
+          body: { status },
+        });
+        await loadSessions();
+      } catch (err) {
+        setStatus(`Unable to update task: ${err.message}`, 'error');
+      }
+    }
+
+    sessionsEl.addEventListener('click', event => {
+      const addButton = event.target.closest('[data-add-task]');
+      if (addButton) {
+        addTask(addButton.dataset.sessionId, addButton.dataset.addTask);
+        return;
+      }
+      const statusButton = event.target.closest('[data-task-status]');
+      if (statusButton) {
+        updateTask(statusButton.dataset.taskId, statusButton.dataset.taskStatus);
+      }
+    });
+
+    refreshBtn.addEventListener('click', loadSessions);
+    loadSessions();
+  </script>
+</body>
+</html>

@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Field Session | GrassrootsMVT</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <script src="/config/environments.js"></script>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 0 auto;
+      max-width: 840px;
+      padding: 1rem;
+      background: #f8fafc;
+      color: #0f172a;
+    }
+    h1 { margin-bottom: .25rem; }
+    .muted { color: #475569; }
+    .card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 1rem;
+      margin: 1rem 0;
+    }
+    .row { display: flex; gap: .75rem; flex-wrap: wrap; align-items: center; }
+    button, a.button {
+      border: 0;
+      border-radius: 8px;
+      padding: .75rem 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .primary { background: #0ea5e9; color: #fff; }
+    .secondary { background: #e2e8f0; color: #0f172a; }
+    .danger { background: #fee2e2; color: #991b1b; }
+    button[disabled] { opacity: .55; cursor: not-allowed; }
+    .status { font-weight: 700; }
+    .ok { color: #15803d; }
+    .warn { color: #b45309; }
+    .error { color: #b91c1c; }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: .35rem .75rem; }
+    dt { font-weight: 700; }
+    dd { margin: 0; }
+  </style>
+</head>
+<body>
+  <h1>Field Session</h1>
+  <p class="muted">Share your current location only while you choose to during an active field session.</p>
+
+  <div class="card">
+    <div class="row">
+      <button id="startSessionBtn" class="primary" type="button">Start field session</button>
+      <button id="shareOnceBtn" class="secondary" type="button" disabled>Share current location</button>
+      <button id="liveBtn" class="secondary" type="button" disabled>Start live updates</button>
+      <button id="stopSharingBtn" class="danger" type="button" disabled>Stop sharing</button>
+      <button id="endSessionBtn" class="secondary" type="button" disabled>End session</button>
+      <a class="button secondary" href="/index.html">Back to hub</a>
+    </div>
+    <p id="status" class="status muted">Loading session status...</p>
+  </div>
+
+  <div class="card">
+    <h2>Consent</h2>
+    <p>
+      Sharing is optional. When you press Share current location or Start live updates, support volunteers can see your latest location during this field session so they can help with call-aheads, next stops, and scheduling. We store only your latest location for this first version. Use Stop sharing at any time to clear your shared location.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Session Details</h2>
+    <dl>
+      <dt>Session</dt><dd id="sessionId">None</dd>
+      <dt>Sharing</dt><dd id="sharingState">Off</dd>
+      <dt>Last update</dt><dd id="lastUpdate">None</dd>
+      <dt>Accuracy</dt><dd id="accuracy">None</dd>
+    </dl>
+  </div>
+
+  <script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
+  <script src="/shared/authGlobal.js"></script>
+  <script>
+    const CONSENT_VERSION = 'field-location-v1';
+    const els = {
+      start: document.getElementById('startSessionBtn'),
+      share: document.getElementById('shareOnceBtn'),
+      live: document.getElementById('liveBtn'),
+      stop: document.getElementById('stopSharingBtn'),
+      end: document.getElementById('endSessionBtn'),
+      status: document.getElementById('status'),
+      sessionId: document.getElementById('sessionId'),
+      sharingState: document.getElementById('sharingState'),
+      lastUpdate: document.getElementById('lastUpdate'),
+      accuracy: document.getElementById('accuracy'),
+    };
+    let session = null;
+    let watchId = null;
+
+    function setStatus(message, kind = 'muted') {
+      els.status.textContent = message;
+      els.status.className = `status ${kind}`;
+    }
+
+    function formatDate(value) {
+      if (!value) return 'None';
+      const date = new Date(String(value).replace(' ', 'T') + 'Z');
+      return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    }
+
+    function render() {
+      const active = !!session && session.status === 'active';
+      const sharing = !!session?.sharing_enabled;
+      els.start.disabled = active;
+      els.share.disabled = !active;
+      els.live.disabled = !active || !!watchId;
+      els.stop.disabled = !active || !sharing;
+      els.end.disabled = !active;
+      els.sessionId.textContent = session?.id || 'None';
+      els.sharingState.textContent = sharing ? (watchId ? 'Live updates on' : 'Latest location shared') : 'Off';
+      els.lastUpdate.textContent = formatDate(session?.latest_location_at);
+      els.accuracy.textContent = session?.latest_accuracy_m ? `${Math.round(session.latest_accuracy_m)} m` : 'None';
+    }
+
+    async function loadSession() {
+      try {
+        const data = await window.apiGet('field-sessions/me');
+        session = data?.session || null;
+        render();
+        setStatus(session ? 'Field session active.' : 'No active field session.', session ? 'ok' : 'muted');
+      } catch (err) {
+        setStatus(`Unable to load session: ${err.message}`, 'error');
+      }
+    }
+
+    async function startSession() {
+      try {
+        const data = await window.apiPost('field-sessions', {});
+        session = data.session;
+        render();
+        setStatus(data.reused ? 'Resumed existing field session.' : 'Field session started.', 'ok');
+      } catch (err) {
+        setStatus(`Unable to start session: ${err.message}`, 'error');
+      }
+    }
+
+    function getPosition() {
+      return new Promise((resolve, reject) => {
+        if (!navigator.geolocation) {
+          reject(new Error('Geolocation is not available in this browser.'));
+          return;
+        }
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 10000,
+        });
+      });
+    }
+
+    async function sendPosition(position) {
+      if (!session?.id) throw new Error('Start a field session first.');
+      const payload = {
+        lat: position.coords.latitude,
+        lng: position.coords.longitude,
+        accuracy_m: position.coords.accuracy,
+        consent_text_version: CONSENT_VERSION,
+      };
+      const data = await window.apiPost(`field-sessions/${session.id}/location`, payload);
+      session = data.session;
+      render();
+      setStatus('Location shared.', 'ok');
+    }
+
+    async function shareOnce() {
+      try {
+        setStatus('Requesting location...', 'warn');
+        await sendPosition(await getPosition());
+      } catch (err) {
+        setStatus(`Location share failed: ${err.message}`, 'error');
+      }
+    }
+
+    function startLive() {
+      if (!navigator.geolocation) {
+        setStatus('Geolocation is not available in this browser.', 'error');
+        return;
+      }
+      watchId = navigator.geolocation.watchPosition(
+        position => sendPosition(position).catch(err => setStatus(`Live update failed: ${err.message}`, 'error')),
+        err => setStatus(`Live update failed: ${err.message}`, 'error'),
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+      );
+      render();
+      setStatus('Live updates started while this page is open.', 'ok');
+    }
+
+    function stopWatch() {
+      if (watchId !== null) {
+        navigator.geolocation.clearWatch(watchId);
+        watchId = null;
+      }
+    }
+
+    async function stopSharing() {
+      try {
+        stopWatch();
+        if (!session?.id) return;
+        const data = await window.apiPost(`field-sessions/${session.id}/stop-sharing`, {});
+        session = data.session;
+        render();
+        setStatus('Sharing stopped and latest location cleared.', 'ok');
+      } catch (err) {
+        setStatus(`Unable to stop sharing: ${err.message}`, 'error');
+      }
+    }
+
+    async function endSession() {
+      try {
+        stopWatch();
+        if (!session?.id) return;
+        await window.apiPost(`field-sessions/${session.id}/end`, {});
+        session = null;
+        render();
+        setStatus('Field session ended.', 'ok');
+      } catch (err) {
+        setStatus(`Unable to end session: ${err.message}`, 'error');
+      }
+    }
+
+    els.start.addEventListener('click', startSession);
+    els.share.addEventListener('click', shareOnce);
+    els.live.addEventListener('click', startLive);
+    els.stop.addEventListener('click', stopSharing);
+    els.end.addEventListener('click', endSession);
+    window.addEventListener('pagehide', stopWatch);
+    loadSession();
+  </script>
+</body>
+</html>

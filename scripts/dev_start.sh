@@ -48,7 +48,8 @@ mkdir -p logs
 
 # Start the unified Worker (serves UI + API)
 echo "🔧 Starting Worker (UI + API) on port $WORKER_PORT..."
-cd worker && \
+(
+  cd worker
     ENVIRONMENT=local \
     LOCAL_DEVELOPMENT=true \
     DISABLE_AUTH=true \
@@ -57,10 +58,10 @@ cd worker && \
         --port $WORKER_PORT \
         --local \
         --persist-to .wrangler/state \
-        > ../logs/worker-dev.log 2>&1 &
+        > ../logs/worker-dev.log 2>&1
+) &
 worker_pid=$!
-echo $worker_pid > ../logs/worker-dev.pid
-cd ..
+echo $worker_pid > logs/worker-dev.pid
 
 # Wait for worker to start
 sleep 3
@@ -97,12 +98,14 @@ echo "🛑 To stop: npm run dev:stop"
 echo ""
 
 # Optional: Open browser to the application
-if command_exists "open"; then
-    echo "🌐 Opening browser to http://localhost:$WORKER_PORT"
-    open http://localhost:$WORKER_PORT
-elif command_exists "xdg-open"; then
-    echo "🌐 Opening browser to http://localhost:$WORKER_PORT"
-    xdg-open http://localhost:$WORKER_PORT
+if [ "${OPEN_BROWSER:-0}" = "1" ]; then
+    if command_exists "open"; then
+        echo "🌐 Opening browser to http://localhost:$WORKER_PORT"
+        open http://localhost:$WORKER_PORT
+    elif command_exists "xdg-open"; then
+        echo "🌐 Opening browser to http://localhost:$WORKER_PORT"
+        xdg-open http://localhost:$WORKER_PORT
+    fi
 fi
 
 # Keep script running and show live logs

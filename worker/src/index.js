@@ -2588,6 +2588,394 @@ router.post('/pulse', async (request, env, ctx) => {
   }
 });
 
+const FIELD_CONSENT_TEXT_VERSION = 'field-location-v1';
+
+function getPathSegmentAfter(path, marker) {
+  const parts = String(path || '').split('/').filter(Boolean);
+  const index = parts.indexOf(marker);
+  if (index === -1 || index + 1 >= parts.length) return null;
+  return decodeURIComponent(parts[index + 1]);
+}
+
+function normalizeFieldTaskType(value) {
+  const normalized = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+  if (normalized === 'next_stop' || normalized === 'confirmed_next_stop') return 'next_stop';
+  return 'call_ahead';
+}
+
+function normalizeFieldTaskStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+  const allowed = new Set(['open', 'confirmed', 'done', 'cancelled']);
+  return allowed.has(normalized) ? normalized : 'open';
+}
+
+async function getActiveFieldSessionForEmail(db, email) {
+  return buildStatement(
+    db,
+    `SELECT *
+     FROM field_sessions
+     WHERE lower(volunteer_email) = lower(?1)
+       AND status = 'active'
+     ORDER BY started_at DESC, id DESC
+     LIMIT 1`,
+    [email]
+  ).first();
+}
+
+async function getFieldSessionForOwner(db, sessionId, email) {
+  return buildStatement(
+    db,
+    `SELECT *
+     FROM field_sessions
+     WHERE id = ?1
+       AND lower(volunteer_email) = lower(?2)
+     LIMIT 1`,
+    [sessionId, email]
+  ).first();
+}
+
+router.post('/field-sessions', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+
+    const table = await resolveTable(env, ['field_sessions']);
+    const email = (auth.email || '').trim().toLowerCase();
+    if (!email) {
+      return ctx.jsonResponse({ ok: false, error: 'Authenticated email required' }, 401, ctx.allowedOrigin);
+    }
+
+    const existing = await getActiveFieldSessionForEmail(db, email);
+    if (existing) {
+      return ctx.jsonResponse({ ok: true, session: existing, reused: true }, 200, ctx.allowedOrigin);
+    }
+
+    let displayName = email;
+    const volunteerTable = await resolveTableOptional(env, ['volunteers']);
+    if (volunteerTable) {
+      const volunteer = await fetchVolunteerById(env, db, volunteerTable, email);
+      displayName = deriveVolunteerDisplayName(volunteer, email);
+    }
+
+    const result = await buildStatement(
+      db,
+      `INSERT INTO ${table} (volunteer_email, volunteer_name, status, sharing_enabled)
+       VALUES (?1, ?2, 'active', 0)`,
+      [email, displayName]
+    ).run();
+    const sessionId = result?.meta?.last_row_id;
+    const session = await buildStatement(db, `SELECT * FROM ${table} WHERE id = ?1`, [sessionId]).first();
+    return ctx.jsonResponse({ ok: true, session }, 201, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/field-sessions error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.get('/field-sessions/me', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+    await resolveTable(env, ['field_sessions']);
+    const email = (auth.email || '').trim().toLowerCase();
+    const session = email ? await getActiveFieldSessionForEmail(db, email) : null;
+    return ctx.jsonResponse({ ok: true, session }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    const status = err?.status === 401 ? 401 : 500;
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, status, ctx.allowedOrigin);
+  }
+});
+
+router.post('/field-sessions/:id/location', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    throw err;
+  }
+
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+    const table = await resolveTable(env, ['field_sessions']);
+    const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
+    const lat = Number(body?.lat);
+    const lng = Number(body?.lng);
+    const accuracy = body?.accuracy_m ?? body?.accuracy ?? null;
+    if (!Number.isFinite(sessionId) || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return ctx.jsonResponse({ ok: false, error: 'session id, lat, and lng are required' }, 400, ctx.allowedOrigin);
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return ctx.jsonResponse({ ok: false, error: 'invalid coordinates' }, 400, ctx.allowedOrigin);
+    }
+    const session = await getFieldSessionForOwner(db, sessionId, auth.email || '');
+    if (!session || session.status !== 'active') {
+      return ctx.jsonResponse({ ok: false, error: 'active field session not found' }, 404, ctx.allowedOrigin);
+    }
+
+    await buildStatement(
+      db,
+      `UPDATE ${table}
+       SET sharing_enabled = 1,
+           latest_lat = ?1,
+           latest_lng = ?2,
+           latest_accuracy_m = ?3,
+           latest_location_at = datetime('now'),
+           consent_text_version = ?4,
+           stopped_sharing_at = NULL,
+           updated_at = datetime('now')
+       WHERE id = ?5`,
+      [
+        lat,
+        lng,
+        Number.isFinite(Number(accuracy)) ? Number(accuracy) : null,
+        body?.consent_text_version || FIELD_CONSENT_TEXT_VERSION,
+        sessionId,
+      ]
+    ).run();
+    const updated = await buildStatement(db, `SELECT * FROM ${table} WHERE id = ?1`, [sessionId]).first();
+    return ctx.jsonResponse({ ok: true, session: updated }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/field-sessions/:id/location error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.post('/field-sessions/:id/stop-sharing', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+    const table = await resolveTable(env, ['field_sessions']);
+    const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
+    const session = await getFieldSessionForOwner(db, sessionId, auth.email || '');
+    if (!session) {
+      return ctx.jsonResponse({ ok: false, error: 'field session not found' }, 404, ctx.allowedOrigin);
+    }
+    await buildStatement(
+      db,
+      `UPDATE ${table}
+       SET sharing_enabled = 0,
+           latest_lat = NULL,
+           latest_lng = NULL,
+           latest_accuracy_m = NULL,
+           latest_location_at = NULL,
+           stopped_sharing_at = datetime('now'),
+           updated_at = datetime('now')
+       WHERE id = ?1`,
+      [sessionId]
+    ).run();
+    const updated = await buildStatement(db, `SELECT * FROM ${table} WHERE id = ?1`, [sessionId]).first();
+    return ctx.jsonResponse({ ok: true, session: updated }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/field-sessions/:id/stop-sharing error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.post('/field-sessions/:id/end', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+    const table = await resolveTable(env, ['field_sessions']);
+    const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
+    const session = await getFieldSessionForOwner(db, sessionId, auth.email || '');
+    if (!session) {
+      return ctx.jsonResponse({ ok: false, error: 'field session not found' }, 404, ctx.allowedOrigin);
+    }
+    await buildStatement(
+      db,
+      `UPDATE ${table}
+       SET status = 'ended',
+           sharing_enabled = 0,
+           latest_lat = NULL,
+           latest_lng = NULL,
+           latest_accuracy_m = NULL,
+           latest_location_at = NULL,
+           ended_at = datetime('now'),
+           updated_at = datetime('now')
+       WHERE id = ?1`,
+      [sessionId]
+    ).run();
+    return ctx.jsonResponse({ ok: true }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/field-sessions/:id/end error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.get('/admin/field-sessions', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+    const sessionsTable = await resolveTable(env, ['field_sessions']);
+    const tasksTable = await resolveTableOptional(env, ['field_session_tasks']);
+    const url = new URL(request.url);
+    const includeEnded = url.searchParams.get('include_ended') === 'true';
+
+    const sessionsResult = await buildStatement(
+      db,
+      `SELECT *
+       FROM ${sessionsTable}
+       WHERE ${includeEnded ? '1 = 1' : "status = 'active'"}
+       ORDER BY status ASC, latest_location_at DESC, started_at DESC
+       LIMIT 100`
+    ).all();
+    const sessions = sessionsResult.results || [];
+
+    let tasksBySession = new Map();
+    if (tasksTable && sessions.length) {
+      const ids = sessions.map(session => session.id);
+      const placeholders = ids.map((_, index) => `?${index + 1}`).join(',');
+      const tasksResult = await buildStatement(
+        db,
+        `SELECT *
+         FROM ${tasksTable}
+         WHERE session_id IN (${placeholders})
+         ORDER BY created_at DESC, id DESC`,
+        ids
+      ).all();
+      for (const task of tasksResult.results || []) {
+        const list = tasksBySession.get(task.session_id) || [];
+        list.push(task);
+        tasksBySession.set(task.session_id, list);
+      }
+    }
+
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        sessions: sessions.map(session => ({
+          ...session,
+          tasks: tasksBySession.get(session.id) || [],
+        })),
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/admin/field-sessions error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.post('/admin/field-sessions/:id/tasks', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    throw err;
+  }
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_session_tasks', ctx.allowedOrigin);
+    const sessionsTable = await resolveTable(env, ['field_sessions']);
+    const tasksTable = await resolveTable(env, ['field_session_tasks']);
+    const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
+    const session = await buildStatement(db, `SELECT id FROM ${sessionsTable} WHERE id = ?1`, [sessionId]).first();
+    if (!session) {
+      return ctx.jsonResponse({ ok: false, error: 'field session not found' }, 404, ctx.allowedOrigin);
+    }
+    const taskType = normalizeFieldTaskType(body?.task_type || body?.type);
+    const title = String(body?.title || '').trim();
+    const notes = body?.notes ? String(body.notes).trim() : null;
+    const scheduledFor = body?.scheduled_for ? String(body.scheduled_for).trim() : null;
+    if (!title) {
+      return ctx.jsonResponse({ ok: false, error: 'title is required' }, 400, ctx.allowedOrigin);
+    }
+    const result = await buildStatement(
+      db,
+      `INSERT INTO ${tasksTable} (session_id, task_type, status, title, notes, scheduled_for, created_by)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+      [sessionId, taskType, normalizeFieldTaskStatus(body?.status), title, notes, scheduledFor, auth.email || null]
+    ).run();
+    const task = await buildStatement(db, `SELECT * FROM ${tasksTable} WHERE id = ?1`, [result?.meta?.last_row_id]).first();
+    return ctx.jsonResponse({ ok: true, task }, 201, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/admin/field-sessions/:id/tasks error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.patch('/admin/field-session-tasks/:id', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    throw err;
+  }
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_session_tasks', ctx.allowedOrigin);
+    const tasksTable = await resolveTable(env, ['field_session_tasks']);
+    const taskId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-session-tasks'));
+    if (!Number.isFinite(taskId)) {
+      return ctx.jsonResponse({ ok: false, error: 'task id is required' }, 400, ctx.allowedOrigin);
+    }
+
+    const updates = [];
+    const params = [];
+    let paramIndex = 1;
+    if (body?.status !== undefined) {
+      const status = normalizeFieldTaskStatus(body.status);
+      updates.push(`status = ?${paramIndex++}`);
+      params.push(status);
+      updates.push(`completed_at = ${status === 'done' ? "datetime('now')" : 'NULL'}`);
+    }
+    if (body?.title !== undefined) {
+      updates.push(`title = ?${paramIndex++}`);
+      params.push(String(body.title || '').trim());
+    }
+    if (body?.notes !== undefined) {
+      updates.push(`notes = ?${paramIndex++}`);
+      params.push(body.notes ? String(body.notes).trim() : null);
+    }
+    if (body?.scheduled_for !== undefined) {
+      updates.push(`scheduled_for = ?${paramIndex++}`);
+      params.push(body.scheduled_for ? String(body.scheduled_for).trim() : null);
+    }
+    if (!updates.length) {
+      return ctx.jsonResponse({ ok: false, error: 'No updates provided' }, 400, ctx.allowedOrigin);
+    }
+    updates.push(`updated_at = datetime('now')`);
+    params.push(taskId);
+    await buildStatement(
+      db,
+      `UPDATE ${tasksTable}
+       SET ${updates.join(', ')}
+       WHERE id = ?${paramIndex}`,
+      params
+    ).run();
+    const task = await buildStatement(db, `SELECT * FROM ${tasksTable} WHERE id = ?1`, [taskId]).first();
+    if (!task) return ctx.jsonResponse({ ok: false, error: 'task not found' }, 404, ctx.allowedOrigin);
+    return ctx.jsonResponse({ ok: true, task }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/admin/field-session-tasks/:id error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
 // ============================================================================
 // ADMIN ROUTES
 // ============================================================================

@@ -63,6 +63,9 @@
     <button class="quick-action" data-quick-action="volunteer">
       🙋 Add/Update Volunteer
     </button>
+    <button class="quick-action" data-quick-action="field">
+      Field Session
+    </button>
     <button class="quick-action" data-quick-action="county">
       🏙️ County/City Targeting
     </button>
@@ -228,10 +231,14 @@
       window.location.href = 'volunteer-intake/index.html';
       return;
     }
+    if (flow === 'field') {
+      window.location.href = 'field-session/index.html';
+      return;
+    }
     activeFlow = flow;
     quickActionButtons.forEach(btn => {
       const action = btn.dataset.quickAction;
-      if (action === 'contact') {
+      if (action === 'contact' || action === 'volunteer' || action === 'field') {
         btn.classList.remove('is-active');
       } else {
         btn.classList.toggle('is-active', action === flow);
