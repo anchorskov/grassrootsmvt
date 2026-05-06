@@ -1259,6 +1259,27 @@ router.post('/canvass', async (request, env, ctx) => {
         followup_needed ? 1 : 0,
       ]
     ).run();
+
+    // Opportunistically geocode voter from canvass GPS contact.
+    // Refreshes coordinates if > 30 days old; never blocks the canvass response.
+    if (Number.isFinite(Number(location_lat)) && Number.isFinite(Number(location_lng))) {
+      try {
+        const addrTable = await resolveTableOptional(env, ['voters_addr_norm']);
+        if (addrTable) {
+          await buildStatement(
+            db,
+            `UPDATE ${addrTable}
+             SET lat = ?1, lng = ?2, geocoded_at = datetime('now')
+             WHERE voter_id = ?3
+               AND (lat IS NULL OR geocoded_at < datetime('now', '-30 days'))`,
+            [Number(location_lat), Number(location_lng), voterId]
+          ).run();
+        }
+      } catch {
+        // Non-critical — don't fail the canvass log if coordinate write fails
+      }
+    }
+
     return ctx.jsonResponse({ ok: true, msg: 'Canvass logged' }, 200, ctx.allowedOrigin);
   } catch (err) {
     if (err instanceof DependencyMissingError) {
@@ -2605,8 +2626,123 @@ function normalizeFieldTaskType(value) {
 
 function normalizeFieldTaskStatus(value) {
   const normalized = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
-  const allowed = new Set(['open', 'confirmed', 'done', 'cancelled']);
+  const allowed = new Set(['open', 'claimed', 'confirmed', 'done', 'cancelled']);
   return allowed.has(normalized) ? normalized : 'open';
+}
+
+function normalizeTeamId(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  const slug = raw.replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '');
+  return slug || null;
+}
+
+function getSupportScope(email, env) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const globalEmails = new Set(
+    String(env?.GLOBAL_DISPATCH_EMAILS || '')
+      .split(',')
+      .map(item => item.trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  if (globalEmails.has(normalizedEmail)) {
+    return { global: true, teams: new Set() };
+  }
+
+  const rawMemberships = String(env?.TEAM_MEMBERSHIPS_JSON || '').trim();
+  if (!rawMemberships) {
+    // Backward-compat: no team map configured means existing behavior.
+    return { global: true, teams: new Set() };
+  }
+
+  try {
+    const parsed = JSON.parse(rawMemberships);
+    const membership = parsed?.[normalizedEmail];
+    if (!membership) return { global: false, teams: new Set() };
+
+    const teams = Array.isArray(membership) ? membership : [membership];
+    const normalizedTeams = new Set();
+    for (const team of teams) {
+      if (team === '*') return { global: true, teams: new Set() };
+      const normalizedTeam = normalizeTeamId(team);
+      if (normalizedTeam) normalizedTeams.add(normalizedTeam);
+    }
+    return { global: false, teams: normalizedTeams };
+  } catch {
+    return { global: true, teams: new Set() };
+  }
+}
+
+function hasTeamAccess(scope, teamId) {
+  if (scope.global) return true;
+  if (!teamId) return true;
+  return scope.teams.has(normalizeTeamId(teamId));
+}
+
+function buildTeamScopeWhere(scope, params, { includeUnscoped = true } = {}) {
+  if (scope.global || !scope.teams.size) return '';
+  const placeholders = [];
+  for (const team of scope.teams) {
+    placeholders.push(`?${params.length + 1}`);
+    params.push(team);
+  }
+  const inClause = `team_id IN (${placeholders.join(',')})`;
+  return includeUnscoped ? `(${inClause} OR team_id IS NULL)` : inClause;
+}
+
+async function fetchVolunteerTeamContext(env, db, volunteerTable, id) {
+  const columns = await getTableColumns(env, volunteerTable);
+  const hasTeam = columns.includes('team_id');
+  const hasQueue = columns.includes('support_queue');
+  if (!hasTeam && !hasQueue) return null;
+
+  const selected = [];
+  if (hasTeam) selected.push('team_id');
+  if (hasQueue) selected.push('support_queue');
+  const row = await buildStatement(
+    db,
+    `SELECT ${selected.join(', ')}
+     FROM ${volunteerTable}
+     WHERE lower(trim(id)) = lower(trim(?1))
+     LIMIT 1`,
+    [String(id || '').trim().toLowerCase()]
+  ).first();
+  return row || null;
+}
+
+async function getFieldTaskForScope(db, tasksTable, taskId, scope) {
+  const task = await buildStatement(db, `SELECT * FROM ${tasksTable} WHERE id = ?1`, [taskId]).first();
+  if (!task) return null;
+  if (!hasTeamAccess(scope, task.team_id)) {
+    const error = new Error('team scope denied');
+    error.status = 403;
+    throw error;
+  }
+  return task;
+}
+
+function assertExpectedVersion(task, expectedVersion) {
+  const parsedExpected = Number(expectedVersion);
+  const currentVersion = Number(task?.version || 1);
+  if (!Number.isFinite(parsedExpected) || parsedExpected !== currentVersion) {
+    const error = new Error('version_conflict');
+    error.status = 409;
+    error.payload = { ok: false, error: 'version_conflict', current_version: currentVersion };
+    throw error;
+  }
+}
+
+async function updateFieldTaskRow(db, tasksTable, taskId, updates, params = []) {
+  const assignments = [...updates, `updated_at = datetime('now')`];
+  await buildStatement(
+    db,
+    `UPDATE ${tasksTable}
+     SET ${assignments.join(', ')}
+     WHERE id = ?${params.length + 1}`,
+    [...params, taskId]
+  ).run();
+  return buildStatement(db, `SELECT * FROM ${tasksTable} WHERE id = ?1`, [taskId]).first();
 }
 
 async function getActiveFieldSessionForEmail(db, email) {
@@ -2651,18 +2787,35 @@ router.post('/field-sessions', async (request, env, ctx) => {
       return ctx.jsonResponse({ ok: true, session: existing, reused: true }, 200, ctx.allowedOrigin);
     }
 
+    let body = {};
+    try {
+      const raw = await request.text();
+      body = raw ? JSON.parse(raw) : {};
+    } catch {
+      body = {};
+    }
+
     let displayName = email;
+    let teamId = normalizeTeamId(body?.team_id);
+    let supportQueue = body?.support_queue ? String(body.support_queue).trim() : null;
     const volunteerTable = await resolveTableOptional(env, ['volunteers']);
     if (volunteerTable) {
       const volunteer = await fetchVolunteerById(env, db, volunteerTable, email);
       displayName = deriveVolunteerDisplayName(volunteer, email);
+      const volunteerContext = await fetchVolunteerTeamContext(env, db, volunteerTable, email);
+      if (!teamId && volunteerContext?.team_id) {
+        teamId = normalizeTeamId(volunteerContext.team_id);
+      }
+      if (!supportQueue && volunteerContext?.support_queue) {
+        supportQueue = String(volunteerContext.support_queue).trim();
+      }
     }
 
     const result = await buildStatement(
       db,
-      `INSERT INTO ${table} (volunteer_email, volunteer_name, status, sharing_enabled)
-       VALUES (?1, ?2, 'active', 0)`,
-      [email, displayName]
+      `INSERT INTO ${table} (volunteer_email, volunteer_name, status, sharing_enabled, team_id, support_queue)
+       VALUES (?1, ?2, 'active', 0, ?3, ?4)`,
+      [email, displayName, teamId, supportQueue]
     ).run();
     const sessionId = result?.meta?.last_row_id;
     const session = await buildStatement(db, `SELECT * FROM ${table} WHERE id = ?1`, [sessionId]).first();
@@ -2682,7 +2835,24 @@ router.get('/field-sessions/me', async (request, env, ctx) => {
     await resolveTable(env, ['field_sessions']);
     const email = (auth.email || '').trim().toLowerCase();
     const session = email ? await getActiveFieldSessionForEmail(db, email) : null;
-    return ctx.jsonResponse({ ok: true, session }, 200, ctx.allowedOrigin);
+
+    let tasks = [];
+    if (session) {
+      const tasksTable = await resolveTableOptional(env, ['field_session_tasks']);
+      if (tasksTable) {
+        const tasksResult = await buildStatement(
+          db,
+          `SELECT * FROM ${tasksTable}
+           WHERE session_id = ?1
+             AND status NOT IN ('done', 'cancelled')
+           ORDER BY created_at ASC, id ASC`,
+          [session.id]
+        ).all();
+        tasks = tasksResult.results || [];
+      }
+    }
+
+    return ctx.jsonResponse({ ok: true, session, tasks }, 200, ctx.allowedOrigin);
   } catch (err) {
     if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
     const status = err?.status === 401 ? 401 : 500;
@@ -2719,6 +2889,9 @@ router.post('/field-sessions/:id/location', async (request, env, ctx) => {
       return ctx.jsonResponse({ ok: false, error: 'active field session not found' }, 404, ctx.allowedOrigin);
     }
 
+    const streetHint = body?.street_hint ? String(body.street_hint).trim().slice(0, 120) : null;
+    const cityHint = body?.city_hint ? String(body.city_hint).trim().slice(0, 80) : null;
+
     await buildStatement(
       db,
       `UPDATE ${table}
@@ -2728,6 +2901,8 @@ router.post('/field-sessions/:id/location', async (request, env, ctx) => {
            latest_accuracy_m = ?3,
            latest_location_at = datetime('now'),
            consent_text_version = ?4,
+           street_hint = COALESCE(?6, street_hint),
+           city_hint = COALESCE(?7, city_hint),
            stopped_sharing_at = NULL,
            updated_at = datetime('now')
        WHERE id = ?5`,
@@ -2737,6 +2912,8 @@ router.post('/field-sessions/:id/location', async (request, env, ctx) => {
         Number.isFinite(Number(accuracy)) ? Number(accuracy) : null,
         body?.consent_text_version || FIELD_CONSENT_TEXT_VERSION,
         sessionId,
+        streetHint,
+        cityHint,
       ]
     ).run();
     const updated = await buildStatement(db, `SELECT * FROM ${table} WHERE id = ?1`, [sessionId]).first();
@@ -2818,22 +2995,58 @@ router.get('/admin/field-sessions', async (request, env, ctx) => {
   try {
     const auth = await ensureAuth(request, env, ctx.config);
     requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
     const db = getDb(env);
     if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
     const sessionsTable = await resolveTable(env, ['field_sessions']);
     const tasksTable = await resolveTableOptional(env, ['field_session_tasks']);
     const url = new URL(request.url);
     const includeEnded = url.searchParams.get('include_ended') === 'true';
+    const requestedTeamId = normalizeTeamId(url.searchParams.get('team_id'));
+
+    if (requestedTeamId && !hasTeamAccess(scope, requestedTeamId)) {
+      return ctx.jsonResponse({ ok: false, error: 'team scope denied' }, 403, ctx.allowedOrigin);
+    }
+
+    const baseWhere = [];
+    const baseParams = [];
+    if (!includeEnded) {
+      baseWhere.push("status = 'active'");
+    }
+    const scopeClause = buildTeamScopeWhere(scope, baseParams);
+    if (scopeClause) baseWhere.push(scopeClause);
+
+    const finalWhere = [...baseWhere];
+    const finalParams = [...baseParams];
+    if (requestedTeamId) {
+      finalWhere.push(`team_id = ?${finalParams.length + 1}`);
+      finalParams.push(requestedTeamId);
+    }
+
+    const baseWhereSql = baseWhere.length ? `WHERE ${baseWhere.join(' AND ')}` : '';
+    const finalWhereSql = finalWhere.length ? `WHERE ${finalWhere.join(' AND ')}` : '';
 
     const sessionsResult = await buildStatement(
       db,
       `SELECT *
        FROM ${sessionsTable}
-       WHERE ${includeEnded ? '1 = 1' : "status = 'active'"}
+       ${finalWhereSql}
        ORDER BY status ASC, latest_location_at DESC, started_at DESC
-       LIMIT 100`
+       LIMIT 100`,
+      finalParams
     ).all();
     const sessions = sessionsResult.results || [];
+
+    const teamsResult = await buildStatement(
+      db,
+      `SELECT DISTINCT team_id
+       FROM ${sessionsTable}
+       ${baseWhereSql}
+         ${baseWhereSql ? 'AND' : 'WHERE'} team_id IS NOT NULL
+       ORDER BY team_id ASC`,
+      baseParams
+    ).all();
+    const availableTeams = (teamsResult.results || []).map(row => row.team_id).filter(Boolean);
 
     let tasksBySession = new Map();
     if (tasksTable && sessions.length) {
@@ -2857,6 +3070,7 @@ router.get('/admin/field-sessions', async (request, env, ctx) => {
     return ctx.jsonResponse(
       {
         ok: true,
+        available_teams: availableTeams,
         sessions: sessions.map(session => ({
           ...session,
           tasks: tasksBySession.get(session.id) || [],
@@ -2872,6 +3086,184 @@ router.get('/admin/field-sessions', async (request, env, ctx) => {
   }
 });
 
+router.get('/admin/field-sessions/:id/nearby-voters', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+
+    const sessionsTable = await resolveTable(env, ['field_sessions']);
+    const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
+    const session = await buildStatement(db, `SELECT * FROM ${sessionsTable} WHERE id = ?1`, [sessionId]).first();
+    if (!session) return ctx.jsonResponse({ ok: false, error: 'field session not found' }, 404, ctx.allowedOrigin);
+    if (!hasTeamAccess(scope, session.team_id)) {
+      return ctx.jsonResponse({ ok: false, error: 'team scope denied' }, 403, ctx.allowedOrigin);
+    }
+
+    const streetHint = session.street_hint;
+    const cityHint = session.city_hint;
+    const sessionLat = Number.isFinite(Number(session.latest_lat)) ? Number(session.latest_lat) : null;
+    const sessionLng = Number.isFinite(Number(session.latest_lng)) ? Number(session.latest_lng) : null;
+
+    // No street hint and no GPS — nothing to search on
+    if (!streetHint && (sessionLat === null || sessionLng === null)) {
+      return ctx.jsonResponse(
+        { ok: true, rows: [], has_phone: 0, no_phone: 0, street_used: null, street_index_id: null, method: null },
+        200,
+        ctx.allowedOrigin
+      );
+    }
+
+    const votersTable = await resolveTable(env, ['voters']);
+    const addrTable = await resolveTable(env, ['voters_addr_norm', 'voters_addr', 'voter_addresses']);
+    const phoneTable = await resolveTableOptional(env, ['best_phone', 'voter_phones', 'v_best_phone', 'best_phone_view']);
+
+    const phoneJoin = phoneTable ? `LEFT JOIN ${phoneTable} bp ON v.voter_id = bp.voter_id` : '';
+    const phoneExpr = phoneTable ? `NULLIF(bp.phone_e164, '')` : 'NULL';
+
+    const addrColumns = await getTableColumns(env, addrTable);
+    const fnExpr = addrColumns.includes('fn') ? "COALESCE(va.fn, '')" : addrColumns.includes('first_name') ? "COALESCE(va.first_name, '')" : "''";
+    const lnExpr = addrColumns.includes('ln') ? "COALESCE(va.ln, '')" : addrColumns.includes('last_name') ? "COALESCE(va.last_name, '')" : "''";
+    const hasVoterCoords = addrColumns.includes('lat') && addrColumns.includes('lng');
+
+    let query;
+    let params;
+    let method;
+    let streetIndexId = null;
+
+    if (streetHint) {
+      // Primary: resolve canonical street_index_id for precise indexed lookup
+      try {
+        const streetsTable = await resolveTableOptional(env, ['streets_index']);
+        const cityCountyTable = await resolveTableOptional(env, ['wy_city_county']);
+        if (streetsTable) {
+          let streetRow;
+          if (cityHint && cityCountyTable) {
+            streetRow = await buildStatement(
+              db,
+              `SELECT si.id FROM ${streetsTable} si
+               JOIN ${cityCountyTable} cc ON si.city_county_id = cc.id
+               WHERE UPPER(si.street_canonical) = UPPER(?1)
+                 AND UPPER(cc.city) = UPPER(?2)
+               LIMIT 1`,
+              [streetHint, cityHint]
+            ).first();
+          } else {
+            streetRow = await buildStatement(
+              db,
+              `SELECT id FROM ${streetsTable} WHERE UPPER(street_canonical) = UPPER(?1) LIMIT 1`,
+              [streetHint]
+            ).first();
+          }
+          if (streetRow) streetIndexId = streetRow.id;
+        }
+      } catch {
+        // streets_index lookup is optional; fall through to name match
+      }
+
+      if (streetIndexId !== null) {
+        method = 'street_id';
+        query = `
+          SELECT v.voter_id,
+                 ${fnExpr} AS first_name,
+                 ${lnExpr} AS last_name,
+                 COALESCE(va.addr1, '') AS address,
+                 COALESCE(va.city, '') AS city,
+                 COALESCE(va.zip, '') AS zip,
+                 ${phoneExpr} AS phone_e164
+          FROM ${votersTable} v
+          LEFT JOIN ${addrTable} va ON v.voter_id = va.voter_id
+          ${phoneJoin}
+          WHERE va.street_index_id = ?1
+          ORDER BY CASE WHEN ${phoneExpr} IS NULL THEN 1 ELSE 0 END ASC, va.addr1 ASC
+          LIMIT 50`;
+        params = [streetIndexId];
+      } else {
+        method = 'street_name';
+        query = `
+          SELECT v.voter_id,
+                 ${fnExpr} AS first_name,
+                 ${lnExpr} AS last_name,
+                 COALESCE(va.addr1, '') AS address,
+                 COALESCE(va.city, '') AS city,
+                 COALESCE(va.zip, '') AS zip,
+                 ${phoneExpr} AS phone_e164
+          FROM ${votersTable} v
+          LEFT JOIN ${addrTable} va ON v.voter_id = va.voter_id
+          ${phoneJoin}
+          WHERE UPPER(va.addr1) LIKE '%' || ?1 || '%'
+            ${cityHint ? 'AND UPPER(va.city) = ?2' : ''}
+          ORDER BY CASE WHEN ${phoneExpr} IS NULL THEN 1 ELSE 0 END ASC, va.addr1 ASC
+          LIMIT 50`;
+        params = cityHint ? [streetHint.toUpperCase(), cityHint.toUpperCase()] : [streetHint.toUpperCase()];
+      }
+    } else if (hasVoterCoords && sessionLat !== null && sessionLng !== null) {
+      // Fallback: GPS bounding-box using geocoded voter coordinates (populated by canvass contacts).
+      // ±0.003 lat ≈ ±333m; ±0.004 lng ≈ ±333m at Wyoming latitude (~43°, cos≈0.731)
+      method = 'coordinates';
+      const latDelta = 0.003;
+      const lngDelta = 0.004;
+      query = `
+        SELECT v.voter_id,
+               ${fnExpr} AS first_name,
+               ${lnExpr} AS last_name,
+               COALESCE(va.addr1, '') AS address,
+               COALESCE(va.city, '') AS city,
+               COALESCE(va.zip, '') AS zip,
+               ${phoneExpr} AS phone_e164,
+               va.lat,
+               va.lng
+        FROM ${votersTable} v
+        LEFT JOIN ${addrTable} va ON v.voter_id = va.voter_id
+        ${phoneJoin}
+        WHERE va.lat IS NOT NULL
+          AND va.lat BETWEEN ?1 AND ?2
+          AND va.lng BETWEEN ?3 AND ?4
+        ORDER BY CASE WHEN ${phoneExpr} IS NULL THEN 1 ELSE 0 END ASC,
+                 ((va.lat - ?5) * (va.lat - ?5) + (va.lng - ?6) * (va.lng - ?6)) ASC
+        LIMIT 50`;
+      params = [
+        sessionLat - latDelta, sessionLat + latDelta,
+        sessionLng - lngDelta, sessionLng + lngDelta,
+        sessionLat, sessionLng,
+      ];
+    } else {
+      // No voter coordinates in DB yet (migration 031 not yet populated)
+      return ctx.jsonResponse(
+        { ok: true, rows: [], has_phone: 0, no_phone: 0, street_used: null, street_index_id: null, method: 'coordinates_pending' },
+        200,
+        ctx.allowedOrigin
+      );
+    }
+
+    const result = await buildStatement(db, query, params).all();
+    const rows = (result.results || []).map(row => ({
+      voter_id: row.voter_id,
+      first_name: row.first_name || '',
+      last_name: row.last_name || '',
+      address: row.address || '',
+      city: row.city || '',
+      zip: row.zip || '',
+      phone_e164: row.phone_e164 || null,
+    }));
+
+    const has_phone = rows.filter(r => r.phone_e164).length;
+    const no_phone = rows.length - has_phone;
+
+    return ctx.jsonResponse(
+      { ok: true, rows, has_phone, no_phone, street_used: streetHint, street_index_id: streetIndexId, method },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/admin/field-sessions/:id/nearby-voters error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
 router.post('/admin/field-sessions/:id/tasks', async (request, env, ctx) => {
   let body;
   try {
@@ -2883,27 +3275,71 @@ router.post('/admin/field-sessions/:id/tasks', async (request, env, ctx) => {
   try {
     const auth = await ensureAuth(request, env, ctx.config);
     requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
     const db = getDb(env);
     if (!db) return missingTableResponse('field_session_tasks', ctx.allowedOrigin);
     const sessionsTable = await resolveTable(env, ['field_sessions']);
     const tasksTable = await resolveTable(env, ['field_session_tasks']);
+    const tasksColumns = await getTableColumns(env, tasksTable);
+    const hasTaskTeam = tasksColumns.includes('team_id');
+    const hasAssignee = tasksColumns.includes('assigned_support_email');
+    const hasPriority = tasksColumns.includes('priority');
+    const hasDueAt = tasksColumns.includes('due_at');
+    const hasVersion = tasksColumns.includes('version');
     const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
-    const session = await buildStatement(db, `SELECT id FROM ${sessionsTable} WHERE id = ?1`, [sessionId]).first();
+    const session = await buildStatement(db, `SELECT id, team_id FROM ${sessionsTable} WHERE id = ?1`, [sessionId]).first();
     if (!session) {
       return ctx.jsonResponse({ ok: false, error: 'field session not found' }, 404, ctx.allowedOrigin);
+    }
+    if (!hasTeamAccess(scope, session.team_id)) {
+      return ctx.jsonResponse({ ok: false, error: 'team scope denied' }, 403, ctx.allowedOrigin);
     }
     const taskType = normalizeFieldTaskType(body?.task_type || body?.type);
     const title = String(body?.title || '').trim();
     const notes = body?.notes ? String(body.notes).trim() : null;
     const scheduledFor = body?.scheduled_for ? String(body.scheduled_for).trim() : null;
+    const teamId = normalizeTeamId(body?.team_id) || normalizeTeamId(session.team_id);
+    if (teamId && !hasTeamAccess(scope, teamId)) {
+      return ctx.jsonResponse({ ok: false, error: 'team scope denied' }, 403, ctx.allowedOrigin);
+    }
+    const assignedSupportEmail = hasAssignee && body?.assigned_support_email
+      ? String(body.assigned_support_email).trim().toLowerCase()
+      : null;
+    const priority = hasPriority && body?.priority ? String(body.priority).trim().toLowerCase() : (hasPriority ? 'normal' : null);
+    const dueAt = hasDueAt && body?.due_at ? String(body.due_at).trim() : null;
     if (!title) {
       return ctx.jsonResponse({ ok: false, error: 'title is required' }, 400, ctx.allowedOrigin);
     }
+
+    const insertColumns = ['session_id', 'task_type', 'status', 'title', 'notes', 'scheduled_for', 'created_by'];
+    const insertValues = [sessionId, taskType, normalizeFieldTaskStatus(body?.status), title, notes, scheduledFor, auth.email || null];
+    if (hasTaskTeam) {
+      insertColumns.push('team_id');
+      insertValues.push(teamId);
+    }
+    if (hasAssignee) {
+      insertColumns.push('assigned_support_email');
+      insertValues.push(assignedSupportEmail);
+    }
+    if (hasPriority) {
+      insertColumns.push('priority');
+      insertValues.push(priority || 'normal');
+    }
+    if (hasDueAt) {
+      insertColumns.push('due_at');
+      insertValues.push(dueAt);
+    }
+    if (hasVersion) {
+      insertColumns.push('version');
+      insertValues.push(1);
+    }
+
+    const placeholders = insertColumns.map((_, index) => `?${index + 1}`).join(', ');
     const result = await buildStatement(
       db,
-      `INSERT INTO ${tasksTable} (session_id, task_type, status, title, notes, scheduled_for, created_by)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
-      [sessionId, taskType, normalizeFieldTaskStatus(body?.status), title, notes, scheduledFor, auth.email || null]
+      `INSERT INTO ${tasksTable} (${insertColumns.join(', ')})
+       VALUES (${placeholders})`,
+      insertValues
     ).run();
     const task = await buildStatement(db, `SELECT * FROM ${tasksTable} WHERE id = ?1`, [result?.meta?.last_row_id]).first();
     return ctx.jsonResponse({ ok: true, task }, 201, ctx.allowedOrigin);
@@ -2925,12 +3361,24 @@ router.patch('/admin/field-session-tasks/:id', async (request, env, ctx) => {
   try {
     const auth = await ensureAuth(request, env, ctx.config);
     requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
     const db = getDb(env);
     if (!db) return missingTableResponse('field_session_tasks', ctx.allowedOrigin);
     const tasksTable = await resolveTable(env, ['field_session_tasks']);
+    const taskColumns = await getTableColumns(env, tasksTable);
+    const hasVersion = taskColumns.includes('version');
     const taskId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-session-tasks'));
     if (!Number.isFinite(taskId)) {
       return ctx.jsonResponse({ ok: false, error: 'task id is required' }, 400, ctx.allowedOrigin);
+    }
+
+    const currentTask = await getFieldTaskForScope(db, tasksTable, taskId, scope);
+    if (!currentTask) {
+      return ctx.jsonResponse({ ok: false, error: 'task not found' }, 404, ctx.allowedOrigin);
+    }
+
+    if (hasVersion && body?.expected_version !== undefined) {
+      assertExpectedVersion(currentTask, body.expected_version);
     }
 
     const updates = [];
@@ -2954,8 +3402,23 @@ router.patch('/admin/field-session-tasks/:id', async (request, env, ctx) => {
       updates.push(`scheduled_for = ?${paramIndex++}`);
       params.push(body.scheduled_for ? String(body.scheduled_for).trim() : null);
     }
+    if (taskColumns.includes('assigned_support_email') && body?.assigned_support_email !== undefined) {
+      updates.push(`assigned_support_email = ?${paramIndex++}`);
+      params.push(body.assigned_support_email ? String(body.assigned_support_email).trim().toLowerCase() : null);
+    }
+    if (taskColumns.includes('priority') && body?.priority !== undefined) {
+      updates.push(`priority = ?${paramIndex++}`);
+      params.push(body.priority ? String(body.priority).trim().toLowerCase() : 'normal');
+    }
+    if (taskColumns.includes('due_at') && body?.due_at !== undefined) {
+      updates.push(`due_at = ?${paramIndex++}`);
+      params.push(body.due_at ? String(body.due_at).trim() : null);
+    }
     if (!updates.length) {
       return ctx.jsonResponse({ ok: false, error: 'No updates provided' }, 400, ctx.allowedOrigin);
+    }
+    if (hasVersion) {
+      updates.push(`version = COALESCE(version, 1) + 1`);
     }
     updates.push(`updated_at = datetime('now')`);
     params.push(taskId);
@@ -2971,7 +3434,188 @@ router.patch('/admin/field-session-tasks/:id', async (request, env, ctx) => {
     return ctx.jsonResponse({ ok: true, task }, 200, ctx.allowedOrigin);
   } catch (err) {
     if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    if (err?.status === 409 && err?.payload) {
+      return ctx.jsonResponse(err.payload, 409, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 403, ctx.allowedOrigin);
+    }
     console.error('/admin/field-session-tasks/:id error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.post('/admin/field-session-tasks/:id/claim', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    throw err;
+  }
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_session_tasks', ctx.allowedOrigin);
+    const tasksTable = await resolveTable(env, ['field_session_tasks']);
+    const taskColumns = await getTableColumns(env, tasksTable);
+    const taskId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-session-tasks'));
+    if (!Number.isFinite(taskId)) {
+      return ctx.jsonResponse({ ok: false, error: 'task id is required' }, 400, ctx.allowedOrigin);
+    }
+    const task = await getFieldTaskForScope(db, tasksTable, taskId, scope);
+    if (!task) {
+      return ctx.jsonResponse({ ok: false, error: 'task not found' }, 404, ctx.allowedOrigin);
+    }
+    if (!taskColumns.includes('assigned_support_email') || !taskColumns.includes('version')) {
+      return ctx.jsonResponse({ ok: false, error: 'task claiming unavailable' }, 400, ctx.allowedOrigin);
+    }
+    assertExpectedVersion(task, body?.expected_version);
+    const actorEmail = String(auth.email || '').trim().toLowerCase();
+    const currentAssignee = String(task.assigned_support_email || '').trim().toLowerCase();
+    if (currentAssignee && currentAssignee !== actorEmail) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'task already claimed', assigned_support_email: currentAssignee, current_version: Number(task.version || 1) },
+        409,
+        ctx.allowedOrigin
+      );
+    }
+    const updatedTask = await updateFieldTaskRow(
+      db,
+      tasksTable,
+      taskId,
+      [
+        `assigned_support_email = ?1`,
+        `status = ?2`,
+        `completed_at = NULL`,
+        `version = COALESCE(version, 1) + 1`
+      ],
+      [actorEmail, 'claimed']
+    );
+    return ctx.jsonResponse({ ok: true, task: updatedTask }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    if (err?.status === 409 && err?.payload) {
+      return ctx.jsonResponse(err.payload, 409, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 403, ctx.allowedOrigin);
+    }
+    console.error('/admin/field-session-tasks/:id/claim error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.post('/admin/field-session-tasks/:id/release', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    throw err;
+  }
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_session_tasks', ctx.allowedOrigin);
+    const tasksTable = await resolveTable(env, ['field_session_tasks']);
+    const taskColumns = await getTableColumns(env, tasksTable);
+    const taskId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-session-tasks'));
+    if (!Number.isFinite(taskId)) {
+      return ctx.jsonResponse({ ok: false, error: 'task id is required' }, 400, ctx.allowedOrigin);
+    }
+    const task = await getFieldTaskForScope(db, tasksTable, taskId, scope);
+    if (!task) {
+      return ctx.jsonResponse({ ok: false, error: 'task not found' }, 404, ctx.allowedOrigin);
+    }
+    if (!taskColumns.includes('assigned_support_email') || !taskColumns.includes('version')) {
+      return ctx.jsonResponse({ ok: false, error: 'task release unavailable' }, 400, ctx.allowedOrigin);
+    }
+    assertExpectedVersion(task, body?.expected_version);
+    const updatedTask = await updateFieldTaskRow(
+      db,
+      tasksTable,
+      taskId,
+      [
+        `assigned_support_email = NULL`,
+        `status = ?1`,
+        `completed_at = NULL`,
+        `version = COALESCE(version, 1) + 1`
+      ],
+      ['open']
+    );
+    return ctx.jsonResponse({ ok: true, task: updatedTask }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    if (err?.status === 409 && err?.payload) {
+      return ctx.jsonResponse(err.payload, 409, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 403, ctx.allowedOrigin);
+    }
+    console.error('/admin/field-session-tasks/:id/release error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.post('/admin/field-session-tasks/:id/reassign', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    throw err;
+  }
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_session_tasks', ctx.allowedOrigin);
+    const tasksTable = await resolveTable(env, ['field_session_tasks']);
+    const taskColumns = await getTableColumns(env, tasksTable);
+    const taskId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-session-tasks'));
+    if (!Number.isFinite(taskId)) {
+      return ctx.jsonResponse({ ok: false, error: 'task id is required' }, 400, ctx.allowedOrigin);
+    }
+    const task = await getFieldTaskForScope(db, tasksTable, taskId, scope);
+    if (!task) {
+      return ctx.jsonResponse({ ok: false, error: 'task not found' }, 404, ctx.allowedOrigin);
+    }
+    if (!taskColumns.includes('assigned_support_email') || !taskColumns.includes('version')) {
+      return ctx.jsonResponse({ ok: false, error: 'task reassignment unavailable' }, 400, ctx.allowedOrigin);
+    }
+    assertExpectedVersion(task, body?.expected_version);
+    const assigneeEmail = String(body?.assignee_email || body?.assigned_support_email || '').trim().toLowerCase();
+    if (!assigneeEmail) {
+      return ctx.jsonResponse({ ok: false, error: 'assignee_email is required' }, 400, ctx.allowedOrigin);
+    }
+    const updatedTask = await updateFieldTaskRow(
+      db,
+      tasksTable,
+      taskId,
+      [
+        `assigned_support_email = ?1`,
+        `status = ?2`,
+        `completed_at = NULL`,
+        `version = COALESCE(version, 1) + 1`
+      ],
+      [assigneeEmail, 'claimed']
+    );
+    return ctx.jsonResponse({ ok: true, task: updatedTask }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    if (err?.status === 409 && err?.payload) {
+      return ctx.jsonResponse(err.payload, 409, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 403, ctx.allowedOrigin);
+    }
+    console.error('/admin/field-session-tasks/:id/reassign error', err);
     return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
   }
 });

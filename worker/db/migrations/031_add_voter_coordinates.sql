@@ -1,0 +1,6 @@
+-- Migration 031: Add geocoordinates to voters_addr_norm
+-- Coordinates are populated opportunistically as canvass volunteers log
+-- door contacts with GPS. Updated via POST /canvass when location_lat/lng
+-- are present; kept fresh (refreshed if > 30 days old).
+-- Drift-safe no-op: these columns and the lat/lng index already exist in
+-- the environments this migration is being applied against.

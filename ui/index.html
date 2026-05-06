@@ -35,6 +35,40 @@
   .workflow-card.is-hidden { display:none; }
   .flow-section.is-hidden { display:none !important; }
   .small-text { font-size: 0.85rem; }
+
+  /* Inline help buttons */
+  .help-btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1.15rem; height: 1.15rem; border-radius: 50%;
+    background: #e2e8f0; color: #64748b; font-size: .65rem; font-weight: 700;
+    border: 1px solid #cbd5e1; cursor: pointer; padding: 0; flex-shrink: 0;
+    vertical-align: middle; margin-left: .2rem; line-height: 1;
+  }
+  .help-btn:hover { background: #cbd5e1; color: #334155; border-color: #94a3b8; }
+
+  /* Help pip inside quick-action buttons */
+  .help-pip {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 1rem; height: 1rem; border-radius: 50%;
+    background: rgba(14,165,233,.15); color: #0369a1;
+    font-size: .6rem; font-weight: 800; cursor: pointer; flex-shrink: 0;
+    user-select: none; margin-left: auto; padding-left: .3rem;
+  }
+  .help-pip:hover { background: rgba(14,165,233,.35); }
+  .quick-action.is-active .help-pip { background: rgba(14,165,233,.25); }
+
+  /* Shared tooltip popover */
+  .help-tooltip {
+    position: fixed; z-index: 9999; max-width: 260px; width: max-content;
+    background: #1e293b; color: #f1f5f9; font-size: .82rem; line-height: 1.5;
+    padding: .55rem .75rem; border-radius: 8px;
+    box-shadow: 0 4px 20px rgba(0,0,0,.25);
+    opacity: 0; pointer-events: none; transition: opacity .12s; font-weight: 400;
+  }
+  .help-tooltip.is-visible { opacity: 1; pointer-events: auto; }
+
+  /* Wrapper to keep action button + its "?" together */
+  .btn-help-wrap { display: inline-flex; align-items: center; gap: .3rem; }
 </style>
 </head>
 
@@ -58,19 +92,16 @@
   <h3>Quick Actions</h3>
   <div class="quick-action-grid">
     <button class="quick-action" data-quick-action="contact">
-      📋 Add/Update Voter
+      📋 Add/Update Voter<span class="help-pip" data-tip="add-voter">?</span>
     </button>
     <button class="quick-action" data-quick-action="volunteer">
-      🙋 Add/Update Volunteer
-    </button>
-    <button class="quick-action" data-quick-action="field">
-      Field Session
+      🙋 Add/Update Volunteer<span class="help-pip" data-tip="add-volunteer">?</span>
     </button>
     <button class="quick-action" data-quick-action="county">
-      🏙️ County/City Targeting
+      🏙️ County/City Targeting<span class="help-pip" data-tip="county-targeting">?</span>
     </button>
     <button class="quick-action" data-quick-action="district">
-      🏛️ House/Senate Targeting
+      🏛️ House/Senate Targeting<span class="help-pip" data-tip="district-targeting">?</span>
     </button>
   </div>
   <p class="quick-action-hint" id="quickActionHint">Choose a workflow to display its tools.</p>
@@ -83,13 +114,13 @@
   </div>
   <div class="row flow-section" data-flow-section="county">
     <div>
-      <label for="county">County</label>
+      <label for="county">County <button class="help-btn" data-tip="county" type="button">?</button></label>
       <select id="county">
         <option value="">— select —</option>
       </select>
     </div>
     <div>
-      <label for="city">City (optional)</label>
+      <label for="city">City (optional) <button class="help-btn" data-tip="city" type="button">?</button></label>
       <select id="city" disabled>
         <option value="">— any —</option>
       </select>
@@ -101,7 +132,7 @@
 
   <div class="row district-row flow-section is-hidden" data-flow-section="district" data-district-row>
     <div>
-      <label for="district_type">District type</label>
+      <label for="district_type">District type <button class="help-btn" data-tip="district-type" type="button">?</button></label>
       <select id="district_type" disabled>
         <option value="">— select —</option>
         <option value="house">House</option>
@@ -109,13 +140,13 @@
       </select>
     </div>
     <div>
-      <label for="district">District</label>
+      <label for="district">District <button class="help-btn" data-tip="district" type="button">?</button></label>
       <select id="district" disabled>
         <option value="">— select —</option>
       </select>
     </div>
     <div class="district-city is-hidden" data-district-city>
-      <label for="district_city">City within district (optional)</label>
+      <label for="district_city">City within district (optional) <button class="help-btn" data-tip="district-city" type="button">?</button></label>
       <select id="district_city" disabled>
         <option value="">— any —</option>
       </select>
@@ -124,7 +155,7 @@
 
   <div class="row" style="margin-top:.5rem;">
     <div>
-      <label>Party</label>
+      <label>Party <button class="help-btn" data-tip="party" type="button">?</button></label>
       <div class="chips">
         <label class="chip"><input type="checkbox" id="p_r" value="Republican"> R</label>
         <label class="chip"><input type="checkbox" id="p_d" value="Democratic"> D</label>
@@ -132,14 +163,20 @@
       </div>
     </div>
     <div>
-      <label for="limit">Number of voters</label>
+      <label for="limit">Number of voters <button class="help-btn" data-tip="limit" type="button">?</button></label>
       <input id="limit" type="number" min="1" max="200" value="50" />
     </div>
   </div>
 
   <div class="btns">
-    <button id="startCall" class="primary" disabled>Start Calls</button>
-    <button id="startCanvass" class="secondary" disabled>Start Canvass</button>
+    <span class="btn-help-wrap">
+      <button id="startCall" class="primary" disabled>Start Calls</button>
+      <button class="help-btn" data-tip="start-calls" type="button">?</button>
+    </span>
+    <span class="btn-help-wrap">
+      <button id="startCanvass" class="secondary" disabled>Start Canvass</button>
+      <button class="help-btn" data-tip="start-canvass" type="button">?</button>
+    </span>
     <span id="msg" class="muted"></span>
   </div>
 </div>
@@ -231,14 +268,10 @@
       window.location.href = 'volunteer-intake/index.html';
       return;
     }
-    if (flow === 'field') {
-      window.location.href = 'field-session/index.html';
-      return;
-    }
     activeFlow = flow;
     quickActionButtons.forEach(btn => {
       const action = btn.dataset.quickAction;
-      if (action === 'contact' || action === 'volunteer' || action === 'field') {
+      if (action === 'contact' || action === 'volunteer') {
         btn.classList.remove('is-active');
       } else {
         btn.classList.toggle('is-active', action === flow);
@@ -767,6 +800,88 @@
     title: 'Volunteer Hub Instructions',
     toggleLabel: 'Help',
   });
+</script>
+
+<!-- Shared inline help tooltip -->
+<div id="helpTooltip" class="help-tooltip" role="tooltip"></div>
+<script>
+(function () {
+  const TIPS = {
+    'add-voter':          'Log a new door contact or update an existing voter record — name, address, party, and contact history.',
+    'add-volunteer':      'Register a new volunteer or update an existing volunteer\'s contact info, availability, and district assignment.',
+    'county-targeting':   'Pull a voter list filtered to a Wyoming county and optional city. Good for broad area phone banking or canvassing.',
+    'district-targeting': 'Pull a voter list locked to a specific Wyoming House or Senate district. Best for turf-based door-knocking.',
+    'county':             'Required for county/city targeting. Filters the voter list to this county.',
+    'city':               'Optional. Narrows the voter list to a specific city or town within the selected county.',
+    'district-type':      'House = state representative district (smaller, ~6,000 residents). Senate = state senator district (larger, ~18,000 residents).',
+    'district':           'The specific district number to target — e.g. HD 14 or SD 06. Districts are assigned based on census boundaries.',
+    'district-city':      'Optional. Filter to voters in a specific city within the chosen district. Useful for city-by-city canvass coordination.',
+    'party':              'Filter by voter registration. R = Republican, D = Democratic, Unaff/Minor = unaffiliated or minor party. Leave all unchecked to include everyone.',
+    'limit':              'How many voter records to load into the session (max 200). Start with 25–50 for a short calling block; use 100–200 for a full canvass shift.',
+    'start-calls':        'Opens the phone banking list with your current filters. Only voters with a known phone number are included.',
+    'start-canvass':      'Opens the door-knocking list with your current filters. Includes all voters in the area, with or without a phone number.',
+  };
+
+  const tooltip = document.getElementById('helpTooltip');
+  if (!tooltip) return;
+
+  let activeTarget = null;
+
+  function showTip(el, key) {
+    const text = TIPS[key];
+    if (!text) return;
+    tooltip.textContent = text;
+    activeTarget = el;
+
+    // Make briefly visible (0 opacity) to measure height
+    tooltip.style.opacity = '0';
+    tooltip.style.display = '';
+    tooltip.classList.add('is-visible');
+
+    const rect = el.getBoundingClientRect();
+    const ttW = Math.min(260, window.innerWidth - 16);
+    const ttH = tooltip.offsetHeight || 72;
+
+    let left = rect.left + rect.width / 2 - ttW / 2;
+    let top  = rect.bottom + 8;
+
+    if (left < 8) left = 8;
+    if (left + ttW > window.innerWidth - 8) left = window.innerWidth - ttW - 8;
+    if (top + ttH > window.innerHeight - 8) top = rect.top - ttH - 8;
+
+    tooltip.style.left  = left + 'px';
+    tooltip.style.top   = top  + 'px';
+    tooltip.style.maxWidth = ttW + 'px';
+    tooltip.style.opacity = '';
+  }
+
+  function hideTip() {
+    tooltip.classList.remove('is-visible');
+    activeTarget = null;
+  }
+
+  document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.help-btn, .help-pip');
+    if (btn) {
+      e.stopPropagation();
+      e.preventDefault();
+      const key = btn.dataset.tip;
+      if (activeTarget === btn) {
+        hideTip();
+      } else {
+        showTip(btn, key);
+      }
+      return;
+    }
+    if (!tooltip.contains(e.target)) {
+      hideTip();
+    }
+  }, true); // capture phase so stopPropagation works before quick-action listener
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') hideTip();
+  });
+})();
 </script>
 
 </body>

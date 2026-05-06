@@ -48,6 +48,12 @@
     dl { display: grid; grid-template-columns: max-content 1fr; gap: .35rem .75rem; }
     dt { font-weight: 700; }
     dd { margin: 0; }
+    .task-list { list-style: none; margin: .5rem 0 0; padding: 0; }
+    .task-list li { padding: .5rem .75rem; border-radius: 6px; margin-bottom: .4rem; background: #f0fdf4; border-left: 4px solid #15803d; }
+    .task-list li.call-ahead { background: #eff6ff; border-left-color: #1d4ed8; }
+    .task-badge { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: #64748b; }
+    .empty-tasks { color: #64748b; font-style: italic; }
+    .refresh-hint { font-size: .8rem; color: #94a3b8; margin-top: .4rem; }
   </style>
 </head>
 <body>
@@ -78,15 +84,25 @@
     <dl>
       <dt>Session</dt><dd id="sessionId">None</dd>
       <dt>Sharing</dt><dd id="sharingState">Off</dd>
+      <dt>Address</dt><dd id="resolvedAddress">—</dd>
+      <dt>Coordinates</dt><dd id="coordinates">—</dd>
       <dt>Last update</dt><dd id="lastUpdate">None</dd>
       <dt>Accuracy</dt><dd id="accuracy">None</dd>
     </dl>
+    <p id="geoDebug" class="refresh-hint"></p>
+  </div>
+
+  <div class="card" id="tasksCard" style="display:none">
+    <h2>Tasks from Support</h2>
+    <ul class="task-list" id="taskList"></ul>
+    <p class="refresh-hint" id="taskRefreshHint"></p>
   </div>
 
   <script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
   <script src="/shared/authGlobal.js"></script>
   <script>
     const CONSENT_VERSION = 'field-location-v1';
+    const TASK_POLL_MS = 5 * 60 * 1000; // 5 minutes
     const els = {
       start: document.getElementById('startSessionBtn'),
       share: document.getElementById('shareOnceBtn'),
@@ -98,9 +114,16 @@
       sharingState: document.getElementById('sharingState'),
       lastUpdate: document.getElementById('lastUpdate'),
       accuracy: document.getElementById('accuracy'),
+      resolvedAddress: document.getElementById('resolvedAddress'),
+      coordinates: document.getElementById('coordinates'),
+      geoDebug: document.getElementById('geoDebug'),
+      tasksCard: document.getElementById('tasksCard'),
+      taskList: document.getElementById('taskList'),
+      taskRefreshHint: document.getElementById('taskRefreshHint'),
     };
     let session = null;
     let watchId = null;
+    let taskPollTimer = null;
 
     function setStatus(message, kind = 'muted') {
       els.status.textContent = message;
@@ -111,6 +134,38 @@
       if (!value) return 'None';
       const date = new Date(String(value).replace(' ', 'T') + 'Z');
       return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+    }
+
+    function formatCoordinates(lat, lng) {
+      if (typeof lat !== 'number' || typeof lng !== 'number') return null;
+      return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+    }
+
+    function renderTasks(tasks) {
+      if (!session || session.status !== 'active') {
+        els.tasksCard.style.display = 'none';
+        return;
+      }
+      els.tasksCard.style.display = '';
+      if (!tasks || !tasks.length) {
+        els.taskList.innerHTML = '<li class="empty-tasks" style="background:none;border:none;padding:.25rem 0">No tasks assigned yet.</li>';
+      } else {
+        els.taskList.innerHTML = tasks.map(t => {
+          const isCall = t.task_type === 'call_ahead';
+          const badge = isCall ? 'Call ahead' : 'Next stop';
+          return `<li class="${isCall ? 'call-ahead' : ''}">
+            <span class="task-badge">${badge}</span>
+            <div><strong>${escapeHtml(t.title)}</strong></div>
+            ${t.notes ? `<div style="color:#475569;font-size:.9rem">${escapeHtml(t.notes)}</div>` : ''}
+          </li>`;
+        }).join('');
+      }
+      const now = new Date().toLocaleTimeString();
+      els.taskRefreshHint.textContent = `Updated ${now} · auto-refreshes every 5 min`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
     }
 
     function render() {
@@ -125,6 +180,32 @@
       els.sharingState.textContent = sharing ? (watchId ? 'Live updates on' : 'Latest location shared') : 'Off';
       els.lastUpdate.textContent = formatDate(session?.latest_location_at);
       els.accuracy.textContent = session?.latest_accuracy_m ? `${Math.round(session.latest_accuracy_m)} m` : 'None';
+      const street = session?.street_hint;
+      const city = session?.city_hint;
+      els.resolvedAddress.textContent = sharing
+        ? (street && city ? `${street}, ${city}` : street || city || 'Resolving…')
+        : '—';
+      els.coordinates.textContent = sharing
+        ? (formatCoordinates(session?.latest_lat, session?.latest_lng) || 'Waiting for location...')
+        : '—';
+
+      const debug = window.__lastReverseGeocode;
+      if (debug?.url && sharing) {
+        const stamp = debug.at ? new Date(debug.at).toLocaleTimeString() : 'n/a';
+        const resultText = debug.result
+          ? `result: ${debug.result}`
+          : (debug.error ? `error: ${debug.error}` : 'pending');
+        els.geoDebug.textContent = `Reverse geocode ${stamp} | ${debug.coords} | ${resultText}`;
+      } else {
+        els.geoDebug.textContent = '';
+      }
+    }
+
+    function schedulePoll() {
+      clearTimeout(taskPollTimer);
+      if (session && session.status === 'active') {
+        taskPollTimer = setTimeout(loadSession, TASK_POLL_MS);
+      }
     }
 
     async function loadSession() {
@@ -132,6 +213,8 @@
         const data = await window.apiGet('field-sessions/me');
         session = data?.session || null;
         render();
+        renderTasks(data?.tasks || []);
+        schedulePoll();
         setStatus(session ? 'Field session active.' : 'No active field session.', session ? 'ok' : 'muted');
       } catch (err) {
         setStatus(`Unable to load session: ${err.message}`, 'error');
@@ -143,6 +226,8 @@
         const data = await window.apiPost('field-sessions', {});
         session = data.session;
         render();
+        renderTasks([]);
+        schedulePoll();
         setStatus(data.reused ? 'Resumed existing field session.' : 'Field session started.', 'ok');
       } catch (err) {
         setStatus(`Unable to start session: ${err.message}`, 'error');
@@ -163,18 +248,48 @@
       });
     }
 
+    async function reverseGeocode(lat, lng) {
+      const coords = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+      try {
+        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`;
+        window.__lastReverseGeocode = { at: new Date().toISOString(), coords, url };
+        const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+        if (!res.ok) {
+          window.__lastReverseGeocode.error = `HTTP ${res.status}`;
+          return {};
+        }
+        const data = await res.json();
+        const addr = data.address || {};
+        const street = addr.road || addr.pedestrian || addr.footway || addr.path || null;
+        const city = addr.city || addr.town || addr.village || addr.hamlet || addr.county || null;
+        window.__lastReverseGeocode.result = data.display_name || `${street || ''} ${city || ''}`.trim() || 'no address fields';
+        return { street_hint: street, city_hint: city };
+      } catch (err) {
+        window.__lastReverseGeocode = {
+          at: new Date().toISOString(),
+          coords,
+          error: err?.message || 'request failed',
+        };
+        return {};
+      }
+    }
+
     async function sendPosition(position) {
       if (!session?.id) throw new Error('Start a field session first.');
+      const lat = position.coords.latitude;
+      const lng = position.coords.longitude;
+      const hints = await reverseGeocode(lat, lng);
       const payload = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
+        lat,
+        lng,
         accuracy_m: position.coords.accuracy,
         consent_text_version: CONSENT_VERSION,
+        ...hints,
       };
       const data = await window.apiPost(`field-sessions/${session.id}/location`, payload);
       session = data.session;
       render();
-      setStatus('Location shared.', 'ok');
+      setStatus(`Location shared (${lat.toFixed(6)}, ${lng.toFixed(6)}).`, 'ok');
     }
 
     async function shareOnce() {
@@ -226,7 +341,9 @@
         if (!session?.id) return;
         await window.apiPost(`field-sessions/${session.id}/end`, {});
         session = null;
+        clearTimeout(taskPollTimer);
         render();
+        renderTasks([]);
         setStatus('Field session ended.', 'ok');
       } catch (err) {
         setStatus(`Unable to end session: ${err.message}`, 'error');
@@ -238,7 +355,7 @@
     els.live.addEventListener('click', startLive);
     els.stop.addEventListener('click', stopSharing);
     els.end.addEventListener('click', endSession);
-    window.addEventListener('pagehide', stopWatch);
+    window.addEventListener('pagehide', () => { stopWatch(); clearTimeout(taskPollTimer); });
     loadSession();
   </script>
 </body>

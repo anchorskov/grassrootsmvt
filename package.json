@@ -4,8 +4,8 @@
   "description": "GrassrootsMVT volunteer management platform with Cloudflare Workers + Pages + D1",
   "type": "module",
   "scripts": {
-    "dev": "./scripts/dev_start.sh",
-    "dev:stop": "./scripts/dev_stop.sh",
+    "dev": "./scripts/startDev.sh",
+    "stop": "./scripts/stopDev.sh",
     "dev:worker": "cd worker && wrangler dev --env preview --port 8787",
     "dev:pages": "cd ui && wrangler pages dev . --port 8788 --compatibility-date 2024-01-01",
     "build": "npm run build:worker && npm run build:pages",

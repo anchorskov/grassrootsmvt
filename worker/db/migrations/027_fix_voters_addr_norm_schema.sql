@@ -2,6 +2,9 @@
 -- Issue: voters_addr_norm had two definitions of street_index_id
 -- Solution: Recreate table with corrected schema (single street_index_id column)
 
+-- Drop dependent views first so SQLite/D1 allows the table swap on fresh or drifted local DBs.
+DROP VIEW IF EXISTS v_voters_addr_norm;
+
 -- Temporarily disable foreign key constraints for migration
 PRAGMA foreign_keys = OFF;
 
@@ -36,6 +39,11 @@ ALTER TABLE voters_addr_norm_fixed RENAME TO voters_addr_norm;
 CREATE INDEX idx_voters_addr_norm_city ON voters_addr_norm(city);
 CREATE INDEX idx_voters_addr_norm_street_index_id ON voters_addr_norm(street_index_id);
 CREATE INDEX idx_voters_addr_norm_city_county_id ON voters_addr_norm(city_county_id);
+
+-- Restore the compatibility view if local seeding or scripts created it earlier.
+CREATE VIEW IF NOT EXISTS v_voters_addr_norm AS
+SELECT *
+FROM voters_addr_norm;
 
 -- Re-enable foreign key constraints
 PRAGMA foreign_keys = ON;
