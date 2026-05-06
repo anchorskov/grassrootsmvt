@@ -1,7 +1,8 @@
 # GrassrootsMVT Database Schema Reference
-**Date:** October 15, 2025  
+**Date:** May 5, 2026 (updated from October 15, 2025 original)  
 **Database:** Cloudflare D1 SQLite  
-**Purpose:** Complete data management system documentation
+**Purpose:** Complete data management system documentation  
+**Migrations applied:** 031 (local `wy_local` and remote `wy` production)
 
 ## 🎯 **Overview**
 
@@ -83,16 +84,21 @@ This document serves as the single source of truth for all database tables, view
 | ln | TEXT | Last name (normalized) | Cleaned |
 | fn | TEXT | First name (normalized) | Cleaned |
 | addr1 | TEXT | Full normalized address | Cleaned |
+| addr_raw | TEXT | Raw address including house number | Import |
 | city | TEXT | City name (normalized) | Cleaned |
-| state | TEXT | State abbreviation | Default 'WY' |
 | zip | TEXT | ZIP code | Validated |
-| senate | TEXT | Senate district | Required |
-| house | TEXT | House district | Required |
-| city_county_id | INTEGER NOT NULL | FK to wy_city_county.id | Geographic mapping |
+| senate | TEXT | Senate district | Derived |
+| house | TEXT | House district | Derived |
+| city_county_id | INTEGER | FK to wy_city_county.id | Geographic mapping |
+| street_index_id | INTEGER | FK to streets_index.id | Canonical street reference |
+| lat | REAL | GPS latitude (migration 031) | Canvass GPS backfill |
+| lng | REAL | GPS longitude (migration 031) | Canvass GPS backfill |
+| geocoded_at | TEXT | ISO timestamp of last coordinate update | Auto-set on canvass log |
 
-**Purpose**: Base table for v_voters_addr_norm view with complete normalized address data  
-**Relationships**: Joined with wy_city_county in v_voters_addr_norm view  
-**Index Status**: ✅ PRIMARY KEY on voter_id
+**Purpose**: Primary voter address table; also stores GPS coordinates populated when canvass volunteers log door contacts with location data  
+**Coordinate sourcing**: When `POST /canvass` receives `location_lat`/`location_lng`, coordinates are written back here. Refreshed if > 30 days old. Enables bounding-box proximity queries once sufficient coverage is built up.  
+**Relationships**: Joined with wy_city_county and streets_index  
+**Index Status**: ✅ PRIMARY KEY on voter_id; index on `(lat, lng)` for proximity queries
 
 ---
 
@@ -320,6 +326,59 @@ LEFT JOIN wy_city_county AS wcc
 
 ---
 
+## 🗺️ **Field Coordination System** *(Migration 029–030)*
+
+Links GPS-sharing field canvassing volunteers to call-center support desks in real time.
+
+### **field_sessions**
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER PRIMARY KEY AUTOINCREMENT | Session identifier |
+| volunteer_email | TEXT NOT NULL | Field volunteer email |
+| volunteer_name | TEXT | Display name |
+| status | TEXT DEFAULT 'active' | 'active' or 'ended' |
+| sharing_enabled | INTEGER DEFAULT 0 | 1 = currently sharing GPS |
+| latest_lat | REAL | Most recent latitude |
+| latest_lng | REAL | Most recent longitude |
+| latest_accuracy_m | REAL | GPS accuracy in metres |
+| latest_location_at | TEXT | Timestamp of last GPS update |
+| consent_text_version | TEXT | Version of consent agreement accepted |
+| street_hint | TEXT | Reverse-geocoded street name (from Nominatim) |
+| city_hint | TEXT | Reverse-geocoded city name |
+| started_at | TEXT DEFAULT datetime('now') | Session start timestamp |
+| stopped_sharing_at | TEXT | When sharing was stopped |
+| ended_at | TEXT | Session end timestamp |
+| created_at / updated_at | TEXT | Audit timestamps |
+
+**Purpose**: Tracks active field volunteers; street_hint/city_hint are resolved automatically when the volunteer shares their location, enabling the support desk to query nearby voters without needing raw GPS coordinates.
+
+---
+
+### **field_session_tasks**
+| Column | Type | Description |
+|--------|------|-------------|
+| id | INTEGER PRIMARY KEY AUTOINCREMENT | Task identifier |
+| session_id | INTEGER NOT NULL FK → field_sessions(id) | Parent session |
+| task_type | TEXT NOT NULL | 'call_ahead' or 'next_stop' |
+| status | TEXT DEFAULT 'open' | 'open', 'confirmed', 'done', 'cancelled' |
+| title | TEXT NOT NULL | Task description (voter name + address) |
+| notes | TEXT | Call notes — auto-includes phone number for call_ahead |
+| scheduled_for | TEXT | Optional scheduling hint |
+| created_by | TEXT | Admin email who created the task |
+| created_at / updated_at / completed_at | TEXT | Audit timestamps |
+
+**Purpose**: Coordination tasks assigned by support desk to field volunteers. Call-ahead tasks include the voter's phone number in notes. Field volunteers poll `GET /field-sessions/me` every 5 min to receive new tasks.
+
+**API routes**:
+- `GET /admin/field-sessions` — support desk view of all active sessions
+- `GET /admin/field-sessions/:id/nearby-voters` — voters on the current street (resolves `street_index_id` first; falls back to name match; falls back to GPS bounding box if coordinates exist)
+- `POST /admin/field-sessions/:id/tasks` — create task
+- `PATCH /admin/field-session-tasks/:id` — update task status
+- `GET /field-sessions/me` — field volunteer's session + open tasks
+- `POST /field-sessions/:id/location` — update GPS + street hint
+
+---
+
 ## 📋 **Message Templates**
 
 ### **message_templates**
@@ -383,21 +442,24 @@ Stored at `sql/find_jimmy_skovgard.sql` for quick reuse.
 ## 📁 **Related Files**
 
 ### **Schema Files:**
-- `db/schema/volunteer_schema.sql` - Volunteer and contact tables
-- `db/schema/voter_contact_staging.sql` - Contact staging system
-- `db/schema/eligible_view_stub.sql` - Development stub tables
+- `worker/db/migrations/001_create_base_schema.sql` - Base voter/contact tables
+- `worker/db/migrations/013_create_volunteer_staging.sql` - Volunteer staging system
+- `worker/db/migrations/023_add_voter_contact_staging.sql` - Contact staging system
+- `worker/db/migrations/029_create_field_support.sql` - Field sessions and tasks
+- `worker/db/migrations/030_add_street_hint_to_field_sessions.sql` - GPS reverse-geocode hints
+- `worker/db/migrations/031_add_voter_coordinates.sql` - Voter lat/lng for proximity queries
 
 ### **API Integration:**
-- `worker/src/api/contact-form.js` - Contact form API endpoints
-- `worker/src/index.js` - Main API routes and voter queries
+- `worker/src/index.js` - All API routes (voter queries, canvass, field coordination)
 
 ### **Documentation:**
 - `docs/contact_system_comprehensive.md` - Contact system details
 - `docs/VOTER_DATA_MIGRATION_GUIDE.md` - Data migration procedures
-- `docs/grassrootsmvt_ui_goals.md` - Project goals and status
+- `instructions/snapshot_D1_tables_01-17-26.md` - WORM schema snapshot (Jan 17 2026, migrations 001–026)
+- `instructions/snapshot_D1_tables_05-05-26.md` - Schema snapshot (May 5 2026, migrations 027–031)
 
 ---
 
-**Status**: ✅ **CURRENT AND VERIFIED** - All tables documented as of October 15, 2025  
+**Status**: ✅ **CURRENT AND VERIFIED** — Updated May 5, 2026. Migrations 001–031 applied to both `wy_local` (local) and `wy` (production remote).  
 **Maintenance**: Update this document when schema changes are made  
 **Contact**: Update related documentation when this reference changes

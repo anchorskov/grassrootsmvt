@@ -23,6 +23,7 @@ node_modules/
 .wrangler/
 .venv/
 *.log
+*.pid
 ui/_worker.dev.js
 _worker.js
 # Environment files
@@ -55,6 +56,9 @@ ui/.vercel/
 ui/.wrangler/
 .wrangler/
 _archive_grassrootsmvt-functions/
+playwright-report/
+test-results/
+.test-results/
 
 # Ignore function node modules for UI/functions (we build in CI)
 ui/functions/node_modules/
@@ -64,3 +68,64 @@ ui/_worker.dev.js
 ui/_worker.build.js
 worker/.dev.vars
 
+# Local generated SQL/chunk artifacts
+migrate_chunk_*
+migrate_names_chunk_*
+migrate_names.sql
+sql_batch_*/
+temp_d1_exports/
+*_SCHEMA_*.sql
+REMOTE_D1_SCHEMA_*.sql
+LOCAL_D1_SCHEMA_*.sql
+
+# Local reports/debug outputs
+STREET_*REPORT*.md
+STREET_*SUMMARY*.md
+SYNC_CHECKLIST_*.txt
+TABLES_INVENTORY.txt
+D1_QUICK_REFERENCE.txt
+QUICKREF_*.sh
+
+# One-off local debug/generated artifacts at repo root
+/debug_*
+/fix_*
+/generate_*
+/bulk_update_*.sql
+/quick_update.sql
+/sql_updates*.sql
+/sync_voters_addr_norm_*.sql
+/canonical_street.txt
+/unresolved_halls.txt
+/update_stats.txt
+/work_changes.md
+/STREET_FIX_*.md
+/STREET_INDEX_*.md
+/STREET_INDEX_*.sql
+/STREET_MAPPING_*.md
+/correct_street_index_ids.sh
+/export_streets_index_chunked.sh
+/migrate_political_party.*
+/split_sql.cjs
+/sql_individual_updates.sql
+/test_buckboard_disconnect.sh
+/trace_data_linkage.sh
+/update_voters_addr_norm_*.cjs
+/update_voters_addr_norm_*.sh
+/verify_import.sh
+/worker/fix_addr_raw.js
+/worker/restore_local_d1.sh
+/worker/package.json
+/scripts/add_streets_index_id_to_addr1_canonical.py
+/scripts/batch_load_voters_addr_norm_remote.sh
+/scripts/export_and_prepare_voters_addr_norm.sh
+/scripts/fuzzy_add_streets_index_id.py
+/scripts/import_streets_index_*.sh
+/scripts/link_voters_to_streets.py
+/scripts/make_tmp_voter_street_*.py
+/scripts/sync_streets_index_to_remote.sh
+/scripts/test_canvass_street_index_flow.sh
+/scripts/update_voters_addr_norm_street_index.sh
+/sql/apply_confident_voter_street_matches.sql
+/sql/export_street_link_inputs.sql
+/worker/d1_db.sqlite3
+/.codex

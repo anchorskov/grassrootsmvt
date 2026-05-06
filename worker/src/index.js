@@ -182,6 +182,27 @@ function buildDistrictNormalizationExpr(column) {
   END`;
 }
 
+async function getLegislatorByDistrict(db, table, chamber, district) {
+  if (!table || !chamber || !district) return null;
+  const stmt = db.prepare(`
+    SELECT
+      name,
+      chamber,
+      district,
+      party,
+      phone,
+      email,
+      COALESCE(campaign_website, '') AS campaign_website,
+      COALESCE(official_profile_url, '') AS official_profile_url
+    FROM ${table}
+    WHERE chamber = ?1
+      AND UPPER(TRIM(district)) = UPPER(TRIM(?2))
+    LIMIT 1
+  `);
+  const result = await stmt.bind(chamber, district).first();
+  return result || null;
+}
+
 async function getCityCountyIdsForDistrict(env, db, districtType, districtCode, districtCity = null) {
   if (!districtType || !districtCode) return [];
   const coverageTable = await resolveTableOptional(env, ['district_coverage']);
@@ -197,8 +218,8 @@ async function getCityCountyIdsForDistrict(env, db, districtType, districtCode, 
       `SELECT DISTINCT cc.id
        FROM ${coverageTable} dc
        JOIN wy_city_county cc
-         ON cc.county_norm = dc.county
-        AND (dc.city = '' OR cc.city_norm = dc.city)
+         ON cc.county = dc.county
+        AND (dc.city = '' OR cc.city = dc.city)
        WHERE dc.district_type = ?1 AND dc.district_code = ?2${cityClause}`,
       params
     ).all();
@@ -224,8 +245,8 @@ async function getCityCountyIdsForDistrict(env, db, districtType, districtCode, 
      FROM ${addrTable} va
      JOIN ${votersTable} v ON v.voter_id = va.voter_id
      JOIN wy_city_county cc
-       ON cc.county_norm = UPPER(TRIM(v.county))
-      AND cc.city_norm = UPPER(TRIM(COALESCE(va.city, '')))
+       ON cc.county = UPPER(TRIM(v.county))
+      AND cc.city = UPPER(TRIM(COALESCE(va.city, '')))
      WHERE ${normalizedExpr} = ?1${cityClause}`,
     params
   ).all();
@@ -255,13 +276,25 @@ async function buildRegionFilterClause(env, db, filters = {}) {
 
   const county = normalizeTextValue(filters.county);
   const city = normalizeTextValue(filters.city);
-  if (!county || !city) {
-    throw new BadRequestError('county/city or district filters required');
+  if (county && city) {
+    return {
+      clause: 'cc.county = ? AND cc.city = ?',
+      params: [county, city],
+    };
   }
-  return {
-    clause: 'cc.county_norm = ? AND cc.city_norm = ?',
-    params: [county, city],
-  };
+  if (county && !city) {
+    return {
+      clause: 'cc.county = ?',
+      params: [county],
+    };
+  }
+  if (city && !county) {
+    return {
+      clause: 'cc.city = ?',
+      params: [city],
+    };
+  }
+  throw new BadRequestError('county/city or district filters required');
 }
 
 function sanitizeReturnTarget(rawTarget, baseUrl) {
@@ -487,12 +520,67 @@ router.get('/volunteer/me', async (request, env, ctx) => {
 
     const displayName = deriveVolunteerDisplayName(volunteer, email);
     return ctx.jsonResponse(
-      { ok: true, email: auth.email, volunteer, display_name: displayName },
+      { ok: true, email: auth.email, volunteer, display_name: displayName, is_admin: isAdmin(auth.email, env) },
       200,
       ctx.allowedOrigin
     );
   } catch (err) {
     const status = err?.status === 401 ? 401 : 500;
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      status,
+      ctx.allowedOrigin
+    );
+  }
+});
+
+router.get('/volunteers/options', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    if (!auth?.email) {
+      return ctx.jsonResponse({ ok: false, error: 'Unauthenticated' }, 401, ctx.allowedOrigin);
+    }
+    if (!isAdmin(auth.email, env)) {
+      return ctx.jsonResponse({ ok: false, error: 'Admin access required' }, 403, ctx.allowedOrigin);
+    }
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('volunteers', ctx.allowedOrigin);
+    }
+
+    const volunteerTable = await resolveTable(env, ['volunteers']);
+    const columns = await getTableColumns(env, volunteerTable);
+    const hasState = columns.includes('state');
+    const hasCell = columns.includes('cell_phone');
+    const hasCity = columns.includes('city');
+    const url = new URL(request.url);
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '500'), 1000);
+    const onlyActive = url.searchParams.get('active') === 'true';
+
+    const rows = await buildStatement(
+      db,
+      `
+        SELECT id, name, first_name, last_name, is_active${hasState ? ', state' : ', NULL as state'}${hasCell ? ', cell_phone' : ', NULL as cell_phone'}${hasCity ? ', city' : ', NULL as city'}
+        FROM ${volunteerTable}
+        WHERE 1 = 1 ${onlyActive ? 'AND is_active = 1' : ''}
+        ORDER BY is_active DESC, COALESCE(last_name, name), COALESCE(first_name, id)
+        LIMIT ?1
+      `,
+      [limit]
+    ).all();
+
+    return ctx.jsonResponse(
+      { ok: true, volunteers: rows.results || [] },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof DependencyMissingError) {
+      return missingTableResponse(err.table, ctx.allowedOrigin);
+    }
+    const status = err?.status === 401 ? 401 : 500;
+    console.error('/volunteers/options error', err);
     return ctx.jsonResponse(
       { ok: false, error: String(err?.message || err) },
       status,
@@ -884,7 +972,9 @@ router.post('/call', async (request, env, ctx) => {
   let auth;
   try {
     auth = await ensureAuth(request, env, ctx.config);
+    console.log('[/call] Auth check passed:', { email: auth.email, isLocal: auth.isLocal });
   } catch (err) {
+    console.error('[/call] Auth failed:', { status: err?.status, message: String(err?.message || err) });
     const status = err?.status === 401 ? 401 : 500;
     return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, status, ctx.allowedOrigin);
   }
@@ -1169,6 +1259,27 @@ router.post('/canvass', async (request, env, ctx) => {
         followup_needed ? 1 : 0,
       ]
     ).run();
+
+    // Opportunistically geocode voter from canvass GPS contact.
+    // Refreshes coordinates if > 30 days old; never blocks the canvass response.
+    if (Number.isFinite(Number(location_lat)) && Number.isFinite(Number(location_lng))) {
+      try {
+        const addrTable = await resolveTableOptional(env, ['voters_addr_norm']);
+        if (addrTable) {
+          await buildStatement(
+            db,
+            `UPDATE ${addrTable}
+             SET lat = ?1, lng = ?2, geocoded_at = datetime('now')
+             WHERE voter_id = ?3
+               AND (lat IS NULL OR geocoded_at < datetime('now', '-30 days'))`,
+            [Number(location_lat), Number(location_lng), voterId]
+          ).run();
+        }
+      } catch {
+        // Non-critical — don't fail the canvass log if coordinate write fails
+      }
+    }
+
     return ctx.jsonResponse({ ok: true, msg: 'Canvass logged' }, 200, ctx.allowedOrigin);
   } catch (err) {
     if (err instanceof DependencyMissingError) {
@@ -1201,15 +1312,44 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
     return missingTableResponse('voters', ctx.allowedOrigin);
   }
 
-  const { filters = {}, house, street, range = 20, limit: requestedLimit = 20, house_number } = body || {};
+  const {
+    filters = {},
+    house,
+    street,
+    range = 20,
+    limit: requestedLimit = 20,
+    house_number,
+    streets_index_id,
+  } = body || {};
   const limit = Math.min(Math.max(Number(requestedLimit) || 20, 1), 100);
   const streetFilter = String(street || '').toUpperCase().trim();
-  const houseNumberFilter = house_number ? String(house_number).trim() : null;
+  const requestedHouseNumber = house_number ?? house ?? null;
+  const houseNumberFilter = requestedHouseNumber ? String(requestedHouseNumber).trim() : null;
+  const numericHouse = houseNumberFilter && !Number.isNaN(Number(houseNumberFilter)) ? Number(houseNumberFilter) : null;
   const countyFilter = normalizeTextValue(filters.county);
   const cityFilter = normalizeTextValue(filters.city);
   const voterIdFilter = filters.voter_id ? String(filters.voter_id).trim() : null;
   const districtCityFilter = normalizeTextValue(filters.district_city);
-  const partiesFilter = Array.isArray(filters.parties) ? filters.parties : [];
+  const rawPartiesFilter = Array.isArray(filters.parties) ? filters.parties : [];
+  const partiesFilter = Array.isArray(filters.parties)
+    ? filters.parties.map(normalizeTextValue).filter(Boolean)
+    : [];
+  const streetId = Number.isFinite(Number(streets_index_id)) ? Number(streets_index_id) : null;
+  const hasStreetId = streetId !== null && !Number.isNaN(streetId);
+  console.log('[/canvass/nearby] request', {
+    filters,
+    countyFilter,
+    cityFilter,
+    districtCityFilter,
+    rawPartiesFilter,
+    partiesFilter,
+    streetFilter,
+    streets_index_id: streetId,
+    useStreetId: hasStreetId,
+    houseNumberFilter,
+    range,
+    limit,
+  });
 
   try {
     const votersTable = await resolveTable(env, ['voters']);
@@ -1221,11 +1361,23 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
     const phoneValueExpr = phoneTable ? "NULLIF(bp.phone_e164, '')" : 'NULL';
     const phoneValueSelectExpr = phoneTable ? `COALESCE(${phoneValueExpr}, '')` : `''`;
     const phoneConfidenceExpr = phoneTable && hasConfidenceColumn ? 'bp.confidence_code' : 'NULL';
+    const useStreetId = hasStreetId;
+    const addrColumns = await getTableColumns(env, addrTable);
+    const fnExpr = addrColumns.includes('fn')
+      ? "COALESCE(va.fn, '')"
+      : addrColumns.includes('first_name')
+        ? "COALESCE(va.first_name, '')"
+        : "''";
+    const lnExpr = addrColumns.includes('ln')
+      ? "COALESCE(va.ln, '')"
+      : addrColumns.includes('last_name')
+        ? "COALESCE(va.last_name, '')"
+        : "''";
 
     let query = `
       SELECT v.voter_id,
-             COALESCE(va.fn, '') AS first_name,
-             COALESCE(va.ln, '') AS last_name,
+             ${fnExpr} AS first_name,
+             ${lnExpr} AS last_name,
              COALESCE(va.addr1, '') AS address,
              COALESCE(va.city, '') AS city,
              COALESCE(va.zip, '') AS zip,
@@ -1244,7 +1396,11 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
     const params = [];
     let paramIndex = 1;
 
-    if (streetFilter) {
+    if (useStreetId) {
+      query += ` AND va.street_index_id = ?${paramIndex}`;
+      params.push(streetId);
+      paramIndex++;
+    } else if (streetFilter) {
       query += ` AND UPPER(va.addr1) LIKE '%' || ?${paramIndex} || '%'`;
       params.push(streetFilter);
       paramIndex++;
@@ -1252,9 +1408,8 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
 
     // Filter by house number if provided (fast exact match)
     if (houseNumberFilter) {
-      query += ` AND va.addr1 LIKE ?${paramIndex} || ' %'`;
-      params.push(houseNumberFilter);
-      paramIndex++;
+      const houseNumberExpr = `TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1))`;
+      query += ` AND va.addr_raw IS NOT NULL`;
     }
 
     if (voterIdFilter) {
@@ -1277,7 +1432,7 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
 
     if (partiesFilter.length > 0) {
       const placeholders = partiesFilter.map(() => `?${paramIndex++}`).join(',');
-      query += ` AND v.political_party IN (${placeholders})`;
+      query += ` AND UPPER(v.political_party) IN (${placeholders})`;
       params.push(...partiesFilter);
     }
     if (filters.district_type && filters.district) {
@@ -1291,13 +1446,109 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
     }
 
     if (house && range) {
-      query += ` AND va.addr1 IS NOT NULL AND va.addr1 != ''`;
+      query += ` AND va.addr_raw IS NOT NULL AND va.addr_raw != ''`;
     }
 
-    query += ` ORDER BY v.voter_id LIMIT ?${paramIndex}`;
-    params.push(limit);
+    if (houseNumberFilter && numericHouse !== null) {
+      const houseNumberExpr = `TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1))`;
+      const houseNumberCasted = `CAST(${houseNumberExpr} AS INTEGER)`;
+      query += ` ORDER BY CASE WHEN ${houseNumberCasted} IS NULL THEN 1 ELSE 0 END, ABS(${houseNumberCasted} - ?${paramIndex}) ASC, ${houseNumberCasted} ASC, v.voter_id LIMIT ?${paramIndex + 1}`;
+      params.push(numericHouse, limit);
+    } else {
+      query += ` ORDER BY v.voter_id LIMIT ?${paramIndex}`;
+      params.push(limit);
+    }
 
-    const result = await buildStatement(db, query, params).all();
+    let result = await buildStatement(db, query, params).all();
+    console.log('[/canvass/nearby] primary result count', result.results ? result.results.length : 0);
+
+    // GUARD: If street_index_id search returns 0 results and we have a street name,
+    // fall back to street name matching. This handles data misalignment where
+    // voters_addr_norm.street_index_id may reference obsolete or cross-city IDs.
+    if (useStreetId && (!result.results || result.results.length === 0) && streetFilter) {
+      console.warn('[/canvass/nearby] No results for street_index_id; falling back to street name match', {
+        county: countyFilter,
+        city: cityFilter,
+        street: streetFilter,
+        streets_index_id: streetId,
+      });
+
+      // Rebuild query and params using street name pattern instead of street_index_id
+      let fallbackQuery = `
+        SELECT v.voter_id,
+               ${fnExpr} AS first_name,
+               ${lnExpr} AS last_name,
+               COALESCE(va.addr1, '') AS address,
+               COALESCE(va.city, '') AS city,
+               COALESCE(va.zip, '') AS zip,
+               v.county,
+               v.political_party AS party,
+               ${phoneValueSelectExpr} AS phone_e164,
+               ${phoneConfidenceExpr} AS phone_confidence,
+               COALESCE(va.house, v.house, '') AS house_district,
+               COALESCE(va.senate, v.senate, '') AS senate_district
+        FROM ${votersTable} v
+        LEFT JOIN ${addrTable} va ON v.voter_id = va.voter_id
+        ${phoneJoinClause}
+        WHERE 1 = 1
+          AND UPPER(va.addr1) LIKE '%' || ?1 || '%'
+      `;
+
+      const fallbackParams = [streetFilter];
+      let fallbackParamIndex = 2;
+
+      // Re-add all filters except street_index_id
+      if (voterIdFilter) {
+        fallbackQuery += ` AND v.voter_id = ?${fallbackParamIndex}`;
+        fallbackParams.push(voterIdFilter);
+        fallbackParamIndex++;
+      }
+
+      if (countyFilter) {
+        fallbackQuery += ` AND v.county = ?${fallbackParamIndex}`;
+        fallbackParams.push(countyFilter);
+        fallbackParamIndex++;
+      }
+
+      if (cityFilter) {
+        fallbackQuery += ` AND va.city = ?${fallbackParamIndex}`;
+        fallbackParams.push(cityFilter);
+        fallbackParamIndex++;
+      }
+
+      if (partiesFilter.length > 0) {
+        const placeholders = partiesFilter.map(() => `?${fallbackParamIndex++}`).join(',');
+        fallbackQuery += ` AND UPPER(v.political_party) IN (${placeholders})`;
+        fallbackParams.push(...partiesFilter);
+      }
+
+      if (filters.district_type && filters.district) {
+        const column = filters.district_type === 'senate' ? 'v.senate' : 'v.house';
+        fallbackQuery += ` AND ${column} = ?${fallbackParamIndex++}`;
+        fallbackParams.push(filters.district);
+        if (districtCityFilter) {
+          fallbackQuery += ` AND UPPER(TRIM(COALESCE(va.city, ''))) = ?${fallbackParamIndex++}`;
+          fallbackParams.push(districtCityFilter);
+        }
+      }
+
+      if (house && range) {
+        fallbackQuery += ` AND va.addr_raw IS NOT NULL AND va.addr_raw != ''`;
+      }
+
+      if (houseNumberFilter && numericHouse !== null) {
+        const houseNumberExpr = `TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1))`;
+        const houseNumberCasted = `CAST(${houseNumberExpr} AS INTEGER)`;
+        fallbackQuery += ` ORDER BY CASE WHEN ${houseNumberCasted} IS NULL THEN 1 ELSE 0 END, ABS(${houseNumberCasted} - ?${fallbackParamIndex}) ASC, ${houseNumberCasted} ASC, v.voter_id LIMIT ?${fallbackParamIndex + 1}`;
+        fallbackParams.push(numericHouse, limit);
+      } else {
+        fallbackQuery += ` ORDER BY v.voter_id LIMIT ?${fallbackParamIndex}`;
+        fallbackParams.push(limit);
+      }
+
+      result = await buildStatement(db, fallbackQuery, fallbackParams).all();
+      console.log('[/canvass/nearby] fallback result count', result.results ? result.results.length : 0);
+    }
 
     const rows = (result.results || []).map(row => ({
       voter_id: row.voter_id,
@@ -1339,6 +1590,49 @@ router.post('/canvass/nearby', async (request, env, ctx) => {
   }
 });
 
+router.post('/legislators', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    throw err;
+  }
+
+  const db = getDb(env);
+  if (!db) {
+    return missingTableResponse('wy_legislature', ctx.allowedOrigin);
+  }
+
+  try {
+    const legislatorTable = await resolveTableOptional(env, [
+      'wy_legislature',
+      'wy_legislators',
+      'legislators',
+      'legislature',
+    ]);
+    if (!legislatorTable) {
+      return ctx.jsonResponse(
+        { ok: true, house: null, senate: null, missing: 'legislator_table' },
+        200,
+        ctx.allowedOrigin
+      );
+    }
+    const houseDistrict = body.house_district ? String(body.house_district).trim() : null;
+    const senateDistrict = body.senate_district ? String(body.senate_district).trim() : null;
+    const [house, senate] = await Promise.all([
+      getLegislatorByDistrict(db, legislatorTable, 'House', houseDistrict),
+      getLegislatorByDistrict(db, legislatorTable, 'Senate', senateDistrict),
+    ]);
+    return ctx.jsonResponse({ ok: true, house, senate }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    console.error('/legislators error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
 router.post('/streets', async (request, env, ctx) => {
   let body;
   try {
@@ -1370,19 +1664,42 @@ router.post('/streets', async (request, env, ctx) => {
     // Use streets_index for fast, clean street names
     const result = await db.prepare(`
       SELECT 
-        si.street_canonical AS street_name,
-        COUNT(*) AS street_count
+        si.id,
+        si.street_canonical AS street_name
       FROM streets_index si
       JOIN wy_city_county cc ON si.city_county_id = cc.id
       WHERE ${regionFilter.clause}
-      GROUP BY si.street_canonical
       ORDER BY si.street_canonical
     `).bind(...regionFilter.params).all();
 
     const streets = (result.results || []).map(row => ({
+      streets_index_id: row.id,
+      id: row.id,
       name: row.street_name,
-      count: row.street_count,
     }));
+
+    // Fallback: if streets_index has no matches, derive street list from voters_addr_norm
+    if (!streets.length) {
+      const addrTable = await resolveTableOptional(env, ['voters_addr_norm', 'voters_addr', 'voter_addresses']);
+      if (addrTable) {
+        const fbResult = await db.prepare(`
+          SELECT DISTINCT
+            TRIM(REPLACE(REPLACE(va.addr1, SUBSTR(va.addr1, 1, INSTR(va.addr1, ' ')-1), ''), '  ', ' ')) AS street_name
+          FROM ${addrTable} va
+          JOIN wy_city_county cc ON va.city_county_id = cc.id
+          WHERE ${regionFilter.clause}
+            AND va.addr1 IS NOT NULL
+            AND INSTR(va.addr1, ' ') > 0
+          ORDER BY street_name
+          LIMIT 400
+        `).bind(...regionFilter.params).all();
+        const fallbackStreets = (fbResult.results || [])
+          .map(row => (row.street_name || '').toUpperCase().trim())
+          .filter(Boolean)
+          .map(name => ({ streets_index_id: null, id: null, name }));
+        streets.push(...fallbackStreets);
+      }
+    }
 
     return ctx.jsonResponse(
       { ok: true, county, city, streets, total: streets.length },
@@ -1414,9 +1731,12 @@ router.post('/houses', async (request, env, ctx) => {
     throw err;
   }
 
-  const { county, city, street, district_type, district, district_city } = body || {};
+  const { county, city, street, district_type, district, district_city, streets_index_id } = body || {};
   const normalizedStreet = (street || '').toString().trim().toUpperCase();
-  if (!normalizedStreet) {
+  const streetId = Number.isFinite(Number(streets_index_id)) ? Number(streets_index_id) : null;
+  const hasStreetId = streetId !== null && !Number.isNaN(streetId);
+
+  if (!normalizedStreet && !hasStreetId) {
     return ctx.jsonResponse(
       { ok: false, error: 'street is required' },
       400,
@@ -1431,7 +1751,7 @@ router.post('/houses', async (request, env, ctx) => {
 
   try {
     await ensureAuth(request, env, ctx.config);
-    
+
     const regionFilter = await buildRegionFilterClause(env, db, {
       county,
       city,
@@ -1440,20 +1760,75 @@ router.post('/houses', async (request, env, ctx) => {
       district_city,
     });
 
-    // Get house numbers from voters_addr_norm using city_county_id/district filters for speed
-    const result = await db.prepare(`
+    const params = [...regionFilter.params];
+
+    // Prefer street_index_id if available, otherwise fall back to street name match
+    let streetWhereClause = '';
+    let fallbackStreetName = normalizedStreet;
+    
+    if (hasStreetId) {
+      streetWhereClause = 'va.street_index_id = ?';
+      params.push(streetId);
+      
+      // If we only have streets_index_id (no street name), look it up for potential fallback
+      if (!normalizedStreet) {
+        const streetLookup = await db.prepare(`
+          SELECT street_canonical FROM streets_index WHERE id = ?
+        `).bind(streetId).first();
+        if (streetLookup?.street_canonical) {
+          fallbackStreetName = streetLookup.street_canonical.toUpperCase().trim();
+        }
+      }
+    } else if (normalizedStreet) {
+      // Match against addr1 using LIKE pattern (addr1 contains house numbers)
+      streetWhereClause = 'va.addr1 LIKE ?';
+      params.push(`%${normalizedStreet}%`);
+    } else {
+      return ctx.jsonResponse(
+        { ok: false, error: 'street_index_id or street name is required' },
+        400,
+        ctx.allowedOrigin
+      );
+    }
+
+    // Get unique voters on this street and extract distinct house numbers
+    // Note: addr_raw contains the full address (e.g., "5201 RAVEN ST")
+    // Extract house number as the first word from addr_raw
+    let result = await db.prepare(`
       SELECT DISTINCT
-        TRIM(SUBSTR(addr1, 1, INSTR(addr1, ' ')-1)) AS house_number,
-        COUNT(*) AS voter_count
+        TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1)) AS house_number,
+        COUNT(*) OVER (PARTITION BY TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1))) AS voter_count
       FROM voters_addr_norm va
       JOIN wy_city_county cc ON va.city_county_id = cc.id
       WHERE ${regionFilter.clause}
-        AND UPPER(TRIM(SUBSTR(va.addr1, INSTR(va.addr1, ' ')+1))) = ?
-        AND va.addr1 IS NOT NULL
-        AND INSTR(va.addr1, ' ') > 0
-      GROUP BY house_number
-      ORDER BY CAST(house_number AS INTEGER), house_number
-    `).bind(...regionFilter.params, normalizedStreet).all();
+        AND ${streetWhereClause}
+        AND va.addr_raw IS NOT NULL
+      ORDER BY CAST(house_number AS NUMERIC) ASC, house_number ASC
+    `).bind(...params).all();
+
+    // GUARD: If street_index_id search returns 0 results and we have a fallback street name,
+    // fall back to street name matching. This handles data misalignment where
+    // voters_addr_norm.street_index_id may reference obsolete or cross-city IDs.
+    if (hasStreetId && (!result.results || result.results.length === 0) && fallbackStreetName) {
+      console.warn('[/houses] No results for street_index_id; falling back to street name match', {
+        county, city, street: fallbackStreetName, streets_index_id: streetId,
+      });
+      
+      // Rebuild params with street name pattern instead of street_index_id
+      // Use LIKE pattern to match street names in addr1 (which include house numbers)
+      const fallbackParams = [...regionFilter.params, `%${fallbackStreetName}%`];
+      result = await db.prepare(`
+        SELECT DISTINCT
+          TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1)) AS house_number,
+          COUNT(*) OVER (PARTITION BY TRIM(SUBSTR(va.addr_raw, 1, INSTR(va.addr_raw || ' ', ' ') - 1))) AS voter_count
+        FROM voters_addr_norm va
+        JOIN wy_city_county cc ON va.city_county_id = cc.id
+        WHERE ${regionFilter.clause}
+          AND va.addr1 LIKE ?
+          AND va.addr_raw IS NOT NULL
+        ORDER BY CAST(house_number AS NUMERIC) ASC, house_number ASC
+      `).bind(...fallbackParams).all();
+    }
 
     const houses = (result.results || []).map(row => ({
       house_number: row.house_number,
@@ -1819,6 +2194,149 @@ router.post('/contact-form/search-names', async (request, env, ctx) => {
   }
 });
 
+router.post('/volunteer-staging', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    throw err;
+  }
+
+  const db = getDb(env);
+  if (!db) {
+    return missingTableResponse('volunteer_staging', ctx.allowedOrigin);
+  }
+
+  let stagingTable;
+  try {
+    stagingTable = await resolveTable(env, ['volunteer_staging']);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) {
+      return missingTableResponse(err.table, ctx.allowedOrigin);
+    }
+    throw err;
+  }
+
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const actionRaw = (body.action || body.mode || 'new').toString().toLowerCase();
+    const action = actionRaw === 'update' ? 'update' : 'new';
+    const firstName = (body.first_name || body.firstName || '').trim();
+    const lastName = (body.last_name || body.lastName || '').trim();
+    const email = (body.email || body.volunteer_email || '').trim().toLowerCase();
+    const cellPhone = normalizeCellPhone(body.cell_phone || body.phone || body.phone_number);
+    const state = (body.state || 'WY').toString().trim().toUpperCase() || 'WY';
+    const county = (body.county || '').toString().trim().toUpperCase() || null;
+    const city = (body.city || '').toString().trim().toUpperCase() || null;
+    let targetId = (body.target_id || body.volunteer_id || '').toString().trim() || null;
+    const notes = body.notes ? String(body.notes).trim() : null;
+    const isActive = body.is_active === undefined ? null : coerceBooleanFlag(body.is_active, 1);
+
+    const missing = [];
+    if (!firstName && !lastName) missing.push('name');
+    if (!email && !cellPhone) missing.push('email_or_cell_phone');
+    if (missing.length) {
+      return ctx.jsonResponse(
+        { ok: false, error: `Missing required fields: ${missing.join(', ')}` },
+        400,
+        ctx.allowedOrigin
+      );
+    }
+
+    const isSelfTarget = targetId && auth.email && targetId.toLowerCase() === auth.email.toLowerCase();
+    const isUserAdmin = isAdmin(auth.email, env);
+    if (action === 'update' && !isUserAdmin && !isSelfTarget) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Admin required to update another volunteer' },
+        403,
+        ctx.allowedOrigin
+      );
+    }
+    if (action === 'update' && !targetId && !isUserAdmin && auth.email) {
+      targetId = auth.email;
+    }
+
+    const stagingColumns = await getTableColumns(env, stagingTable);
+    const hasStateColumn = stagingColumns.includes('state');
+
+    const insertColumns = [
+      'submitted_by',
+      'action',
+      'target_id',
+      'first_name',
+      'last_name',
+      'email',
+      'cell_phone',
+      'county',
+      'city',
+    ];
+    const params = [
+      auth.email || 'unknown@local',
+      action,
+      targetId,
+      firstName || null,
+      lastName || null,
+      email || null,
+      cellPhone || null,
+      county,
+      city,
+    ];
+
+    if (hasStateColumn) {
+      insertColumns.push('state');
+      params.push(state);
+    }
+
+    insertColumns.push('notes', 'is_active', 'review_status', 'created_at');
+    params.push(notes, isActive, 'pending', new Date().toISOString().replace('T', ' ').slice(0, 19));
+
+    const placeholders = insertColumns.map((_, idx) => `?${idx + 1}`).join(', ');
+
+    const result = await buildStatement(
+      db,
+      `INSERT INTO ${stagingTable} (${insertColumns.join(', ')}) VALUES (${placeholders})`,
+      params
+    ).run();
+
+    const stagingId = result?.meta?.last_row_id ?? null;
+    const notification = await maybeSendVolunteerNotification(env, {
+      stagingId,
+      action,
+      targetId,
+      email,
+      firstName,
+      lastName,
+      county,
+      city,
+      state,
+    });
+
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        staging_id: stagingId,
+        review_status: 'pending',
+        notification,
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof DependencyMissingError) {
+      return missingTableResponse(err.table, ctx.allowedOrigin);
+    }
+    console.error('/volunteer-staging error', err);
+    return ctx.jsonResponse(
+      { ok: false, error: String(err?.message || err) },
+      500,
+      ctx.allowedOrigin
+    );
+  }
+});
+
 router.post('/contact-staging', async (request, env, ctx) => {
   let body;
   try {
@@ -2088,6 +2606,1017 @@ router.post('/pulse', async (request, env, ctx) => {
       500,
       ctx.allowedOrigin
     );
+  }
+});
+
+const FIELD_CONSENT_TEXT_VERSION = 'field-location-v1';
+
+function getPathSegmentAfter(path, marker) {
+  const parts = String(path || '').split('/').filter(Boolean);
+  const index = parts.indexOf(marker);
+  if (index === -1 || index + 1 >= parts.length) return null;
+  return decodeURIComponent(parts[index + 1]);
+}
+
+function normalizeFieldTaskType(value) {
+  const normalized = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+  if (normalized === 'next_stop' || normalized === 'confirmed_next_stop') return 'next_stop';
+  return 'call_ahead';
+}
+
+function normalizeFieldTaskStatus(value) {
+  const normalized = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+  const allowed = new Set(['open', 'claimed', 'confirmed', 'done', 'cancelled']);
+  return allowed.has(normalized) ? normalized : 'open';
+}
+
+function normalizeTeamId(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return null;
+  const slug = raw.replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, '');
+  return slug || null;
+}
+
+function getSupportScope(email, env) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const globalEmails = new Set(
+    String(env?.GLOBAL_DISPATCH_EMAILS || '')
+      .split(',')
+      .map(item => item.trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  if (globalEmails.has(normalizedEmail)) {
+    return { global: true, teams: new Set() };
+  }
+
+  const rawMemberships = String(env?.TEAM_MEMBERSHIPS_JSON || '').trim();
+  if (!rawMemberships) {
+    // Backward-compat: no team map configured means existing behavior.
+    return { global: true, teams: new Set() };
+  }
+
+  try {
+    const parsed = JSON.parse(rawMemberships);
+    const membership = parsed?.[normalizedEmail];
+    if (!membership) return { global: false, teams: new Set() };
+
+    const teams = Array.isArray(membership) ? membership : [membership];
+    const normalizedTeams = new Set();
+    for (const team of teams) {
+      if (team === '*') return { global: true, teams: new Set() };
+      const normalizedTeam = normalizeTeamId(team);
+      if (normalizedTeam) normalizedTeams.add(normalizedTeam);
+    }
+    return { global: false, teams: normalizedTeams };
+  } catch {
+    return { global: true, teams: new Set() };
+  }
+}
+
+function hasTeamAccess(scope, teamId) {
+  if (scope.global) return true;
+  if (!teamId) return true;
+  return scope.teams.has(normalizeTeamId(teamId));
+}
+
+function buildTeamScopeWhere(scope, params, { includeUnscoped = true } = {}) {
+  if (scope.global || !scope.teams.size) return '';
+  const placeholders = [];
+  for (const team of scope.teams) {
+    placeholders.push(`?${params.length + 1}`);
+    params.push(team);
+  }
+  const inClause = `team_id IN (${placeholders.join(',')})`;
+  return includeUnscoped ? `(${inClause} OR team_id IS NULL)` : inClause;
+}
+
+async function fetchVolunteerTeamContext(env, db, volunteerTable, id) {
+  const columns = await getTableColumns(env, volunteerTable);
+  const hasTeam = columns.includes('team_id');
+  const hasQueue = columns.includes('support_queue');
+  if (!hasTeam && !hasQueue) return null;
+
+  const selected = [];
+  if (hasTeam) selected.push('team_id');
+  if (hasQueue) selected.push('support_queue');
+  const row = await buildStatement(
+    db,
+    `SELECT ${selected.join(', ')}
+     FROM ${volunteerTable}
+     WHERE lower(trim(id)) = lower(trim(?1))
+     LIMIT 1`,
+    [String(id || '').trim().toLowerCase()]
+  ).first();
+  return row || null;
+}
+
+async function getFieldTaskForScope(db, tasksTable, taskId, scope) {
+  const task = await buildStatement(db, `SELECT * FROM ${tasksTable} WHERE id = ?1`, [taskId]).first();
+  if (!task) return null;
+  if (!hasTeamAccess(scope, task.team_id)) {
+    const error = new Error('team scope denied');
+    error.status = 403;
+    throw error;
+  }
+  return task;
+}
+
+function assertExpectedVersion(task, expectedVersion) {
+  const parsedExpected = Number(expectedVersion);
+  const currentVersion = Number(task?.version || 1);
+  if (!Number.isFinite(parsedExpected) || parsedExpected !== currentVersion) {
+    const error = new Error('version_conflict');
+    error.status = 409;
+    error.payload = { ok: false, error: 'version_conflict', current_version: currentVersion };
+    throw error;
+  }
+}
+
+async function updateFieldTaskRow(db, tasksTable, taskId, updates, params = []) {
+  const assignments = [...updates, `updated_at = datetime('now')`];
+  await buildStatement(
+    db,
+    `UPDATE ${tasksTable}
+     SET ${assignments.join(', ')}
+     WHERE id = ?${params.length + 1}`,
+    [...params, taskId]
+  ).run();
+  return buildStatement(db, `SELECT * FROM ${tasksTable} WHERE id = ?1`, [taskId]).first();
+}
+
+async function getActiveFieldSessionForEmail(db, email) {
+  return buildStatement(
+    db,
+    `SELECT *
+     FROM field_sessions
+     WHERE lower(volunteer_email) = lower(?1)
+       AND status = 'active'
+     ORDER BY started_at DESC, id DESC
+     LIMIT 1`,
+    [email]
+  ).first();
+}
+
+async function getFieldSessionForOwner(db, sessionId, email) {
+  return buildStatement(
+    db,
+    `SELECT *
+     FROM field_sessions
+     WHERE id = ?1
+       AND lower(volunteer_email) = lower(?2)
+     LIMIT 1`,
+    [sessionId, email]
+  ).first();
+}
+
+router.post('/field-sessions', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+
+    const table = await resolveTable(env, ['field_sessions']);
+    const email = (auth.email || '').trim().toLowerCase();
+    if (!email) {
+      return ctx.jsonResponse({ ok: false, error: 'Authenticated email required' }, 401, ctx.allowedOrigin);
+    }
+
+    const existing = await getActiveFieldSessionForEmail(db, email);
+    if (existing) {
+      return ctx.jsonResponse({ ok: true, session: existing, reused: true }, 200, ctx.allowedOrigin);
+    }
+
+    let body = {};
+    try {
+      const raw = await request.text();
+      body = raw ? JSON.parse(raw) : {};
+    } catch {
+      body = {};
+    }
+
+    let displayName = email;
+    let teamId = normalizeTeamId(body?.team_id);
+    let supportQueue = body?.support_queue ? String(body.support_queue).trim() : null;
+    const volunteerTable = await resolveTableOptional(env, ['volunteers']);
+    if (volunteerTable) {
+      const volunteer = await fetchVolunteerById(env, db, volunteerTable, email);
+      displayName = deriveVolunteerDisplayName(volunteer, email);
+      const volunteerContext = await fetchVolunteerTeamContext(env, db, volunteerTable, email);
+      if (!teamId && volunteerContext?.team_id) {
+        teamId = normalizeTeamId(volunteerContext.team_id);
+      }
+      if (!supportQueue && volunteerContext?.support_queue) {
+        supportQueue = String(volunteerContext.support_queue).trim();
+      }
+    }
+
+    const result = await buildStatement(
+      db,
+      `INSERT INTO ${table} (volunteer_email, volunteer_name, status, sharing_enabled, team_id, support_queue)
+       VALUES (?1, ?2, 'active', 0, ?3, ?4)`,
+      [email, displayName, teamId, supportQueue]
+    ).run();
+    const sessionId = result?.meta?.last_row_id;
+    const session = await buildStatement(db, `SELECT * FROM ${table} WHERE id = ?1`, [sessionId]).first();
+    return ctx.jsonResponse({ ok: true, session }, 201, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/field-sessions error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.get('/field-sessions/me', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+    await resolveTable(env, ['field_sessions']);
+    const email = (auth.email || '').trim().toLowerCase();
+    const session = email ? await getActiveFieldSessionForEmail(db, email) : null;
+
+    let tasks = [];
+    if (session) {
+      const tasksTable = await resolveTableOptional(env, ['field_session_tasks']);
+      if (tasksTable) {
+        const tasksResult = await buildStatement(
+          db,
+          `SELECT * FROM ${tasksTable}
+           WHERE session_id = ?1
+             AND status NOT IN ('done', 'cancelled')
+           ORDER BY created_at ASC, id ASC`,
+          [session.id]
+        ).all();
+        tasks = tasksResult.results || [];
+      }
+    }
+
+    return ctx.jsonResponse({ ok: true, session, tasks }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    const status = err?.status === 401 ? 401 : 500;
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, status, ctx.allowedOrigin);
+  }
+});
+
+router.post('/field-sessions/:id/location', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    throw err;
+  }
+
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+    const table = await resolveTable(env, ['field_sessions']);
+    const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
+    const lat = Number(body?.lat);
+    const lng = Number(body?.lng);
+    const accuracy = body?.accuracy_m ?? body?.accuracy ?? null;
+    if (!Number.isFinite(sessionId) || !Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return ctx.jsonResponse({ ok: false, error: 'session id, lat, and lng are required' }, 400, ctx.allowedOrigin);
+    }
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      return ctx.jsonResponse({ ok: false, error: 'invalid coordinates' }, 400, ctx.allowedOrigin);
+    }
+    const session = await getFieldSessionForOwner(db, sessionId, auth.email || '');
+    if (!session || session.status !== 'active') {
+      return ctx.jsonResponse({ ok: false, error: 'active field session not found' }, 404, ctx.allowedOrigin);
+    }
+
+    const streetHint = body?.street_hint ? String(body.street_hint).trim().slice(0, 120) : null;
+    const cityHint = body?.city_hint ? String(body.city_hint).trim().slice(0, 80) : null;
+
+    await buildStatement(
+      db,
+      `UPDATE ${table}
+       SET sharing_enabled = 1,
+           latest_lat = ?1,
+           latest_lng = ?2,
+           latest_accuracy_m = ?3,
+           latest_location_at = datetime('now'),
+           consent_text_version = ?4,
+           street_hint = COALESCE(?6, street_hint),
+           city_hint = COALESCE(?7, city_hint),
+           stopped_sharing_at = NULL,
+           updated_at = datetime('now')
+       WHERE id = ?5`,
+      [
+        lat,
+        lng,
+        Number.isFinite(Number(accuracy)) ? Number(accuracy) : null,
+        body?.consent_text_version || FIELD_CONSENT_TEXT_VERSION,
+        sessionId,
+        streetHint,
+        cityHint,
+      ]
+    ).run();
+    const updated = await buildStatement(db, `SELECT * FROM ${table} WHERE id = ?1`, [sessionId]).first();
+    return ctx.jsonResponse({ ok: true, session: updated }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/field-sessions/:id/location error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.post('/field-sessions/:id/stop-sharing', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+    const table = await resolveTable(env, ['field_sessions']);
+    const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
+    const session = await getFieldSessionForOwner(db, sessionId, auth.email || '');
+    if (!session) {
+      return ctx.jsonResponse({ ok: false, error: 'field session not found' }, 404, ctx.allowedOrigin);
+    }
+    await buildStatement(
+      db,
+      `UPDATE ${table}
+       SET sharing_enabled = 0,
+           latest_lat = NULL,
+           latest_lng = NULL,
+           latest_accuracy_m = NULL,
+           latest_location_at = NULL,
+           stopped_sharing_at = datetime('now'),
+           updated_at = datetime('now')
+       WHERE id = ?1`,
+      [sessionId]
+    ).run();
+    const updated = await buildStatement(db, `SELECT * FROM ${table} WHERE id = ?1`, [sessionId]).first();
+    return ctx.jsonResponse({ ok: true, session: updated }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/field-sessions/:id/stop-sharing error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.post('/field-sessions/:id/end', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+    const table = await resolveTable(env, ['field_sessions']);
+    const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
+    const session = await getFieldSessionForOwner(db, sessionId, auth.email || '');
+    if (!session) {
+      return ctx.jsonResponse({ ok: false, error: 'field session not found' }, 404, ctx.allowedOrigin);
+    }
+    await buildStatement(
+      db,
+      `UPDATE ${table}
+       SET status = 'ended',
+           sharing_enabled = 0,
+           latest_lat = NULL,
+           latest_lng = NULL,
+           latest_accuracy_m = NULL,
+           latest_location_at = NULL,
+           ended_at = datetime('now'),
+           updated_at = datetime('now')
+       WHERE id = ?1`,
+      [sessionId]
+    ).run();
+    return ctx.jsonResponse({ ok: true }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/field-sessions/:id/end error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.get('/admin/field-sessions', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+    const sessionsTable = await resolveTable(env, ['field_sessions']);
+    const tasksTable = await resolveTableOptional(env, ['field_session_tasks']);
+    const url = new URL(request.url);
+    const includeEnded = url.searchParams.get('include_ended') === 'true';
+    const requestedTeamId = normalizeTeamId(url.searchParams.get('team_id'));
+
+    if (requestedTeamId && !hasTeamAccess(scope, requestedTeamId)) {
+      return ctx.jsonResponse({ ok: false, error: 'team scope denied' }, 403, ctx.allowedOrigin);
+    }
+
+    const baseWhere = [];
+    const baseParams = [];
+    if (!includeEnded) {
+      baseWhere.push("status = 'active'");
+    }
+    const scopeClause = buildTeamScopeWhere(scope, baseParams);
+    if (scopeClause) baseWhere.push(scopeClause);
+
+    const finalWhere = [...baseWhere];
+    const finalParams = [...baseParams];
+    if (requestedTeamId) {
+      finalWhere.push(`team_id = ?${finalParams.length + 1}`);
+      finalParams.push(requestedTeamId);
+    }
+
+    const baseWhereSql = baseWhere.length ? `WHERE ${baseWhere.join(' AND ')}` : '';
+    const finalWhereSql = finalWhere.length ? `WHERE ${finalWhere.join(' AND ')}` : '';
+
+    const sessionsResult = await buildStatement(
+      db,
+      `SELECT *
+       FROM ${sessionsTable}
+       ${finalWhereSql}
+       ORDER BY status ASC, latest_location_at DESC, started_at DESC
+       LIMIT 100`,
+      finalParams
+    ).all();
+    const sessions = sessionsResult.results || [];
+
+    const teamsResult = await buildStatement(
+      db,
+      `SELECT DISTINCT team_id
+       FROM ${sessionsTable}
+       ${baseWhereSql}
+         ${baseWhereSql ? 'AND' : 'WHERE'} team_id IS NOT NULL
+       ORDER BY team_id ASC`,
+      baseParams
+    ).all();
+    const availableTeams = (teamsResult.results || []).map(row => row.team_id).filter(Boolean);
+
+    let tasksBySession = new Map();
+    if (tasksTable && sessions.length) {
+      const ids = sessions.map(session => session.id);
+      const placeholders = ids.map((_, index) => `?${index + 1}`).join(',');
+      const tasksResult = await buildStatement(
+        db,
+        `SELECT *
+         FROM ${tasksTable}
+         WHERE session_id IN (${placeholders})
+         ORDER BY created_at DESC, id DESC`,
+        ids
+      ).all();
+      for (const task of tasksResult.results || []) {
+        const list = tasksBySession.get(task.session_id) || [];
+        list.push(task);
+        tasksBySession.set(task.session_id, list);
+      }
+    }
+
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        available_teams: availableTeams,
+        sessions: sessions.map(session => ({
+          ...session,
+          tasks: tasksBySession.get(session.id) || [],
+        })),
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/admin/field-sessions error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.get('/admin/field-sessions/:id/nearby-voters', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+
+    const sessionsTable = await resolveTable(env, ['field_sessions']);
+    const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
+    const session = await buildStatement(db, `SELECT * FROM ${sessionsTable} WHERE id = ?1`, [sessionId]).first();
+    if (!session) return ctx.jsonResponse({ ok: false, error: 'field session not found' }, 404, ctx.allowedOrigin);
+    if (!hasTeamAccess(scope, session.team_id)) {
+      return ctx.jsonResponse({ ok: false, error: 'team scope denied' }, 403, ctx.allowedOrigin);
+    }
+
+    const streetHint = session.street_hint;
+    const cityHint = session.city_hint;
+    const sessionLat = Number.isFinite(Number(session.latest_lat)) ? Number(session.latest_lat) : null;
+    const sessionLng = Number.isFinite(Number(session.latest_lng)) ? Number(session.latest_lng) : null;
+
+    // No street hint and no GPS — nothing to search on
+    if (!streetHint && (sessionLat === null || sessionLng === null)) {
+      return ctx.jsonResponse(
+        { ok: true, rows: [], has_phone: 0, no_phone: 0, street_used: null, street_index_id: null, method: null },
+        200,
+        ctx.allowedOrigin
+      );
+    }
+
+    const votersTable = await resolveTable(env, ['voters']);
+    const addrTable = await resolveTable(env, ['voters_addr_norm', 'voters_addr', 'voter_addresses']);
+    const phoneTable = await resolveTableOptional(env, ['best_phone', 'voter_phones', 'v_best_phone', 'best_phone_view']);
+
+    const phoneJoin = phoneTable ? `LEFT JOIN ${phoneTable} bp ON v.voter_id = bp.voter_id` : '';
+    const phoneExpr = phoneTable ? `NULLIF(bp.phone_e164, '')` : 'NULL';
+
+    const addrColumns = await getTableColumns(env, addrTable);
+    const fnExpr = addrColumns.includes('fn') ? "COALESCE(va.fn, '')" : addrColumns.includes('first_name') ? "COALESCE(va.first_name, '')" : "''";
+    const lnExpr = addrColumns.includes('ln') ? "COALESCE(va.ln, '')" : addrColumns.includes('last_name') ? "COALESCE(va.last_name, '')" : "''";
+    const hasVoterCoords = addrColumns.includes('lat') && addrColumns.includes('lng');
+
+    let query;
+    let params;
+    let method;
+    let streetIndexId = null;
+
+    if (streetHint) {
+      // Primary: resolve canonical street_index_id for precise indexed lookup
+      try {
+        const streetsTable = await resolveTableOptional(env, ['streets_index']);
+        const cityCountyTable = await resolveTableOptional(env, ['wy_city_county']);
+        if (streetsTable) {
+          let streetRow;
+          if (cityHint && cityCountyTable) {
+            streetRow = await buildStatement(
+              db,
+              `SELECT si.id FROM ${streetsTable} si
+               JOIN ${cityCountyTable} cc ON si.city_county_id = cc.id
+               WHERE UPPER(si.street_canonical) = UPPER(?1)
+                 AND UPPER(cc.city) = UPPER(?2)
+               LIMIT 1`,
+              [streetHint, cityHint]
+            ).first();
+          } else {
+            streetRow = await buildStatement(
+              db,
+              `SELECT id FROM ${streetsTable} WHERE UPPER(street_canonical) = UPPER(?1) LIMIT 1`,
+              [streetHint]
+            ).first();
+          }
+          if (streetRow) streetIndexId = streetRow.id;
+        }
+      } catch {
+        // streets_index lookup is optional; fall through to name match
+      }
+
+      if (streetIndexId !== null) {
+        method = 'street_id';
+        query = `
+          SELECT v.voter_id,
+                 ${fnExpr} AS first_name,
+                 ${lnExpr} AS last_name,
+                 COALESCE(va.addr1, '') AS address,
+                 COALESCE(va.city, '') AS city,
+                 COALESCE(va.zip, '') AS zip,
+                 ${phoneExpr} AS phone_e164
+          FROM ${votersTable} v
+          LEFT JOIN ${addrTable} va ON v.voter_id = va.voter_id
+          ${phoneJoin}
+          WHERE va.street_index_id = ?1
+          ORDER BY CASE WHEN ${phoneExpr} IS NULL THEN 1 ELSE 0 END ASC, va.addr1 ASC
+          LIMIT 50`;
+        params = [streetIndexId];
+      } else {
+        method = 'street_name';
+        query = `
+          SELECT v.voter_id,
+                 ${fnExpr} AS first_name,
+                 ${lnExpr} AS last_name,
+                 COALESCE(va.addr1, '') AS address,
+                 COALESCE(va.city, '') AS city,
+                 COALESCE(va.zip, '') AS zip,
+                 ${phoneExpr} AS phone_e164
+          FROM ${votersTable} v
+          LEFT JOIN ${addrTable} va ON v.voter_id = va.voter_id
+          ${phoneJoin}
+          WHERE UPPER(va.addr1) LIKE '%' || ?1 || '%'
+            ${cityHint ? 'AND UPPER(va.city) = ?2' : ''}
+          ORDER BY CASE WHEN ${phoneExpr} IS NULL THEN 1 ELSE 0 END ASC, va.addr1 ASC
+          LIMIT 50`;
+        params = cityHint ? [streetHint.toUpperCase(), cityHint.toUpperCase()] : [streetHint.toUpperCase()];
+      }
+    } else if (hasVoterCoords && sessionLat !== null && sessionLng !== null) {
+      // Fallback: GPS bounding-box using geocoded voter coordinates (populated by canvass contacts).
+      // ±0.003 lat ≈ ±333m; ±0.004 lng ≈ ±333m at Wyoming latitude (~43°, cos≈0.731)
+      method = 'coordinates';
+      const latDelta = 0.003;
+      const lngDelta = 0.004;
+      query = `
+        SELECT v.voter_id,
+               ${fnExpr} AS first_name,
+               ${lnExpr} AS last_name,
+               COALESCE(va.addr1, '') AS address,
+               COALESCE(va.city, '') AS city,
+               COALESCE(va.zip, '') AS zip,
+               ${phoneExpr} AS phone_e164,
+               va.lat,
+               va.lng
+        FROM ${votersTable} v
+        LEFT JOIN ${addrTable} va ON v.voter_id = va.voter_id
+        ${phoneJoin}
+        WHERE va.lat IS NOT NULL
+          AND va.lat BETWEEN ?1 AND ?2
+          AND va.lng BETWEEN ?3 AND ?4
+        ORDER BY CASE WHEN ${phoneExpr} IS NULL THEN 1 ELSE 0 END ASC,
+                 ((va.lat - ?5) * (va.lat - ?5) + (va.lng - ?6) * (va.lng - ?6)) ASC
+        LIMIT 50`;
+      params = [
+        sessionLat - latDelta, sessionLat + latDelta,
+        sessionLng - lngDelta, sessionLng + lngDelta,
+        sessionLat, sessionLng,
+      ];
+    } else {
+      // No voter coordinates in DB yet (migration 031 not yet populated)
+      return ctx.jsonResponse(
+        { ok: true, rows: [], has_phone: 0, no_phone: 0, street_used: null, street_index_id: null, method: 'coordinates_pending' },
+        200,
+        ctx.allowedOrigin
+      );
+    }
+
+    const result = await buildStatement(db, query, params).all();
+    const rows = (result.results || []).map(row => ({
+      voter_id: row.voter_id,
+      first_name: row.first_name || '',
+      last_name: row.last_name || '',
+      address: row.address || '',
+      city: row.city || '',
+      zip: row.zip || '',
+      phone_e164: row.phone_e164 || null,
+    }));
+
+    const has_phone = rows.filter(r => r.phone_e164).length;
+    const no_phone = rows.length - has_phone;
+
+    return ctx.jsonResponse(
+      { ok: true, rows, has_phone, no_phone, street_used: streetHint, street_index_id: streetIndexId, method },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/admin/field-sessions/:id/nearby-voters error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.post('/admin/field-sessions/:id/tasks', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    throw err;
+  }
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_session_tasks', ctx.allowedOrigin);
+    const sessionsTable = await resolveTable(env, ['field_sessions']);
+    const tasksTable = await resolveTable(env, ['field_session_tasks']);
+    const tasksColumns = await getTableColumns(env, tasksTable);
+    const hasTaskTeam = tasksColumns.includes('team_id');
+    const hasAssignee = tasksColumns.includes('assigned_support_email');
+    const hasPriority = tasksColumns.includes('priority');
+    const hasDueAt = tasksColumns.includes('due_at');
+    const hasVersion = tasksColumns.includes('version');
+    const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
+    const session = await buildStatement(db, `SELECT id, team_id FROM ${sessionsTable} WHERE id = ?1`, [sessionId]).first();
+    if (!session) {
+      return ctx.jsonResponse({ ok: false, error: 'field session not found' }, 404, ctx.allowedOrigin);
+    }
+    if (!hasTeamAccess(scope, session.team_id)) {
+      return ctx.jsonResponse({ ok: false, error: 'team scope denied' }, 403, ctx.allowedOrigin);
+    }
+    const taskType = normalizeFieldTaskType(body?.task_type || body?.type);
+    const title = String(body?.title || '').trim();
+    const notes = body?.notes ? String(body.notes).trim() : null;
+    const scheduledFor = body?.scheduled_for ? String(body.scheduled_for).trim() : null;
+    const teamId = normalizeTeamId(body?.team_id) || normalizeTeamId(session.team_id);
+    if (teamId && !hasTeamAccess(scope, teamId)) {
+      return ctx.jsonResponse({ ok: false, error: 'team scope denied' }, 403, ctx.allowedOrigin);
+    }
+    const assignedSupportEmail = hasAssignee && body?.assigned_support_email
+      ? String(body.assigned_support_email).trim().toLowerCase()
+      : null;
+    const priority = hasPriority && body?.priority ? String(body.priority).trim().toLowerCase() : (hasPriority ? 'normal' : null);
+    const dueAt = hasDueAt && body?.due_at ? String(body.due_at).trim() : null;
+    if (!title) {
+      return ctx.jsonResponse({ ok: false, error: 'title is required' }, 400, ctx.allowedOrigin);
+    }
+
+    const insertColumns = ['session_id', 'task_type', 'status', 'title', 'notes', 'scheduled_for', 'created_by'];
+    const insertValues = [sessionId, taskType, normalizeFieldTaskStatus(body?.status), title, notes, scheduledFor, auth.email || null];
+    if (hasTaskTeam) {
+      insertColumns.push('team_id');
+      insertValues.push(teamId);
+    }
+    if (hasAssignee) {
+      insertColumns.push('assigned_support_email');
+      insertValues.push(assignedSupportEmail);
+    }
+    if (hasPriority) {
+      insertColumns.push('priority');
+      insertValues.push(priority || 'normal');
+    }
+    if (hasDueAt) {
+      insertColumns.push('due_at');
+      insertValues.push(dueAt);
+    }
+    if (hasVersion) {
+      insertColumns.push('version');
+      insertValues.push(1);
+    }
+
+    const placeholders = insertColumns.map((_, index) => `?${index + 1}`).join(', ');
+    const result = await buildStatement(
+      db,
+      `INSERT INTO ${tasksTable} (${insertColumns.join(', ')})
+       VALUES (${placeholders})`,
+      insertValues
+    ).run();
+    const task = await buildStatement(db, `SELECT * FROM ${tasksTable} WHERE id = ?1`, [result?.meta?.last_row_id]).first();
+    return ctx.jsonResponse({ ok: true, task }, 201, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    console.error('/admin/field-sessions/:id/tasks error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.patch('/admin/field-session-tasks/:id', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    throw err;
+  }
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_session_tasks', ctx.allowedOrigin);
+    const tasksTable = await resolveTable(env, ['field_session_tasks']);
+    const taskColumns = await getTableColumns(env, tasksTable);
+    const hasVersion = taskColumns.includes('version');
+    const taskId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-session-tasks'));
+    if (!Number.isFinite(taskId)) {
+      return ctx.jsonResponse({ ok: false, error: 'task id is required' }, 400, ctx.allowedOrigin);
+    }
+
+    const currentTask = await getFieldTaskForScope(db, tasksTable, taskId, scope);
+    if (!currentTask) {
+      return ctx.jsonResponse({ ok: false, error: 'task not found' }, 404, ctx.allowedOrigin);
+    }
+
+    if (hasVersion && body?.expected_version !== undefined) {
+      assertExpectedVersion(currentTask, body.expected_version);
+    }
+
+    const updates = [];
+    const params = [];
+    let paramIndex = 1;
+    if (body?.status !== undefined) {
+      const status = normalizeFieldTaskStatus(body.status);
+      updates.push(`status = ?${paramIndex++}`);
+      params.push(status);
+      updates.push(`completed_at = ${status === 'done' ? "datetime('now')" : 'NULL'}`);
+    }
+    if (body?.title !== undefined) {
+      updates.push(`title = ?${paramIndex++}`);
+      params.push(String(body.title || '').trim());
+    }
+    if (body?.notes !== undefined) {
+      updates.push(`notes = ?${paramIndex++}`);
+      params.push(body.notes ? String(body.notes).trim() : null);
+    }
+    if (body?.scheduled_for !== undefined) {
+      updates.push(`scheduled_for = ?${paramIndex++}`);
+      params.push(body.scheduled_for ? String(body.scheduled_for).trim() : null);
+    }
+    if (taskColumns.includes('assigned_support_email') && body?.assigned_support_email !== undefined) {
+      updates.push(`assigned_support_email = ?${paramIndex++}`);
+      params.push(body.assigned_support_email ? String(body.assigned_support_email).trim().toLowerCase() : null);
+    }
+    if (taskColumns.includes('priority') && body?.priority !== undefined) {
+      updates.push(`priority = ?${paramIndex++}`);
+      params.push(body.priority ? String(body.priority).trim().toLowerCase() : 'normal');
+    }
+    if (taskColumns.includes('due_at') && body?.due_at !== undefined) {
+      updates.push(`due_at = ?${paramIndex++}`);
+      params.push(body.due_at ? String(body.due_at).trim() : null);
+    }
+    if (!updates.length) {
+      return ctx.jsonResponse({ ok: false, error: 'No updates provided' }, 400, ctx.allowedOrigin);
+    }
+    if (hasVersion) {
+      updates.push(`version = COALESCE(version, 1) + 1`);
+    }
+    updates.push(`updated_at = datetime('now')`);
+    params.push(taskId);
+    await buildStatement(
+      db,
+      `UPDATE ${tasksTable}
+       SET ${updates.join(', ')}
+       WHERE id = ?${paramIndex}`,
+      params
+    ).run();
+    const task = await buildStatement(db, `SELECT * FROM ${tasksTable} WHERE id = ?1`, [taskId]).first();
+    if (!task) return ctx.jsonResponse({ ok: false, error: 'task not found' }, 404, ctx.allowedOrigin);
+    return ctx.jsonResponse({ ok: true, task }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    if (err?.status === 409 && err?.payload) {
+      return ctx.jsonResponse(err.payload, 409, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 403, ctx.allowedOrigin);
+    }
+    console.error('/admin/field-session-tasks/:id error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.post('/admin/field-session-tasks/:id/claim', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    throw err;
+  }
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_session_tasks', ctx.allowedOrigin);
+    const tasksTable = await resolveTable(env, ['field_session_tasks']);
+    const taskColumns = await getTableColumns(env, tasksTable);
+    const taskId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-session-tasks'));
+    if (!Number.isFinite(taskId)) {
+      return ctx.jsonResponse({ ok: false, error: 'task id is required' }, 400, ctx.allowedOrigin);
+    }
+    const task = await getFieldTaskForScope(db, tasksTable, taskId, scope);
+    if (!task) {
+      return ctx.jsonResponse({ ok: false, error: 'task not found' }, 404, ctx.allowedOrigin);
+    }
+    if (!taskColumns.includes('assigned_support_email') || !taskColumns.includes('version')) {
+      return ctx.jsonResponse({ ok: false, error: 'task claiming unavailable' }, 400, ctx.allowedOrigin);
+    }
+    assertExpectedVersion(task, body?.expected_version);
+    const actorEmail = String(auth.email || '').trim().toLowerCase();
+    const currentAssignee = String(task.assigned_support_email || '').trim().toLowerCase();
+    if (currentAssignee && currentAssignee !== actorEmail) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'task already claimed', assigned_support_email: currentAssignee, current_version: Number(task.version || 1) },
+        409,
+        ctx.allowedOrigin
+      );
+    }
+    const updatedTask = await updateFieldTaskRow(
+      db,
+      tasksTable,
+      taskId,
+      [
+        `assigned_support_email = ?1`,
+        `status = ?2`,
+        `completed_at = NULL`,
+        `version = COALESCE(version, 1) + 1`
+      ],
+      [actorEmail, 'claimed']
+    );
+    return ctx.jsonResponse({ ok: true, task: updatedTask }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    if (err?.status === 409 && err?.payload) {
+      return ctx.jsonResponse(err.payload, 409, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 403, ctx.allowedOrigin);
+    }
+    console.error('/admin/field-session-tasks/:id/claim error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.post('/admin/field-session-tasks/:id/release', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    throw err;
+  }
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_session_tasks', ctx.allowedOrigin);
+    const tasksTable = await resolveTable(env, ['field_session_tasks']);
+    const taskColumns = await getTableColumns(env, tasksTable);
+    const taskId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-session-tasks'));
+    if (!Number.isFinite(taskId)) {
+      return ctx.jsonResponse({ ok: false, error: 'task id is required' }, 400, ctx.allowedOrigin);
+    }
+    const task = await getFieldTaskForScope(db, tasksTable, taskId, scope);
+    if (!task) {
+      return ctx.jsonResponse({ ok: false, error: 'task not found' }, 404, ctx.allowedOrigin);
+    }
+    if (!taskColumns.includes('assigned_support_email') || !taskColumns.includes('version')) {
+      return ctx.jsonResponse({ ok: false, error: 'task release unavailable' }, 400, ctx.allowedOrigin);
+    }
+    assertExpectedVersion(task, body?.expected_version);
+    const updatedTask = await updateFieldTaskRow(
+      db,
+      tasksTable,
+      taskId,
+      [
+        `assigned_support_email = NULL`,
+        `status = ?1`,
+        `completed_at = NULL`,
+        `version = COALESCE(version, 1) + 1`
+      ],
+      ['open']
+    );
+    return ctx.jsonResponse({ ok: true, task: updatedTask }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    if (err?.status === 409 && err?.payload) {
+      return ctx.jsonResponse(err.payload, 409, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 403, ctx.allowedOrigin);
+    }
+    console.error('/admin/field-session-tasks/:id/release error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.post('/admin/field-session-tasks/:id/reassign', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    throw err;
+  }
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_session_tasks', ctx.allowedOrigin);
+    const tasksTable = await resolveTable(env, ['field_session_tasks']);
+    const taskColumns = await getTableColumns(env, tasksTable);
+    const taskId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-session-tasks'));
+    if (!Number.isFinite(taskId)) {
+      return ctx.jsonResponse({ ok: false, error: 'task id is required' }, 400, ctx.allowedOrigin);
+    }
+    const task = await getFieldTaskForScope(db, tasksTable, taskId, scope);
+    if (!task) {
+      return ctx.jsonResponse({ ok: false, error: 'task not found' }, 404, ctx.allowedOrigin);
+    }
+    if (!taskColumns.includes('assigned_support_email') || !taskColumns.includes('version')) {
+      return ctx.jsonResponse({ ok: false, error: 'task reassignment unavailable' }, 400, ctx.allowedOrigin);
+    }
+    assertExpectedVersion(task, body?.expected_version);
+    const assigneeEmail = String(body?.assignee_email || body?.assigned_support_email || '').trim().toLowerCase();
+    if (!assigneeEmail) {
+      return ctx.jsonResponse({ ok: false, error: 'assignee_email is required' }, 400, ctx.allowedOrigin);
+    }
+    const updatedTask = await updateFieldTaskRow(
+      db,
+      tasksTable,
+      taskId,
+      [
+        `assigned_support_email = ?1`,
+        `status = ?2`,
+        `completed_at = NULL`,
+        `version = COALESCE(version, 1) + 1`
+      ],
+      [assigneeEmail, 'claimed']
+    );
+    return ctx.jsonResponse({ ok: true, task: updatedTask }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    if (err?.status === 409 && err?.payload) {
+      return ctx.jsonResponse(err.payload, 409, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 403, ctx.allowedOrigin);
+    }
+    console.error('/admin/field-session-tasks/:id/reassign error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
   }
 });
 
@@ -3008,19 +4537,31 @@ router.post('/admin/volunteers', async (request, env, ctx) => {
     const lastName = body.last_name ? String(body.last_name).trim() : null;
     const displayName = String(body.name || '').trim() || buildVolunteerName(firstName, lastName, id);
     const cellPhone = normalizeCellPhone(body.cell_phone || '');
+    const state = body.state ? String(body.state).trim().toUpperCase() : null;
+    const city = body.city ? String(body.city).trim().toUpperCase() : null;
     const isActive = coerceBooleanFlag(body.is_active, 1);
 
     if (!id || !displayName) {
       throw new BadRequestError('id and name are required');
     }
 
+    // Check if volunteer already exists (case-insensitive)
+    const existing = await fetchVolunteerById(env, db, volunteerTable, id);
+    if (existing) {
+      return ctx.jsonResponse(
+        { ok: false, error: 'Volunteer already exists' },
+        409,
+        ctx.allowedOrigin
+      );
+    }
+
     await buildStatement(
       db,
       `
-        INSERT INTO ${volunteerTable} (id, name, first_name, last_name, cell_phone, is_active)
-        VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        INSERT INTO ${volunteerTable} (id, name, first_name, last_name, cell_phone, state, city, is_active)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
       `,
-      [id, displayName, firstName, lastName, cellPhone, isActive]
+      [id, displayName, firstName, lastName, cellPhone, state, city, isActive]
     ).run();
 
     const saved = await fetchVolunteerById(env, db, volunteerTable, id);
@@ -3057,6 +4598,44 @@ router.post('/admin/volunteers', async (request, env, ctx) => {
   }
 });
 
+router.get('/admin/volunteers/:id', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('volunteers', ctx.allowedOrigin);
+    }
+
+    const url = new URL(request.url);
+    const rawId = url.pathname.split('/').pop();
+    const id = rawId ? decodeURIComponent(String(rawId)).trim().toLowerCase() : '';
+    if (!id) {
+      throw new BadRequestError('volunteer id required');
+    }
+
+    console.log(`[GET /admin/volunteers/:id] Received id from URL: "${rawId}" -> decoded: "${id}"`);
+
+    const volunteerTable = await resolveTable(env, ['volunteers']);
+    const row = await fetchVolunteerById(env, db, volunteerTable, id);
+    console.log(`[GET /admin/volunteers/:id] fetchVolunteerById returned:`, row ? `found ${row.id}` : 'NOT FOUND');
+    if (!row) {
+      return ctx.jsonResponse({ ok: false, error: 'Volunteer not found' }, 404, ctx.allowedOrigin);
+    }
+    return ctx.jsonResponse({ ok: true, volunteer: row }, 200, ctx.allowedOrigin);
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    if (err?.status === 403) {
+      return ctx.jsonResponse({ ok: false, error: 'Admin access required' }, 403, ctx.allowedOrigin);
+    }
+    console.error('/admin/volunteers/:id GET error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
 router.put('/admin/volunteers/:id', async (request, env, ctx) => {
   try {
     const auth = await ensureAuth(request, env, ctx.config);
@@ -3070,10 +4649,13 @@ router.put('/admin/volunteers/:id', async (request, env, ctx) => {
     }
 
     const url = new URL(request.url);
-    const id = url.pathname.split('/').pop();
+    const rawId = url.pathname.split('/').pop();
+    const id = rawId ? decodeURIComponent(String(rawId)).trim().toLowerCase() : '';
     if (!id) {
       throw new BadRequestError('volunteer id required');
     }
+
+    console.log(`[PUT /admin/volunteers/:id] Received id from URL: "${rawId}" -> decoded: "${id}"`);
 
     const volunteerTable = await resolveTable(env, ['volunteers']);
 
@@ -3097,6 +4679,14 @@ router.put('/admin/volunteers/:id', async (request, env, ctx) => {
       updates.push(`cell_phone = ?${paramIndex++}`);
       params.push(normalizeCellPhone(body.cell_phone || ''));
     }
+    if (body.state !== undefined) {
+      updates.push(`state = ?${paramIndex++}`);
+      params.push(body.state ? String(body.state).trim().toUpperCase() : null);
+    }
+    if (body.city !== undefined) {
+      updates.push(`city = ?${paramIndex++}`);
+      params.push(body.city ? String(body.city).trim().toUpperCase() : null);
+    }
     if (body.is_active !== undefined) {
       updates.push(`is_active = ?${paramIndex++}`);
       params.push(coerceBooleanFlag(body.is_active, 1));
@@ -3112,7 +4702,7 @@ router.put('/admin/volunteers/:id', async (request, env, ctx) => {
       `
         UPDATE ${volunteerTable}
         SET ${updates.join(', ')}
-        WHERE id = ?${paramIndex}
+        WHERE lower(trim(id)) = lower(trim(?${paramIndex}))
       `,
       params
     ).run();
@@ -3161,7 +4751,8 @@ router.delete('/admin/volunteers/:id', async (request, env, ctx) => {
     }
 
     const url = new URL(request.url);
-    const id = url.pathname.split('/').pop();
+    const rawId = url.pathname.split('/').pop();
+    const id = rawId ? decodeURIComponent(String(rawId)).trim().toLowerCase() : '';
     if (!id) {
       throw new BadRequestError('volunteer id required');
     }
@@ -3332,16 +4923,75 @@ function deriveVolunteerDisplayName(volunteer, fallbackEmail) {
   return fallbackEmail ? fallbackEmail.split('@')[0] : 'Volunteer';
 }
 
+function pickVolunteerNotifyRecipient(env) {
+  const raw = env?.VOLUNTEER_NOTIFY_EMAIL || env?.ADMIN_EMAILS || '';
+  return String(raw)
+    .split(',')
+    .map(v => v.trim())
+    .filter(Boolean)[0] || null;
+}
+
+async function maybeSendVolunteerNotification(env, submission = {}) {
+  const toEmail = pickVolunteerNotifyRecipient(env);
+  if (!toEmail) {
+    return { sent: false, skipped: 'no_recipient_configured' };
+  }
+  const host = (env?.PUBLIC_HOSTNAME || 'volunteers.grassrootsmvt.org').replace(/^https?:\/\//, '');
+  const fromEmail = env?.NOTIFY_FROM_EMAIL || `notifications@${host}`;
+  const action = submission.action || 'submission';
+  const stagingId = submission.stagingId || 'pending';
+  const lines = [
+    'A volunteer submitted a staging record.',
+    `Action: ${action}`,
+    submission.targetId ? `Target: ${submission.targetId}` : null,
+    submission.email ? `Volunteer email: ${submission.email}` : null,
+    submission.firstName || submission.lastName ? `Name: ${buildVolunteerName(submission.firstName, submission.lastName)}` : null,
+    submission.county ? `County: ${submission.county}` : null,
+    submission.city ? `City: ${submission.city}` : null,
+    submission.state ? `State: ${submission.state}` : null,
+    `Staging ID: ${stagingId}`,
+    `Submitted at: ${new Date().toISOString()}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  const payload = {
+    personalizations: [{ to: [{ email: toEmail }] }],
+    from: { email: fromEmail, name: 'GrassrootsMVT' },
+    subject: `New volunteer ${action} (${stagingId})`,
+    content: [{ type: 'text/plain', value: lines }],
+  };
+
+  try {
+    const resp = await fetch('https://api.mailchannels.net/tx/v1/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!resp.ok) {
+      const detail = await resp.text().catch(() => '');
+      return { sent: false, status: resp.status, detail };
+    }
+    return { sent: true, status: resp.status };
+  } catch (err) {
+    console.warn('mail notification failed', err);
+    return { sent: false, error: String(err?.message || err) };
+  }
+}
+
 async function fetchVolunteerById(env, db, volunteerTable, id) {
+  const normalizedId = id ? String(id).trim().toLowerCase() : '';
+  console.log(`[fetchVolunteerById] Looking up id="${id}" -> normalized="${normalizedId}" in table=${volunteerTable}`);
   const row = await buildStatement(
     db,
     `
-      SELECT id, name, first_name, last_name, cell_phone, is_active
+      SELECT id, name, first_name, last_name, cell_phone, state, city, is_active
       FROM ${volunteerTable}
-      WHERE id = ?1
+      WHERE lower(trim(id)) = lower(trim(?1))
     `,
-    [id]
+    [normalizedId]
   ).first();
+  console.log(`[fetchVolunteerById] Result:`, row ? `found: ${row.id}` : 'NOT FOUND');
   return row || null;
 }
 

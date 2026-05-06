@@ -43,6 +43,28 @@ const uniq = (arr) => Array.from(new Set(arr)).filter(Boolean);
 // helper: Upper-case safe normalizer
 const up = (s) => (s ?? "").toString().trim().toUpperCase();
 
+function resolveAddrTable() {
+  if (resolveAddrTable.cache) return resolveAddrTable.cache;
+  const candidates = ['voters_addr_norm', 'v_voters_addr_norm'];
+  for (const name of candidates) {
+    try {
+      const row = q1(
+        `SELECT name FROM sqlite_master WHERE type IN ('table','view') AND name = ? LIMIT 1`,
+        name
+      );
+      if (row?.name === name) {
+        resolveAddrTable.cache = name;
+        return name;
+      }
+    } catch (err) {
+      // fall through to next candidate
+    }
+  }
+  resolveAddrTable.cache = candidates[0];
+  return resolveAddrTable.cache;
+}
+const ADDR_TABLE = resolveAddrTable();
+
 // ---- add helpers ----
 const PARTY_MAP = {
   R:'Republican', D:'Democratic', U:'Unaffiliated',
@@ -228,7 +250,7 @@ function buildMeta() {
   for (const county of counties) {
     const rows = q(`
       SELECT DISTINCT n.city
-      FROM v_voters_addr_norm n
+      FROM ${ADDR_TABLE} n
       JOIN voters v ON v.voter_id = n.voter_id
       WHERE v.county = ? AND n.city IS NOT NULL AND TRIM(n.city) <> ''
     `, county);
@@ -360,7 +382,7 @@ app.get("/api/canvass/list", (req, res) => {
       SELECT n.addr1 AS address,
              (n.fn || ' ' || n.ln) AS name,
              n.city, n.zip
-      FROM v_voters_addr_norm n
+      FROM ${ADDR_TABLE} n
       JOIN voters v ON v.voter_id = n.voter_id
       ${where}
       LIMIT ?
@@ -383,7 +405,7 @@ app.post("/api/canvass/list", (req, res) => {
       SELECT n.addr1 AS address,
              (n.fn || ' ' || n.ln) AS name,
              n.city, n.zip
-      FROM v_voters_addr_norm n
+      FROM ${ADDR_TABLE} n
       JOIN voters v ON v.voter_id = n.voter_id
       ${where}
       LIMIT ?
@@ -466,7 +488,7 @@ app.post("/api/canvass/nearby", (req, res) => {
                    THEN SUBSTR(UPPER(TRIM(n.addr1)), INSTR(UPPER(TRIM(n.addr1)),' ')+1)
                    ELSE '' END
             ) AS street_raw
-          FROM v_voters_addr_norm n
+          FROM ${ADDR_TABLE} n
         ),
         norm AS (
           SELECT *,
@@ -516,7 +538,7 @@ app.post("/api/canvass/nearby", (req, res) => {
                    THEN SUBSTR(UPPER(TRIM(n.addr1)), INSTR(UPPER(TRIM(n.addr1)),' ')+1)
                    ELSE '' END
             ) AS street_raw
-          FROM v_voters_addr_norm n
+          FROM ${ADDR_TABLE} n
         ),
         norm AS (
           SELECT *,
@@ -592,7 +614,7 @@ app.all("/api/next", (req, res) => {
                v.political_party AS party, n.city AS ra_city, n.zip AS ra_zip,
                bp.phone_e164
         FROM voters v
-        JOIN v_voters_addr_norm n ON n.voter_id = v.voter_id
+        JOIN ${ADDR_TABLE} n ON n.voter_id = v.voter_id
         ${baseJoin}
         ${where}
         ORDER BY RANDOM()
@@ -626,7 +648,7 @@ app.get('/api/voter/:id', (req, res) => {
              n.zip AS ra_zip,
              bp.phone_e164
       FROM voters v
-      JOIN v_voters_addr_norm n ON n.voter_id = v.voter_id
+      JOIN ${ADDR_TABLE} n ON n.voter_id = v.voter_id
       LEFT JOIN v_best_phone bp ON bp.voter_id = v.voter_id
       WHERE v.voter_id = ?
       LIMIT 1
@@ -717,7 +739,7 @@ app.post("/admin/meta/refresh", (req, res) => {
     `).all().map(r => r.county);
 
     // 2) Cities by county:
-    // Use voters INNER JOIN v_voters_addr_norm to ensure county & city come
+    // Use voters INNER JOIN voters_addr_norm to ensure county & city come
     // from the same record. Apply a small count threshold to reduce stray pairs.
     const cityPairs = db.prepare(`
       SELECT county, city, COUNT(*) AS c
@@ -726,7 +748,7 @@ app.post("/admin/meta/refresh", (req, res) => {
           UPPER(TRIM(v.county)) AS county,
           UPPER(TRIM(n.city))   AS city
         FROM voters v
-        JOIN v_voters_addr_norm n ON n.voter_id = v.voter_id
+        JOIN ${ADDR_TABLE} n ON n.voter_id = v.voter_id
         WHERE n.city IS NOT NULL AND TRIM(n.city) <> ''
       )
       GROUP BY county, city

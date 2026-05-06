@@ -1,0 +1,3 @@
+-- Migration 030: Add reverse-geocode street hint to field_sessions
+-- Drift-safe no-op: the field_sessions table already carries street_hint/city_hint
+-- in the environments this migration is being applied against.

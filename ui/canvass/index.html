@@ -73,6 +73,38 @@
   .list > div { padding:10px 0; border-bottom:1px solid #f1f5f9; }
   .list > div:last-child { border-bottom:0; }
   .toolbar { display:flex; gap:8px; }
+
+  /* GPS Coordination card */
+  .coord-card { background:#f0fdf4; border-color:#86efac; }
+  .coord-header {
+    display:flex; justify-content:space-between; align-items:center;
+    gap:12px; cursor:pointer; user-select:none;
+  }
+  .coord-header:focus-visible { outline:2px solid #16a34a; border-radius:4px; }
+  .coord-chevron { color:#16a34a; font-size:.85rem; font-weight:700; white-space:nowrap; flex-shrink:0; }
+  .coord-body { display:none; margin-top:12px; padding-top:12px; border-top:1px solid #bbf7d0; }
+  .coord-body.is-open { display:block; }
+  .coord-desc { font-size:.9rem; color:#166534; margin:0 0 12px; }
+  .coord-gps-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+  button.coord-btn { background:#16a34a; color:white; border:0; font-weight:600; border-radius:10px; padding:.55rem 1rem; cursor:pointer; font-size:.95rem; }
+  button.coord-btn:hover { background:#15803d; }
+  .coord-gps-note { font-size:.82rem; color:#475569; }
+  .coord-share-label { font-size:.82rem; font-weight:600; color:#475569; margin-bottom:5px; }
+  .coord-link-row { display:flex; gap:8px; align-items:stretch; }
+  .coord-link-box {
+    flex:1 1 auto; min-width: 220px;
+    font-family:monospace; font-size:.8rem; padding:.45rem .65rem;
+    border:1px solid #86efac; border-radius:8px; background:white; color:#166534;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  button.coord-btn { width: auto; }
+  button.coord-copy {
+    background:#e2e8f0; color:#0f172a; border:0; font-size:.82rem; font-weight:600;
+    padding:.45rem .85rem; border-radius:8px; cursor:pointer; white-space:nowrap; flex-shrink:0;
+    width: auto;
+  }
+  button.coord-copy:hover { background:#cbd5e1; }
+  .coord-status { font-size:.82rem; color:#16a34a; margin-top:6px; min-height:1.2em; }
 </style>
 </head>
 
@@ -82,6 +114,34 @@
 
 <div class="card">
   <div class="muted" id="filtersBadge">Loading filters…</div>
+</div>
+
+<!-- GPS Coordination card -->
+<div class="card coord-card">
+  <div class="coord-header" id="coordToggle" role="button" tabindex="0" aria-expanded="false">
+    <div>
+      <strong style="color:#15803d;">GPS Coordination</strong>
+      <span style="font-size:.85rem; color:#475569; margin-left:8px;">Have support coverage? Set this up before heading out.</span>
+    </div>
+    <span class="coord-chevron" id="coordChevron" title="Expand this section to set up live support during canvassing">Enable GPS ▾</span>
+  </div>
+  <div class="coord-body" id="coordBody">
+    <p class="coord-desc">
+      Your support team can open the link below from any admin device. They can see your real-time location, look up nearby voters, and push call-ahead tasks to you while you're at the door.
+    </p>
+    <div class="coord-gps-row">
+      <button class="coord-btn" id="startGpsBtn" data-help="Open your field session in a new tab. From there you can share GPS and receive tasks from support.">Start GPS Session</button>
+      <span class="coord-gps-note">Opens your field session — share GPS location and receive tasks</span>
+    </div>
+    <div>
+      <div class="coord-share-label">Support desk link — share with your support team:</div>
+      <div class="coord-link-row">
+        <div class="coord-link-box" id="supportDeskUrl"></div>
+        <button class="coord-copy" id="copyDeskLink" data-help="Copy the support desk URL so you can send it to your support team.">Copy</button>
+      </div>
+    </div>
+    <div class="coord-status" id="coordStatus"></div>
+  </div>
 </div>
 
 <div class="card">
@@ -95,7 +155,7 @@
   
   <div id="instructionsPanel" style="background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 8px; padding: 16px; margin-bottom: 16px;">
     <div id="instructionText" style="font-weight: 500; color: #0369a1;">
-      👋 Click the Street field and start typing at least two letters
+      👋 Click the Street field and start typing at least two letters. Need live backup? Open GPS Coordination above first.
     </div>
   </div>
   <div id="districtStreetsStatus" class="muted" style="display:none; margin-bottom: 8px;"></div>
@@ -128,7 +188,7 @@
     </div>
   </div>
   <div class="row" style="margin-top:10px;">
-    <button class="primary" id="btnFind">Find nearby</button>
+    <button class="primary" id="btnFind" data-help="Searches for nearby voters using your selected street, house number, range, and filters.">Find nearby</button>
   </div>
   <div id="msg" class="muted" style="margin-top:8px;"></div>
 </div>
@@ -150,6 +210,7 @@ const RETURN_PATH_KEY = 'contactUpdateReturnTo';
 const CANVASS_STATE_KEY = 'canvassPageState';
 const CANVASS_STATE_KEEP_FLAG = 'canvassStateKeep';
 let latestRows = [];
+let selectedStreetId = null;
 const WY_META_PATHS = ['/admin/wy.json', '/ui/admin/wy.json'];
 let wyMetaCache = null;
 const DISTRICT_STREET_LIMIT = 400;
@@ -157,6 +218,20 @@ const DISTRICT_CITY_SCAN_LIMIT = 12;
 let districtStreetSeedPromise = null;
 let streetAutocomplete;
 const districtStreetsStatusEl = document.getElementById('districtStreetsStatus');
+
+function applyButtonHelp(root = document) {
+  root.querySelectorAll('button[data-help]').forEach(btn => {
+    const help = btn.getAttribute('data-help');
+    if (!help) return;
+    if (!btn.getAttribute('title')) {
+      btn.title = help;
+    }
+    if (!btn.getAttribute('aria-label')) {
+      const base = (btn.textContent || '').trim();
+      btn.setAttribute('aria-label', base ? `${base}. ${help}` : help);
+    }
+  });
+}
 
 function normalizeRegionParam(rawValue) {
   const value = (rawValue || '').toString().trim();
@@ -504,17 +579,19 @@ function restoreCanvassState() {
         </div>
         ${contactInfo}
         <div class="toolbar" style="margin-top:8px;">
-          <button data-id="${r.voter_id}" data-a="contacted" style="background: #059669; color: white; font-weight: 500;">📋 Contact</button>
-          <button data-id="${r.voter_id}" data-a="no_answer">🚪 Not Home</button>
-          <button data-id="${r.voter_id}" data-a="note">📝 Note</button>
+          <button data-id="${r.voter_id}" data-a="contacted" data-help="Open the full contact workflow to log a complete door conversation." style="background: #059669; color: white; font-weight: 500;">📋 Contact</button>
+          <button data-id="${r.voter_id}" data-a="no_answer" data-help="Quick-log that no one answered at this address.">🚪 Not Home</button>
+          <button data-id="${r.voter_id}" data-a="note" data-help="Open the update form to record notes or follow-up details.">📝 Note</button>
     <button data-id="${r.voter_id}" data-a="call"
       class="primary"
+      data-help="Open the call workflow with this voter prefilled when a phone number is available."
       ${r.phone_e164 ? '' : 'disabled title="No phone on file" aria-disabled="true"'}
     >Call</button>
         </div>
       `;
       el.appendChild(div);
     }
+    applyButtonHelp(el);
     el.querySelectorAll('button[data-a]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const voter_id = btn.getAttribute('data-id');
@@ -660,10 +737,11 @@ function restoreCanvassState() {
     const filters = fromQS();
     
     console.log('🔍 Making API call with filters:', filters);
+    console.log('🔍 Party filter values:', Array.isArray(filters.parties) ? filters.parties : []);
     console.log('🔍 API URL will be:', API('/canvass/nearby'));
     
   try {
-    const requestBody = { filters, house, street, range, limit };
+    const requestBody = { filters, house, street, range, limit, streets_index_id: selectedStreetId };
     console.log('🔍 Request body:', requestBody);
     
     const j = await jsonFetch(API('/canvass/nearby'), {
@@ -673,6 +751,12 @@ function restoreCanvassState() {
     
     console.log('🔍 API response:', j);
     console.log('🔍 Response rows:', j.rows);
+    if (!j?.rows || j.rows.length === 0) {
+      console.warn('⚠️ No rows returned from /api/canvass/nearby', {
+        request: requestBody,
+        response: j,
+      });
+    }
     
     await renderList(j.rows || []);
     setMsg(`Found ${j.rows?.length||0} nearby addresses.`);
@@ -745,6 +829,7 @@ window.addEventListener('pagehide', () => persistCanvassState());
   });
   // Auto-uppercase input to reduce mismatches
   streetEl.addEventListener('input', () => {
+    selectedStreetId = null;
     const pos = streetEl.selectionStart;
     streetEl.value = (streetEl.value || '').toUpperCase();
     streetEl.selectionStart = streetEl.selectionEnd = pos;
@@ -762,6 +847,7 @@ window.addEventListener('pagehide', () => persistCanvassState());
       const f = fromQS();
       return { district_type: f.district_type, district: f.district, district_city: f.district_city };
     },
+    getStreetId: () => selectedStreetId,
     getStreet: () => document.getElementById('street').value,
     onHouseSelected: (houseNumber, houseData) => {
       console.log('🏠 House selected:', houseNumber);
@@ -780,7 +866,8 @@ window.addEventListener('pagehide', () => persistCanvassState());
       const f = fromQS();
       return { district_type: f.district_type, district: f.district, district_city: f.district_city };
     },
-    onStreetSelected: async (streetName) => {
+    onStreetSelected: async (streetName, streetId) => {
+      selectedStreetId = streetId || null;
       // Enable house number field
       houseAutocomplete.enable();
       
@@ -788,7 +875,7 @@ window.addEventListener('pagehide', () => persistCanvassState());
       updateInstruction('streetSelected');
       
       // Load house numbers for this street
-      await houseAutocomplete.loadHouseNumbers(streetName);
+      await houseAutocomplete.loadHouseNumbers(streetName, streetId);
     },
     onHouseFieldChange: (enabled) => {
       if (enabled) {
@@ -813,7 +900,7 @@ window.addEventListener('pagehide', () => persistCanvassState());
   // Instructions state management
   let currentStep = 'street';
   const instructions = {
-    street: '👋 Click the Street field and start typing at least two letters',
+    street: '👋 Click the Street field and start typing at least two letters. Need live backup? Open GPS Coordination first.',
     streetFocused: '📝 Keep typing — suggestions appear once you enter two or more letters',
     streetSelected: '🏠 Great! Now select a house number from the yellow dropdown above',
     houseSelected: '🔍 Perfect! Click "Find nearby" to search for voters',
@@ -844,6 +931,7 @@ window.addEventListener('pagehide', () => persistCanvassState());
   
   // Initialize with instructions enabled
   updateInstruction('street');
+  applyButtonHelp();
   
   // Add instruction event listeners to existing elements
   const streetInput = document.getElementById('street');
@@ -924,6 +1012,65 @@ window.addEventListener('pagehide', () => persistCanvassState());
   }
   
   // ...existing code...
+
+  // GPS Coordination card
+  (function () {
+    const toggle   = document.getElementById('coordToggle');
+    const body     = document.getElementById('coordBody');
+    const chevron  = document.getElementById('coordChevron');
+    const gpsBtn   = document.getElementById('startGpsBtn');
+    const copyBtn  = document.getElementById('copyDeskLink');
+    const urlBox   = document.getElementById('supportDeskUrl');
+    const statusEl = document.getElementById('coordStatus');
+
+    const supportUrl = window.location.origin + '/admin/field-support.html';
+    if (urlBox) urlBox.textContent = supportUrl;
+
+    let expanded = false;
+
+    function setExpanded(val) {
+      expanded = val;
+      body.classList.toggle('is-open', expanded);
+      chevron.textContent = expanded ? 'Collapse ▴' : 'Enable GPS ▾';
+      toggle.setAttribute('aria-expanded', String(expanded));
+    }
+
+    toggle.addEventListener('click', () => setExpanded(!expanded));
+    toggle.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(!expanded); }
+    });
+
+    gpsBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      window.open('/field-session/', '_blank', 'noopener');
+    });
+
+    copyBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      const done = () => {
+        copyBtn.textContent = 'Copied!';
+        if (statusEl) statusEl.textContent = 'Link copied — share it with your support team now.';
+        setTimeout(() => {
+          copyBtn.textContent = 'Copy';
+          if (statusEl) statusEl.textContent = '';
+        }, 2500);
+      };
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(supportUrl).then(done).catch(() => fallbackCopy());
+      } else {
+        fallbackCopy();
+      }
+      function fallbackCopy() {
+        const ta = document.createElement('textarea');
+        ta.value = supportUrl;
+        ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); done(); } catch {}
+        document.body.removeChild(ta);
+      }
+    });
+  })();
 </script>
 <script type="module">
   import { mountLogoutButton } from '/shared/logoutButton.js';

@@ -19,7 +19,7 @@ This is the single living status page. Dated snapshots such as `PROJECT_SUMMARY_
 
 ## Migrations and schema
 - Migrations head: latest committed migration in `worker/migrations/`  ← update this line when you add a new migration
-- Latest schema snapshot: `Local_D1_Schema_Snapshot_wy_local_20251026.md`
+- Latest schema snapshot: `Local_D1_Schema_Snapshot_wy_local_20251130.md`
 - Deltas since last snapshot: plan migration to enforce `voters_addr_norm.voter_id NOT NULL` (currently PK, notnull=0 in snapshot). Track in `SCHEMA_DELTAS.md`.
 
 - Migrations head (preview): <paste last file shown by `migrations list`>, applied on 2025-10-24.

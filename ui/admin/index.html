@@ -36,28 +36,36 @@
     <h2>Contact Management</h2>
     <div style="margin-bottom: 1rem;">
       <a href="/admin/review.html" class="btn btn-primary" style="display: inline-block; padding: 0.75rem 1.5rem; background: #0ea5e9; color: white; text-decoration: none; border-radius: 8px; font-weight: 600;">
+      <a href="/admin/review.html" class="btn btn-primary" data-help="Open the streamlined review dashboard for voter contacts and pulse opt-ins." style="display: inline-block; padding: 0.75rem 1.5rem; background: #0ea5e9; color: white; text-decoration: none; border-radius: 8px; font-weight: 600;">
         📋 Open Contact Review Dashboard
       </a>
       <p class="muted" style="margin-top: 0.5rem;">New streamlined interface for reviewing contacts and pulse opt-ins with keyboard navigation</p>
     </div>
     <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid #e5e7eb;">
     <div style="margin-bottom:1.5rem;">
-      <a href="/admin/touchpoints.html" class="btn btn-primary" style="display:inline-block; padding:0.6rem 1.2rem; background:#10b981; color:white; text-decoration:none; border-radius:8px; font-weight:600;">
+      <a href="/admin/touchpoints.html" class="btn btn-primary" data-help="Manage the conversation scripts and touchpoints volunteers use during outreach." style="display:inline-block; padding:0.6rem 1.2rem; background:#10b981; color:white; text-decoration:none; border-radius:8px; font-weight:600;">
         🗣️ Manage Icebreakers & Scripts
       </a>
       <p class="muted" style="margin-top:0.4rem;">Add or edit campaign touchpoints that power volunteer scripts.</p>
     </div>
     <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid #e5e7eb;">
     <div style="margin-bottom:1.5rem;">
-      <a href="/admin/volunteers.html" class="btn btn-primary" style="display:inline-block; padding:0.6rem 1.2rem; background:#6366f1; color:white; text-decoration:none; border-radius:8px; font-weight:600;">
+      <a href="/admin/volunteers.html" class="btn btn-primary" data-help="Open volunteer management to update access emails, profile details, and active status." style="display:inline-block; padding:0.6rem 1.2rem; background:#6366f1; color:white; text-decoration:none; border-radius:8px; font-weight:600;">
         👥 Manage Volunteers
       </a>
       <p class="muted" style="margin-top:0.4rem;">Update Access emails, names, phone numbers, and active status.</p>
     </div>
     <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid #e5e7eb;">
+    <div style="margin-bottom:1.5rem;">
+      <a href="/admin/field-support.html" class="btn btn-primary" data-help="Open the live field support desk to monitor sessions, locations, and task routing." style="display:inline-block; padding:0.6rem 1.2rem; background:#0f766e; color:white; text-decoration:none; border-radius:8px; font-weight:600;">
+        Field Support Desk
+      </a>
+      <p class="muted" style="margin-top:0.4rem;">View active field sessions, latest shared locations, call-aheads, and next stops.</p>
+    </div>
+    <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid #e5e7eb;">
     <h3>Legacy Contact List</h3>
     <div style="margin-bottom: 1rem; display: flex; gap: 1rem; align-items: center; flex-wrap: wrap;">
-      <button id="refreshContacts" style="padding: 0.5rem 1rem; border-radius: 6px; background: #0ea5e9; color: white; border: none; cursor: pointer;">🔄 Refresh</button>
+      <button id="refreshContacts" data-help="Refresh the legacy contact list using the current filter and page." style="padding: 0.5rem 1rem; border-radius: 6px; background: #0ea5e9; color: white; border: none; cursor: pointer;">🔄 Refresh</button>
       <label style="display: flex; align-items: center; gap: 0.5rem;">
         <span>Filter:</span>
         <select id="reviewedFilter" style="padding: 0.5rem; border-radius: 6px; border: 1px solid #ccc;">
@@ -68,8 +76,8 @@
       </label>
       <span id="contactCount" class="muted"></span>
       <div style="margin-left: auto;">
-        <button id="prevPage" style="padding: 0.5rem 1rem; border-radius: 6px; background: #6b7280; color: white; border: none; cursor: pointer;" disabled>← Prev</button>
-        <button id="nextPage" style="padding: 0.5rem 1rem; border-radius: 6px; background: #6b7280; color: white; border: none; cursor: pointer;">Next →</button>
+        <button id="prevPage" data-help="Load the previous page of legacy contact records." style="padding: 0.5rem 1rem; border-radius: 6px; background: #6b7280; color: white; border: none; cursor: pointer;" disabled>← Prev</button>
+        <button id="nextPage" data-help="Load the next page of legacy contact records." style="padding: 0.5rem 1rem; border-radius: 6px; background: #6b7280; color: white; border: none; cursor: pointer;">Next →</button>
       </div>
     </div>
     <div id="contactsList">Loading…</div>
@@ -81,8 +89,8 @@
       <h2 style="margin-top: 0;">Edit Contact Record</h2>
       <div id="editForm"></div>
       <div style="display: flex; gap: 1rem; margin-top: 1.5rem;">
-        <button id="saveEdit" style="flex: 1; padding: 0.75rem; border-radius: 6px; background: #10b981; color: white; border: none; cursor: pointer; font-weight: 600;">💾 Save Changes</button>
-        <button id="cancelEdit" style="flex: 1; padding: 0.75rem; border-radius: 6px; background: #6b7280; color: white; border: none; cursor: pointer;">Cancel</button>
+        <button id="saveEdit" data-help="Save updates to this contact record immediately." style="flex: 1; padding: 0.75rem; border-radius: 6px; background: #10b981; color: white; border: none; cursor: pointer; font-weight: 600;">💾 Save Changes</button>
+        <button id="cancelEdit" data-help="Close the editor without saving changes." style="flex: 1; padding: 0.75rem; border-radius: 6px; background: #6b7280; color: white; border: none; cursor: pointer;">Cancel</button>
       </div>
     </div>
   </div>
@@ -91,6 +99,20 @@
   <script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
   <script src="/shared/authGlobal.js"></script>
   <script>
+    function applyControlHelp(root = document) {
+      root.querySelectorAll('button[data-help], a[data-help]').forEach(el => {
+        const help = el.getAttribute('data-help');
+        if (!help) return;
+        if (!el.getAttribute('title')) {
+          el.setAttribute('title', help);
+        }
+        if (!el.getAttribute('aria-label')) {
+          const base = (el.textContent || '').trim();
+          el.setAttribute('aria-label', base ? `${base}. ${help}` : help);
+        }
+      });
+    }
+
     const API = (path = '', params = {}) => {
       const cleanPath = String(path).replace(/^\/?(api\/)?/, '');
       if (window.environmentConfig && typeof window.environmentConfig.getApiUrl === 'function') {
@@ -180,15 +202,16 @@
             html += `<td>${isReviewed ? '✅' : '⏳'}</td>`;
           }
           html += `<td>
-            <button onclick="viewContact(${contact.id})" style="padding: 0.25rem 0.5rem; border-radius: 4px; background: #3b82f6; color: white; border: none; cursor: pointer; margin-right: 0.25rem;">👁️ View</button>
-            <button onclick="editContact(${contact.id})" style="padding: 0.25rem 0.5rem; border-radius: 4px; background: #10b981; color: white; border: none; cursor: pointer; margin-right: 0.25rem;">✏️ Edit</button>
-            <button onclick="deleteContact(${contact.id})" style="padding: 0.25rem 0.5rem; border-radius: 4px; background: #ef4444; color: white; border: none; cursor: pointer;">🗑️ Delete</button>
+            <button data-help="View full details for this contact record." onclick="viewContact(${contact.id})" style="padding: 0.25rem 0.5rem; border-radius: 4px; background: #3b82f6; color: white; border: none; cursor: pointer; margin-right: 0.25rem;">👁️ View</button>
+            <button data-help="Edit this contact record in place." onclick="editContact(${contact.id})" style="padding: 0.25rem 0.5rem; border-radius: 4px; background: #10b981; color: white; border: none; cursor: pointer; margin-right: 0.25rem;">✏️ Edit</button>
+            <button data-help="Delete this contact record permanently." onclick="deleteContact(${contact.id})" style="padding: 0.25rem 0.5rem; border-radius: 4px; background: #ef4444; color: white; border: none; cursor: pointer;">🗑️ Delete</button>
           </td>`;
           html += '</tr>';
         });
         
         html += '</tbody></table>';
         el("contactsList").innerHTML = html;
+        applyControlHelp(el("contactsList"));
       } catch (e) {
         el("contactsList").textContent = "Error loading contacts: " + e.message;
       }
@@ -347,6 +370,7 @@
     
     // Refresh button
     document.getElementById('refreshContacts').addEventListener('click', loadContacts);
+    applyControlHelp();
     
     // Wait for apiClient to be ready
     if (window.apiFetch) {

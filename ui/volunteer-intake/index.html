@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Volunteer Intake | GrassrootsMVT</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <script src="/config/environments.js"></script>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      font-family: system-ui, sans-serif;
+      margin: 0 auto;
+      max-width: 900px;
+      padding: 1.5rem 1rem 3rem;
+      background: #f8fafc;
+    }
+    h1 { margin: 0 0 .25rem; }
+    .muted { color: #475569; }
+    .card {
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 14px;
+      padding: 1.5rem;
+      margin: 1.25rem 0;
+      box-shadow: 0 1px 3px rgba(15,23,42,0.06);
+    }
+    .form-row { display: flex; gap: 1rem; flex-wrap: wrap; }
+    .form-group { flex: 1 1 240px; min-width: 220px; margin: .5rem 0; }
+    label { display: block; font-weight: 600; margin-bottom: .35rem; }
+    input, select, textarea {
+      width: 100%;
+      padding: .7rem .75rem;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      font-size: 1rem;
+      background: #fff;
+    }
+    textarea { min-height: 100px; resize: vertical; }
+    .hint { font-size: .9rem; color: #475569; margin-top: .25rem; }
+    .btn-row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: .75rem 1.3rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .btn-primary { background: #0ea5e9; color: #fff; }
+    .btn-secondary { background: #e2e8f0; color: #0f172a; }
+    .status { font-weight: 600; }
+    .status.error { color: #b91c1c; }
+    .status.success { color: #15803d; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: .4rem;
+      border-radius: 999px;
+      padding: .35rem .75rem;
+      background: #ecfeff;
+      color: #0ea5e9;
+      border: 1px solid #bae6fd;
+      font-size: .9rem;
+      font-weight: 700;
+    }
+    .success-card {
+      display: none;
+      border: 1px solid #bbf7d0;
+      background: #ecfdf3;
+      color: #166534;
+      padding: 1rem;
+      border-radius: 12px;
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Volunteer Intake</h1>
+  <p class="muted">Add a new volunteer or request an update. Submissions go to the staging queue for admin review.</p>
+
+  <div class="card">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+      <div class="pill">Staging → Admin Review</div>
+      <div style="display:flex; gap:.5rem; flex-wrap:wrap; align-items:center;">
+        <button id="helpBtn" type="button" class="btn-secondary" style="padding:.55rem 1rem; border:1px solid #cbd5e1;">Help</button>
+        <a class="btn-secondary" style="text-decoration:none; padding:.55rem 1rem; border:1px solid #cbd5e1;" href="/index.html">← Back to Hub</a>
+      </div>
+    </div>
+    <p class="hint" style="margin-top:.65rem;">We only need the basics. Admins will merge these into the main roster after verification.</p>
+
+    <form id="volunteerForm">
+      <div class="form-row">
+        <div class="form-group">
+          <label for="actionType">Request type</label>
+          <select id="actionType" name="actionType" required>
+            <option value="new">Add new volunteer</option>
+            <option value="update">Update existing volunteer</option>
+          </select>
+          <p class="hint">Pick “Update” if you’re fixing an existing record.</p>
+        </div>
+        <div class="form-group">
+          <label for="existingVolunteer">Existing volunteer (email or ID)</label>
+          <select id="existingVolunteer" name="existingVolunteer" disabled>
+            <option value="">Loading…</option>
+          </select>
+          <p class="hint">Shown when you pick “Update” — choose the record to update.</p>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="firstName">First name</label>
+          <input id="firstName" name="firstName" type="text" autocomplete="given-name" required />
+        </div>
+        <div class="form-group">
+          <label for="lastName">Last name</label>
+          <input id="lastName" name="lastName" type="text" autocomplete="family-name" required />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="email">Volunteer email</label>
+          <input id="email" name="email" type="email" autocomplete="email" required />
+        </div>
+        <div class="form-group">
+          <label for="cellPhone">Cell phone (optional)</label>
+          <input id="cellPhone" name="cellPhone" type="tel" placeholder="+1 307…" autocomplete="tel" />
+          <p class="hint">Digits only are fine; we’ll normalize.</p>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="state">State</label>
+          <input id="state" name="state" type="text" placeholder="WY" value="WY" />
+          <p class="hint">Use the two-letter code.</p>
+        </div>
+        <div class="form-group">
+          <label for="city">City</label>
+          <input id="city" name="city" type="text" placeholder="CHEYENNE" />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="notes">Notes for admin</label>
+        <textarea id="notes" name="notes" placeholder="Role, availability, corrections, or anything else that helps review."></textarea>
+      </div>
+
+      <div class="form-row" style="align-items:center;">
+        <label class="form-group" style="display:flex; gap:.5rem; align-items:center; margin:0;">
+          <input id="isActive" name="isActive" type="checkbox" style="width:1.1rem; height:1.1rem;" />
+          Mark as active
+        </label>
+      </div>
+
+      <div class="btn-row" style="margin-top:1rem;">
+        <button type="submit" class="btn-primary" id="submitBtn">Submit to staging</button>
+        <span id="statusText" class="status muted"></span>
+      </div>
+    </form>
+
+    <div id="successCard" class="success-card">
+      <strong>Saved to staging.</strong>
+      <div id="successDetails"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import '/src/apiClient.v2.js';
+    import '/shared/authGlobal.js';
+    import { initHelpModal } from '/shared/helpModal.js';
+
+    const form = document.getElementById('volunteerForm');
+    const submitBtn = document.getElementById('submitBtn');
+    const statusText = document.getElementById('statusText');
+    const successCard = document.getElementById('successCard');
+    const successTitle = successCard.querySelector('strong');
+    const successDetails = document.getElementById('successDetails');
+    const actionSelect = document.getElementById('actionType');
+    const existingSelect = document.getElementById('existingVolunteer');
+    const helpBtn = document.getElementById('helpBtn');
+    const checkSelfBtn = document.createElement('button');
+    checkSelfBtn.type = 'button';
+    checkSelfBtn.className = 'btn-secondary';
+    checkSelfBtn.textContent = 'Check my info';
+    const adminSaveBtn = document.createElement('button');
+    adminSaveBtn.type = 'button';
+    adminSaveBtn.className = 'btn-primary';
+    adminSaveBtn.textContent = 'Admin: Update live';
+
+    const setStatus = (message, type = 'info') => {
+      statusText.textContent = message || '';
+      statusText.className = `status ${type === 'error' ? 'error' : type === 'success' ? 'success' : 'muted'}`;
+    };
+
+    const volunteerOptions = [];
+    let session = { email: null, is_admin: false, volunteer: null };
+    let selfTargetId = null;
+
+    const setExistingSelectState = () => {
+      const isUpdate = actionSelect.value === 'update';
+      const hasOptions = volunteerOptions.length > 0;
+      existingSelect.disabled = !(isUpdate && hasOptions);
+      if (!isUpdate) existingSelect.value = '';
+    };
+
+    const setAdminVisibility = () => {
+      const updateOption = actionSelect.querySelector('option[value="update"]');
+      if (!session.is_admin && updateOption) {
+        updateOption.disabled = true;
+        actionSelect.value = 'new';
+        existingSelect.disabled = true;
+      }
+      adminSaveBtn.style.display = session.is_admin ? 'inline-flex' : 'none';
+    };
+
+    const loadVolunteerOptions = async () => {
+      if (!session.is_admin) return;
+      try {
+        const data = await window.apiGet('volunteers/options');
+        const options = Array.isArray(data?.volunteers) ? data.volunteers : [];
+        volunteerOptions.splice(0, volunteerOptions.length, ...options);
+        existingSelect.innerHTML = '';
+        const blank = document.createElement('option');
+        blank.value = '';
+        blank.textContent = options.length ? '— select volunteer —' : 'No volunteers found';
+        existingSelect.appendChild(blank);
+        options.forEach(v => {
+          const opt = document.createElement('option');
+          const label = v.name || [v.first_name, v.last_name].filter(Boolean).join(' ').trim() || v.id;
+          opt.value = v.id;
+          opt.textContent = `${label} (${v.id})${v.is_active ? ' • Active' : ''}`;
+          existingSelect.appendChild(opt);
+        });
+        setExistingSelectState();
+      } catch (err) {
+        console.warn('Failed to load volunteer options', err);
+        existingSelect.innerHTML = '<option value="">Unable to load volunteers</option>';
+        existingSelect.disabled = true;
+      }
+    };
+
+    const toUpperOrNull = value => {
+      if (!value) return null;
+      const trimmed = String(value).trim();
+      return trimmed ? trimmed.toUpperCase() : null;
+    };
+
+    const buildPayload = () => {
+      const action = document.getElementById('actionType').value || 'new';
+      const targetFromSelect = existingSelect.value || null;
+      const target_id = selfTargetId || targetFromSelect || null;
+      return {
+        action,
+        target_id,
+        first_name: document.getElementById('firstName').value || null,
+        last_name: document.getElementById('lastName').value || null,
+        email: document.getElementById('email').value || null,
+        cell_phone: document.getElementById('cellPhone').value || null,
+        state: toUpperOrNull(document.getElementById('state').value || 'WY'),
+        city: toUpperOrNull(document.getElementById('city').value),
+        notes: document.getElementById('notes').value || null,
+        is_active: document.getElementById('isActive').checked,
+      };
+    };
+
+    const buildAdminBody = () => {
+      const email = (document.getElementById('email').value || '').trim().toLowerCase();
+      if (!email) throw new Error('Email is required to update volunteers table');
+      const first = (document.getElementById('firstName').value || '').trim();
+      const last = (document.getElementById('lastName').value || '').trim();
+      const name = [first, last].filter(Boolean).join(' ').trim() || email;
+      return {
+        id: email,
+        name,
+        first_name: first || null,
+        last_name: last || null,
+        cell_phone: document.getElementById('cellPhone').value || null,
+        state: toUpperOrNull(document.getElementById('state').value || 'WY'),
+        city: toUpperOrNull(document.getElementById('city').value),
+        is_active: document.getElementById('isActive').checked,
+      };
+    };
+
+    const fillFromVolunteer = (vol) => {
+      if (!vol) return;
+      document.getElementById('firstName').value = vol.first_name || '';
+      document.getElementById('lastName').value = vol.last_name || '';
+      document.getElementById('email').value = vol.id || vol.email || '';
+      document.getElementById('cellPhone').value = vol.cell_phone || '';
+      document.getElementById('state').value = vol.state || 'WY';
+      document.getElementById('city').value = vol.city || '';
+      document.getElementById('isActive').checked = vol.is_active === 1 || vol.is_active === true;
+    };
+
+    existingSelect.addEventListener('change', () => {
+      const selectedId = existingSelect.value;
+      if (!selectedId) return;
+      const vol = volunteerOptions.find(v => v.id === selectedId);
+      if (vol) {
+        fillFromVolunteer(vol);
+        selfTargetId = null;
+      }
+    });
+
+    actionSelect.addEventListener('change', () => {
+      const isUpdate = actionSelect.value === 'update';
+      if (!isUpdate) {
+        existingSelect.value = '';
+        selfTargetId = null;
+      } else if (!volunteerOptions.length) {
+        loadVolunteerOptions();
+      }
+      setExistingSelectState();
+    });
+
+    const checkMyInfo = async () => {
+      setStatus('Loading your record…');
+      try {
+        const data = await window.apiGet('volunteer/me');
+        session = { email: data?.email || null, is_admin: !!data?.is_admin, volunteer: data?.volunteer || null };
+        setAdminVisibility();
+        if (session.volunteer) {
+          fillFromVolunteer(session.volunteer);
+          actionSelect.value = 'update';
+          selfTargetId = session.email || session.volunteer.id || null;
+          setExistingSelectState();
+          setStatus('Loaded your record. Submit to propose updates.', 'success');
+        } else {
+          setStatus('No volunteer record found for your login.', 'error');
+        }
+      } catch (err) {
+        console.warn('Failed to load self record', err);
+        setStatus('Unable to load your record.', 'error');
+      }
+    };
+
+    const traceAdminVolunteer = async (testId) => {
+      if (!testId) {
+        setStatus('No email provided for trace.', 'error');
+        return;
+      }
+      
+      const normalizedId = String(testId).trim().toLowerCase();
+      setStatus(`Starting trace for ${normalizedId}…`);
+      
+      // Step 1: GET
+      try {
+        const res = await window.apiFetch(`admin/volunteers/${encodeURIComponent(normalizedId)}`, { method: 'GET' });
+        const text = await res.text().catch(() => '');
+        console.log(`[TRACE] GET admin/volunteers/${normalizedId}: status=${res.status} body=${text}`);
+      } catch (err) {
+        console.error(`[TRACE] GET admin/volunteers/${normalizedId} threw:`, err);
+      }
+      
+      // Step 2: POST (minimal payload)
+      const minimalPayload = {
+        id: normalizedId,
+        name: 'Trace Test',
+        state: 'WY',
+        city: 'TEST',
+        is_active: true,
+      };
+      try {
+        const res = await window.apiFetch('admin/volunteers', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(minimalPayload),
+        });
+        const text = await res.text().catch(() => '');
+        console.log(`[TRACE] POST admin/volunteers: status=${res.status} body=${text}`);
+      } catch (err) {
+        console.error(`[TRACE] POST admin/volunteers threw:`, err);
+      }
+      
+      // Step 3: PUT (same payload)
+      try {
+        const res = await window.apiFetch(`admin/volunteers/${encodeURIComponent(normalizedId)}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(minimalPayload),
+        });
+        const text = await res.text().catch(() => '');
+        console.log(`[TRACE] PUT admin/volunteers/${normalizedId}: status=${res.status} body=${text}`);
+      } catch (err) {
+        console.error(`[TRACE] PUT admin/volunteers/${normalizedId} threw:`, err);
+      }
+      
+      setStatus('Trace complete. Check console for details.', 'success');
+    };
+
+    const saveDirectAdmin = async () => {
+      if (!session.is_admin) {
+        setStatus('Admin only action.', 'error');
+        return;
+      }
+      try {
+        const body = buildAdminBody();
+        let pathUsed = 'unknown';
+        let resp;
+        // PUT-first: update if present, 404 triggers create
+        const putRes = await window.apiFetch(`admin/volunteers/${encodeURIComponent(body.id)}`, {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        const putText = await putRes.text().catch(() => '');
+        console.log(`[saveDirectAdmin] PUT status=${putRes.status} body=${putText}`);
+
+        if (putRes.ok) {
+          pathUsed = 'UPDATE via PUT';
+          resp = putText ? JSON.parse(putText) : null;
+        } else if (putRes.status === 404) {
+          console.log('[saveDirectAdmin] PUT returned 404, attempting POST create…');
+          try {
+            resp = await window.apiPost('admin/volunteers', body);
+            pathUsed = 'CREATE via POST';
+          } catch (err) {
+            if (err?.status === 409) {
+              console.warn('[saveDirectAdmin] POST conflict 409, retrying PUT…', err);
+              const retryRes = await window.apiFetch(`admin/volunteers/${encodeURIComponent(body.id)}`, {
+                method: 'PUT',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify(body),
+              });
+              const retryText = await retryRes.text().catch(() => '');
+              console.log(`[saveDirectAdmin] PUT retry status=${retryRes.status} body=${retryText}`);
+              if (!retryRes.ok) throw new Error(retryText || `HTTP ${retryRes.status}`);
+              resp = retryText ? JSON.parse(retryText) : null;
+              pathUsed = 'CREATE→UPDATE fallback';
+            } else {
+              throw err;
+            }
+          }
+        } else {
+          throw new Error(putText || `HTTP ${putRes.status}`);
+        }
+
+        const saved = resp?.volunteer || body;
+        fillFromVolunteer(saved);
+        const finalMsg = pathUsed.includes('UPDATE') ? 'Updated existing volunteer' : 'Created new volunteer';
+        console.log(`[saveDirectAdmin] Final result: ${finalMsg} (path: ${pathUsed})`);
+        setStatus(`${finalMsg} (path: ${pathUsed})`, 'success');
+        successTitle.textContent = 'Saved to volunteers table.';
+        successCard.style.display = 'block';
+        successDetails.textContent = `${finalMsg}: ${saved.id || body.id}`;
+      } catch (err) {
+        console.error('admin save failed', err);
+        const msg = err?.message || 'Failed to update volunteers table';
+        setStatus(msg, 'error');
+      }
+    };
+
+    // insert "Check my info" and admin direct-save buttons next to submit
+    const btnRow = submitBtn.parentElement;
+    btnRow.insertBefore(checkSelfBtn, submitBtn);
+    btnRow.insertBefore(adminSaveBtn, submitBtn.nextSibling);
+    checkSelfBtn.addEventListener('click', checkMyInfo);
+    adminSaveBtn.addEventListener('click', saveDirectAdmin);
+
+    (async () => {
+      try {
+        const data = await window.apiGet('volunteer/me');
+        session = { email: data?.email || null, is_admin: !!data?.is_admin, volunteer: data?.volunteer || null };
+        setAdminVisibility();
+        if (session.is_admin) {
+          loadVolunteerOptions();
+        }
+      } catch (err) {
+        console.warn('Session check failed', err);
+      } finally {
+        setExistingSelectState();
+      }
+    })();
+
+    if (helpBtn) {
+      initHelpModal({
+        helpPath: '/help/volunteer-intake.md',
+        title: 'Volunteer Intake Help',
+        toggleElement: helpBtn,
+      });
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      setStatus('Submitting…');
+      successCard.style.display = 'none';
+      submitBtn.disabled = true;
+
+      try {
+        if (typeof window.ensureAccessSession === 'function') {
+          await window.ensureAccessSession();
+        }
+        const payload = buildPayload();
+        const result = await window.apiPost('volunteer-staging', payload);
+        const id = result?.staging_id || 'pending';
+        const status = result?.review_status || 'pending';
+        setStatus('Saved to staging for admin review.', 'success');
+        successTitle.textContent = 'Saved to staging.';
+        successDetails.textContent = `Staging ID ${id} • Status: ${status}`;
+        successCard.style.display = 'block';
+        form.reset();
+        document.getElementById('actionType').value = payload.action;
+      } catch (err) {
+        console.error('volunteer staging failed', err);
+        const detail = err?.body || err?.message || 'Request failed';
+        setStatus(detail, 'error');
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

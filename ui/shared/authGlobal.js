@@ -1,4 +1,10 @@
 (() => {
+  // Suppress "Could not establish connection" error from chrome.runtime
+  // This prevents console noise when no extension background script exists
+  if (typeof window !== 'undefined' && typeof chrome !== 'undefined' && chrome.runtime) {
+    chrome.runtime.onMessage?.addListener?.(() => {});
+  }
+
   const listeners = new Set();
   let readyDispatched = false;
 
