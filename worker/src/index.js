@@ -2874,6 +2874,10 @@ router.post('/field-sessions/:id/location', async (request, env, ctx) => {
     const db = getDb(env);
     if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
     const table = await resolveTable(env, ['field_sessions']);
+    const email = (auth.email || '').trim().toLowerCase();
+    if (!email) {
+      return ctx.jsonResponse({ ok: false, error: 'Authenticated email required' }, 401, ctx.allowedOrigin);
+    }
     const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
     const lat = Number(body?.lat);
     const lng = Number(body?.lng);
@@ -2884,7 +2888,7 @@ router.post('/field-sessions/:id/location', async (request, env, ctx) => {
     if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
       return ctx.jsonResponse({ ok: false, error: 'invalid coordinates' }, 400, ctx.allowedOrigin);
     }
-    const session = await getFieldSessionForOwner(db, sessionId, auth.email || '');
+    const session = await getFieldSessionForOwner(db, sessionId, email);
     if (!session || session.status !== 'active') {
       return ctx.jsonResponse({ ok: false, error: 'active field session not found' }, 404, ctx.allowedOrigin);
     }
@@ -2892,36 +2896,332 @@ router.post('/field-sessions/:id/location', async (request, env, ctx) => {
     const streetHint = body?.street_hint ? String(body.street_hint).trim().slice(0, 120) : null;
     const cityHint = body?.city_hint ? String(body.city_hint).trim().slice(0, 80) : null;
 
-    await buildStatement(
-      db,
-      `UPDATE ${table}
-       SET sharing_enabled = 1,
-           latest_lat = ?1,
-           latest_lng = ?2,
-           latest_accuracy_m = ?3,
-           latest_location_at = datetime('now'),
-           consent_text_version = ?4,
-           street_hint = COALESCE(?6, street_hint),
-           city_hint = COALESCE(?7, city_hint),
-           stopped_sharing_at = NULL,
-           updated_at = datetime('now')
-       WHERE id = ?5`,
-      [
-        lat,
-        lng,
-        Number.isFinite(Number(accuracy)) ? Number(accuracy) : null,
-        body?.consent_text_version || FIELD_CONSENT_TEXT_VERSION,
-        sessionId,
-        streetHint,
-        cityHint,
-      ]
-    ).run();
+    const baseParams = [
+      lat,
+      lng,
+      Number.isFinite(Number(accuracy)) ? Number(accuracy) : null,
+      body?.consent_text_version || FIELD_CONSENT_TEXT_VERSION,
+      sessionId,
+      streetHint,
+      cityHint,
+    ];
+
+    try {
+      await buildStatement(
+        db,
+        `UPDATE ${table}
+         SET sharing_enabled = 1,
+             latest_lat = ?1,
+             latest_lng = ?2,
+             latest_accuracy_m = ?3,
+             latest_location_at = datetime('now'),
+             consent_text_version = ?4,
+             street_hint = COALESCE(?6, street_hint),
+             city_hint = COALESCE(?7, city_hint),
+             stopped_sharing_at = NULL,
+             updated_at = datetime('now')
+         WHERE id = ?5`,
+        baseParams
+      ).run();
+    } catch (updateErr) {
+      const msg = String(updateErr?.message || updateErr || '');
+      const missingHintColumn = msg.includes('no such column: street_hint') || msg.includes('no such column: city_hint');
+      if (!missingHintColumn) throw updateErr;
+
+      // Drift-safe fallback for environments where hint columns were not created yet.
+      await buildStatement(
+        db,
+        `UPDATE ${table}
+         SET sharing_enabled = 1,
+             latest_lat = ?1,
+             latest_lng = ?2,
+             latest_accuracy_m = ?3,
+             latest_location_at = datetime('now'),
+             consent_text_version = ?4,
+             stopped_sharing_at = NULL,
+             updated_at = datetime('now')
+         WHERE id = ?5`,
+        baseParams.slice(0, 5)
+      ).run();
+    }
     const updated = await buildStatement(db, `SELECT * FROM ${table} WHERE id = ?1`, [sessionId]).first();
     return ctx.jsonResponse({ ok: true, session: updated }, 200, ctx.allowedOrigin);
   } catch (err) {
     if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
-    console.error('/field-sessions/:id/location error', err);
-    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    console.error('/field-sessions/:id/location error', { status, error: String(err?.message || err) });
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, status, ctx.allowedOrigin);
+  }
+});
+
+router.get('/field-sessions/:id/nearby-address', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const email = (auth.email || '').trim().toLowerCase();
+    if (!email) {
+      return ctx.jsonResponse({ ok: false, error: 'Authenticated email required' }, 401, ctx.allowedOrigin);
+    }
+
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+
+    const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
+    if (!Number.isFinite(sessionId)) {
+      return ctx.jsonResponse({ ok: false, error: 'valid session id required' }, 400, ctx.allowedOrigin);
+    }
+
+    const session = await getFieldSessionForOwner(db, sessionId, email);
+    if (!session) {
+      return ctx.jsonResponse({ ok: false, error: 'field session not found' }, 404, ctx.allowedOrigin);
+    }
+
+    const lat = Number(session.latest_lat);
+    const lng = Number(session.latest_lng);
+    const streetHintRaw = (session.street_hint || '').trim();
+    const cityHint = (session.city_hint || '').trim();
+
+    const hintNumberMatch = streetHintRaw.match(/^(\d{1,6})\s+/);
+    const hintHouseNumber = hintNumberMatch ? Number(hintNumberMatch[1]) : null;
+    const streetToken = streetHintRaw
+      .replace(/^\d{1,6}\s+/, '')
+      .replace(/\b(street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd|court|ct|place|pl)\b/gi, '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .find(part => part.length >= 3) || null;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return ctx.jsonResponse({ ok: true, nearby_address: null, reason: 'no_location' }, 200, ctx.allowedOrigin);
+    }
+
+    const addrTable = await resolveTableOptional(env, ['voters_addr_norm', 'voters_addr', 'voter_addresses']);
+    if (!addrTable) {
+      return ctx.jsonResponse({ ok: true, nearby_address: null, reason: 'address_table_missing' }, 200, ctx.allowedOrigin);
+    }
+
+    const addrColumns = await getTableColumns(env, addrTable);
+    const hasCoords = addrColumns.includes('lat') && addrColumns.includes('lng');
+
+    const getStreetFallback = async () => {
+      if (!streetToken) return null;
+      const fallback = await buildStatement(
+        db,
+        `SELECT
+           COALESCE(addr1, '') AS address,
+           COALESCE(city, '') AS city,
+           COALESCE(zip, '') AS zip,
+           CASE
+             WHEN INSTR(addr1, ' ') > 1 THEN ABS(CAST(SUBSTR(addr1, 1, INSTR(addr1, ' ') - 1) AS INTEGER) - ?3)
+             ELSE 999999
+           END AS number_gap
+         FROM ${addrTable}
+         WHERE UPPER(addr1) LIKE '%' || UPPER(?1) || '%'
+           AND (?2 = '' OR UPPER(city) = UPPER(?2))
+         ORDER BY CASE WHEN ?3 IS NULL THEN 0 ELSE number_gap END ASC, addr1 ASC
+         LIMIT 1`,
+        [streetToken, cityHint || '', hintHouseNumber]
+      ).first();
+      if (!fallback) return null;
+      return [fallback.address, fallback.city, fallback.zip].filter(Boolean).join(', ');
+    };
+
+    if (!hasCoords) {
+      const streetFallback = await getStreetFallback();
+      return ctx.jsonResponse(
+        {
+          ok: true,
+          nearby_address: streetFallback,
+          reason: streetFallback ? 'same_street_fallback' : 'address_coords_missing',
+        },
+        200,
+        ctx.allowedOrigin
+      );
+    }
+
+    const radiusFeet = 200;
+    const radiusMeters = radiusFeet * 0.3048;
+    const latMetersPerDegree = 111320;
+    const lngMetersPerDegree = Math.max(1e-6, 111320 * Math.cos((lat * Math.PI) / 180));
+    const latDelta = radiusMeters / latMetersPerDegree;
+    const lngDelta = radiusMeters / lngMetersPerDegree;
+    const nearest = await buildStatement(
+      db,
+      `SELECT
+         COALESCE(addr1, '') AS address,
+         COALESCE(city, '') AS city,
+         COALESCE(zip, '') AS zip,
+         (((lat - ?5) * ?7) * ((lat - ?5) * ?7) + ((lng - ?6) * ?8) * ((lng - ?6) * ?8)) AS distance2_m
+       FROM ${addrTable}
+       WHERE lat IS NOT NULL
+         AND lng IS NOT NULL
+         AND lat BETWEEN ?1 AND ?2
+         AND lng BETWEEN ?3 AND ?4
+       ORDER BY distance2_m ASC
+       LIMIT 1`,
+      [lat - latDelta, lat + latDelta, lng - lngDelta, lng + lngDelta, lat, lng, latMetersPerDegree, lngMetersPerDegree]
+    ).first();
+
+    if (!nearest) {
+      const streetFallback = await getStreetFallback();
+      return ctx.jsonResponse(
+        {
+          ok: true,
+          nearby_address: streetFallback,
+          reason: streetFallback ? 'same_street_fallback' : 'no_nearby_match',
+        },
+        200,
+        ctx.allowedOrigin
+      );
+    }
+
+    const distanceMeters = Math.sqrt(Number(nearest.distance2_m));
+    if (!Number.isFinite(distanceMeters) || distanceMeters > radiusMeters) {
+      const streetFallback = await getStreetFallback();
+      return ctx.jsonResponse(
+        {
+          ok: true,
+          nearby_address: streetFallback,
+          reason: streetFallback ? 'same_street_fallback' : 'outside_radius',
+          nearest_distance_ft: Number.isFinite(distanceMeters) ? Math.round(distanceMeters * 3.28084) : null,
+        },
+        200,
+        ctx.allowedOrigin
+      );
+    }
+
+    const nearbyAddress = [nearest.address, nearest.city, nearest.zip].filter(Boolean).join(', ');
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        nearby_address: nearbyAddress || null,
+        nearest_distance_ft: Math.round(distanceMeters * 3.28084),
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    console.error('/field-sessions/:id/nearby-address error', { status, error: String(err?.message || err) });
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, status, ctx.allowedOrigin);
+  }
+});
+
+router.post('/field-sessions/:id/nearby-address-hint', async (request, env, ctx) => {
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    throw err;
+  }
+
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    const email = (auth.email || '').trim().toLowerCase();
+    if (!email) {
+      return ctx.jsonResponse({ ok: false, error: 'Authenticated email required' }, 401, ctx.allowedOrigin);
+    }
+
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+
+    const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
+    if (!Number.isFinite(sessionId)) {
+      return ctx.jsonResponse({ ok: false, error: 'valid session id required' }, 400, ctx.allowedOrigin);
+    }
+
+    const session = await getFieldSessionForOwner(db, sessionId, email);
+    if (!session) {
+      return ctx.jsonResponse({ ok: false, error: 'field session not found' }, 404, ctx.allowedOrigin);
+    }
+
+    const userAddress = String(body?.address || '').trim();
+    if (!userAddress) {
+      return ctx.jsonResponse({ ok: false, error: 'address is required' }, 400, ctx.allowedOrigin);
+    }
+    if (userAddress.length > 140) {
+      return ctx.jsonResponse({ ok: false, error: 'address is too long' }, 400, ctx.allowedOrigin);
+    }
+
+    const cityHint = String(body?.city || session.city_hint || '').trim();
+    const query = cityHint ? `${userAddress}, ${cityHint}` : userAddress;
+    const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&q=${encodeURIComponent(query)}`;
+    const geocodeRes = await fetch(url, {
+      headers: {
+        'Accept-Language': 'en',
+        'User-Agent': 'grassrootsmvt-field-support/1.0',
+      },
+    });
+
+    if (!geocodeRes.ok) {
+      return ctx.jsonResponse({ ok: false, error: `geocode_failed_http_${geocodeRes.status}` }, 502, ctx.allowedOrigin);
+    }
+
+    const geocodeRows = await geocodeRes.json();
+    const match = Array.isArray(geocodeRows) ? geocodeRows[0] : null;
+    const lat = Number(match?.lat);
+    const lng = Number(match?.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return ctx.jsonResponse({ ok: true, geocoded: false, updated_rows: 0 }, 200, ctx.allowedOrigin);
+    }
+
+    const addr = match?.address || {};
+    const road = addr.road || addr.pedestrian || addr.footway || addr.path || null;
+    const city = addr.city || addr.town || addr.village || addr.hamlet || addr.county || cityHint || null;
+    const houseNumber = addr.house_number || null;
+
+    const sessionsTable = await resolveTable(env, ['field_sessions']);
+    const streetHint = road ? [houseNumber, road].filter(Boolean).join(' ') : userAddress;
+    await buildStatement(
+      db,
+      `UPDATE ${sessionsTable}
+       SET street_hint = COALESCE(?1, street_hint),
+           city_hint = COALESCE(?2, city_hint),
+           updated_at = datetime('now')
+       WHERE id = ?3`,
+      [streetHint, city, sessionId]
+    ).run();
+
+    let updatedRows = 0;
+    const addrTable = await resolveTableOptional(env, ['voters_addr_norm', 'voters_addr', 'voter_addresses']);
+    if (addrTable) {
+      const cols = await getTableColumns(env, addrTable);
+      if (cols.includes('lat') && cols.includes('lng')) {
+        const updateResult = await buildStatement(
+          db,
+          `UPDATE ${addrTable}
+           SET lat = ?1,
+               lng = ?2,
+               geocoded_at = datetime('now')
+           WHERE UPPER(addr1) = UPPER(?3)
+             AND (?4 = '' OR UPPER(city) = UPPER(?4))
+             AND (lat IS NULL OR lng IS NULL)`,
+          [lat, lng, userAddress, cityHint || '']
+        ).run();
+        updatedRows = Number(updateResult?.meta?.changes || 0);
+      }
+    }
+
+    const updatedSession = await buildStatement(db, `SELECT * FROM ${sessionsTable} WHERE id = ?1`, [sessionId]).first();
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        geocoded: true,
+        lat,
+        lng,
+        street_hint: streetHint,
+        city_hint: city,
+        updated_rows: updatedRows,
+        session: updatedSession,
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    console.error('/field-sessions/:id/nearby-address-hint error', { status, error: String(err?.message || err) });
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, status, ctx.allowedOrigin);
   }
 });
 
@@ -3261,6 +3561,135 @@ router.get('/admin/field-sessions/:id/nearby-voters', async (request, env, ctx) 
     if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
     console.error('/admin/field-sessions/:id/nearby-voters error', err);
     return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
+  }
+});
+
+router.post('/admin/field-sessions/:id/geocode-street', async (request, env, ctx) => {
+  let body = {};
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (!(err instanceof BadRequestError)) throw err;
+  }
+
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+    const scope = getSupportScope(auth.email, env);
+    const db = getDb(env);
+    if (!db) return missingTableResponse('field_sessions', ctx.allowedOrigin);
+
+    const sessionsTable = await resolveTable(env, ['field_sessions']);
+    const addrTable = await resolveTable(env, ['voters_addr_norm', 'voters_addr', 'voter_addresses']);
+    const addrColumns = await getTableColumns(env, addrTable);
+    if (!addrColumns.includes('lat') || !addrColumns.includes('lng')) {
+      return ctx.jsonResponse({ ok: false, error: 'address table does not support coordinates' }, 400, ctx.allowedOrigin);
+    }
+
+    const sessionId = Number(getPathSegmentAfter(new URL(request.url).pathname, 'field-sessions'));
+    const session = await buildStatement(db, `SELECT * FROM ${sessionsTable} WHERE id = ?1`, [sessionId]).first();
+    if (!session) return ctx.jsonResponse({ ok: false, error: 'field session not found' }, 404, ctx.allowedOrigin);
+    if (!hasTeamAccess(scope, session.team_id)) {
+      return ctx.jsonResponse({ ok: false, error: 'team scope denied' }, 403, ctx.allowedOrigin);
+    }
+
+    const streetRaw = String(session.street_hint || '').trim();
+    const cityHint = String(session.city_hint || '').trim();
+    if (!streetRaw) {
+      return ctx.jsonResponse({ ok: false, error: 'street hint is required on session' }, 400, ctx.allowedOrigin);
+    }
+
+    const streetToken = streetRaw
+      .replace(/^\d{1,6}\s+/, '')
+      .replace(/\b(street|st|avenue|ave|road|rd|drive|dr|lane|ln|boulevard|blvd|court|ct|place|pl)\b/gi, '')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .find(part => part.length >= 3);
+
+    if (!streetToken) {
+      return ctx.jsonResponse({ ok: false, error: 'unable to parse street token' }, 400, ctx.allowedOrigin);
+    }
+
+    const requestedLimit = Number(body?.limit);
+    const limit = Number.isFinite(requestedLimit) ? Math.min(Math.max(Math.floor(requestedLimit), 1), 3) : 2;
+
+    const candidatesResult = await buildStatement(
+      db,
+      `SELECT voter_id, COALESCE(addr1, '') AS addr1, COALESCE(city, '') AS city, COALESCE(state, 'WY') AS state
+       FROM ${addrTable}
+       WHERE UPPER(addr1) LIKE '%' || UPPER(?1) || '%'
+         AND (?2 = '' OR UPPER(city) = UPPER(?2))
+         AND (lat IS NULL OR lng IS NULL)
+       ORDER BY addr1 ASC
+       LIMIT ${limit}`,
+      [streetToken, cityHint]
+    ).all();
+
+    const candidates = candidatesResult.results || [];
+    if (!candidates.length) {
+      return ctx.jsonResponse({ ok: true, attempted: 0, updated: 0, failed: 0, message: 'No unresolved street rows found' }, 200, ctx.allowedOrigin);
+    }
+
+    let attempted = 0;
+    let updated = 0;
+    let failed = 0;
+
+    for (const row of candidates) {
+      attempted += 1;
+      const query = `${row.addr1}, ${row.city || cityHint || ''}, ${row.state || 'WY'}`.replace(/\s+,/g, ',').replace(/,+/g, ',').trim();
+      try {
+        const geoUrl = `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&addressdetails=1&q=${encodeURIComponent(query)}`;
+        const geoRes = await fetch(geoUrl, {
+          headers: {
+            'Accept-Language': 'en',
+            'User-Agent': 'grassrootsmvt-admin-geocoder/1.0',
+          },
+        });
+        if (!geoRes.ok) {
+          failed += 1;
+          continue;
+        }
+        const geoRows = await geoRes.json();
+        const match = Array.isArray(geoRows) ? geoRows[0] : null;
+        const lat = Number(match?.lat);
+        const lng = Number(match?.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+          failed += 1;
+          continue;
+        }
+        await buildStatement(
+          db,
+          `UPDATE ${addrTable}
+           SET lat = ?1,
+               lng = ?2,
+               geocoded_at = datetime('now')
+           WHERE voter_id = ?3`,
+          [lat, lng, row.voter_id]
+        ).run();
+        updated += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        attempted,
+        updated,
+        failed,
+        street_token: streetToken,
+        city: cityHint || null,
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err instanceof DependencyMissingError) return missingTableResponse(err.table, ctx.allowedOrigin);
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    console.error('/admin/field-sessions/:id/geocode-street error', { status, error: String(err?.message || err) });
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, status, ctx.allowedOrigin);
   }
 });
 
@@ -3726,6 +4155,90 @@ router.get('/admin/stats', async (request, env, ctx) => {
       500,
       ctx.allowedOrigin
     );
+  }
+});
+
+router.get('/admin/call-activity', async (request, env, ctx) => {
+  try {
+    const auth = await ensureAuth(request, env, ctx.config);
+    requireAdmin(auth.email, env);
+
+    const db = getDb(env);
+    if (!db) {
+      return missingTableResponse('call_activity', ctx.allowedOrigin);
+    }
+
+    const url = new URL(request.url);
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 500);
+    const offset = parseInt(url.searchParams.get('offset') || '0');
+    const resultFilter = url.searchParams.get('call_result'); // e.g. 'Reached'
+    const followupFilter = url.searchParams.get('followup_needed'); // 'true' or 'false'
+    const volunteerFilter = url.searchParams.get('volunteer');
+
+    const callTable = await resolveTable(env, ['call_activity', 'call_log', 'calls']);
+
+    const conditions = [];
+    const params = [];
+    let paramIndex = 1;
+
+    if (resultFilter) {
+      conditions.push(`call_result = ?${paramIndex++}`);
+      params.push(resultFilter);
+    }
+    if (followupFilter === 'true') {
+      conditions.push(`followup_needed = 1`);
+    } else if (followupFilter === 'false') {
+      conditions.push(`(followup_needed = 0 OR followup_needed IS NULL)`);
+    }
+    if (volunteerFilter) {
+      conditions.push(`volunteer_email = ?${paramIndex++}`);
+      params.push(volunteerFilter);
+    }
+
+    const whereClause = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const rows = await buildStatement(db, `
+      SELECT id, voter_id, volunteer_email, call_result, notes,
+             pitch_used, pulse_opt_in, followup_needed, followup_date, created_at
+      FROM ${callTable}
+      ${whereClause}
+      ORDER BY created_at DESC
+      LIMIT ?${paramIndex++} OFFSET ?${paramIndex++}
+    `, [...params, limit, offset]).all();
+
+    const total = await buildStatement(db, `
+      SELECT COUNT(*) as count FROM ${callTable} ${whereClause}
+    `, params).first();
+
+    const summary = await buildStatement(db, `
+      SELECT call_result, COUNT(*) as count
+      FROM ${callTable}
+      WHERE call_result IS NOT NULL
+      GROUP BY call_result
+      ORDER BY count DESC
+    `).all();
+
+    return ctx.jsonResponse(
+      {
+        ok: true,
+        calls: rows?.results || [],
+        total: total?.count || 0,
+        limit,
+        offset,
+        by_result: summary?.results || [],
+      },
+      200,
+      ctx.allowedOrigin
+    );
+  } catch (err) {
+    if (err?.status === 403) {
+      return ctx.jsonResponse({ ok: false, error: 'Admin access required' }, 403, ctx.allowedOrigin);
+    }
+    if (err instanceof DependencyMissingError) {
+      return missingTableResponse(err.table, ctx.allowedOrigin);
+    }
+    console.error('/admin/call-activity error', err);
+    return ctx.jsonResponse({ ok: false, error: String(err?.message || err) }, 500, ctx.allowedOrigin);
   }
 });
 

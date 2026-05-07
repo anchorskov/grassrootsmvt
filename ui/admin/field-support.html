@@ -203,6 +203,9 @@
                    &mdash; <button class="secondary" type="button" style="padding:.3rem .6rem;font-size:.82rem"
                      data-help="Load nearby voters for this volunteer's current street hint."
                      data-load-nearby="${session.id}">Load voters on this street</button>
+                   <button class="secondary" type="button" style="padding:.3rem .6rem;font-size:.82rem"
+                     data-help="Geocode up to 3 unresolved voter addresses on this street (admin tool)."
+                     data-geocode-street="${session.id}">Geocode street (max 3)</button>
                  </p>`
               : `<p class="muted" style="font-size:.9rem">No street hint yet — field volunteer must share location first.</p>`
             }
@@ -334,6 +337,20 @@
       }
     }
 
+    async function geocodeStreet(sessionId) {
+      try {
+        setStatus('Geocoding up to 3 unresolved street addresses...', 'warn');
+        const data = await window.apiPost(`admin/field-sessions/${sessionId}/geocode-street`, { limit: 3 });
+        const attempted = Number(data?.attempted || 0);
+        const updated = Number(data?.updated || 0);
+        const failed = Number(data?.failed || 0);
+        setStatus(`Street geocode run complete: attempted ${attempted}, updated ${updated}, failed ${failed}.`, updated > 0 ? 'ok' : 'warn');
+        await loadNearbyVoters(sessionId);
+      } catch (err) {
+        setStatus(`Unable to geocode street: ${err.message}`, 'error');
+      }
+    }
+
     async function addTask(sessionId, taskType, prefillTitle = '', prefillNotes = '') {
       const label = taskType === 'next_stop' ? 'confirmed next stop' : 'call-ahead task';
       const title = prompt(`Enter ${label}`, prefillTitle);
@@ -445,6 +462,11 @@
       const nearbyButton = event.target.closest('[data-load-nearby]');
       if (nearbyButton) {
         loadNearbyVoters(nearbyButton.dataset.loadNearby);
+        return;
+      }
+      const geocodeButton = event.target.closest('[data-geocode-street]');
+      if (geocodeButton) {
+        geocodeStreet(geocodeButton.dataset.geocodeStreet);
         return;
       }
       const quickCall = event.target.closest('[data-quick-call]');

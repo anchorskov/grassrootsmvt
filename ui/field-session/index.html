@@ -85,10 +85,12 @@
       <dt>Session</dt><dd id="sessionId">None</dd>
       <dt>Sharing</dt><dd id="sharingState">Off</dd>
       <dt>Address</dt><dd id="resolvedAddress">—</dd>
+      <dt>Nearby address</dt><dd id="nearbyAddress">—</dd>
       <dt>Coordinates</dt><dd id="coordinates">—</dd>
       <dt>Last update</dt><dd id="lastUpdate">None</dd>
       <dt>Accuracy</dt><dd id="accuracy">None</dd>
     </dl>
+    <button type="button" class="button secondary" id="addNearbyAddressBtn" style="display:none;margin-top:.5rem">Add nearby address</button>
     <p id="geoDebug" class="refresh-hint"></p>
   </div>
 
@@ -115,6 +117,8 @@
       lastUpdate: document.getElementById('lastUpdate'),
       accuracy: document.getElementById('accuracy'),
       resolvedAddress: document.getElementById('resolvedAddress'),
+      nearbyAddress: document.getElementById('nearbyAddress'),
+      addNearbyAddressBtn: document.getElementById('addNearbyAddressBtn'),
       coordinates: document.getElementById('coordinates'),
       geoDebug: document.getElementById('geoDebug'),
       tasksCard: document.getElementById('tasksCard'),
@@ -122,6 +126,8 @@
       taskRefreshHint: document.getElementById('taskRefreshHint'),
     };
     let session = null;
+    let nearbyAddress = null;
+    let nearbyAddressState = null;
     let watchId = null;
     let taskPollTimer = null;
 
@@ -185,6 +191,29 @@
       els.resolvedAddress.textContent = sharing
         ? (street && city ? `${street}, ${city}` : street || city || 'Resolving…')
         : '—';
+      if (!sharing) {
+        els.nearbyAddress.textContent = '—';
+      } else if (nearbyAddress) {
+        els.nearbyAddress.textContent = nearbyAddress;
+      } else if (nearbyAddressState === 'outside_radius') {
+        els.nearbyAddress.textContent = 'No known address within 200 ft';
+      } else if (nearbyAddressState === 'no_nearby_match') {
+        els.nearbyAddress.textContent = 'No nearby geocoded address found';
+      } else if (nearbyAddressState === 'same_street_fallback') {
+        els.nearbyAddress.textContent = nearbyAddress || 'Same street fallback found';
+      } else if (nearbyAddressState === 'address_coords_missing') {
+        els.nearbyAddress.textContent = 'Address geocodes not loaded yet';
+      } else {
+        els.nearbyAddress.textContent = 'Searching nearby...';
+      }
+
+      const shouldPromptManualAddress = sharing && (
+        nearbyAddressState === 'address_coords_missing' ||
+        nearbyAddressState === 'no_nearby_match' ||
+        nearbyAddressState === 'outside_radius'
+      );
+      els.addNearbyAddressBtn.style.display = shouldPromptManualAddress ? '' : 'none';
+      els.addNearbyAddressBtn.disabled = !sharing;
       els.coordinates.textContent = sharing
         ? (formatCoordinates(session?.latest_lat, session?.latest_lng) || 'Waiting for location...')
         : '—';
@@ -208,10 +237,37 @@
       }
     }
 
+    async function loadNearbyAddress() {
+      if (!session?.id || !session?.sharing_enabled) {
+        nearbyAddress = null;
+        nearbyAddressState = null;
+        return;
+      }
+      try {
+        const data = await window.apiGet(`field-sessions/${session.id}/nearby-address`);
+        if (data?.nearby_address) {
+          const feet = Number(data?.nearest_distance_ft);
+          if (data?.reason === 'same_street_fallback') {
+            nearbyAddress = `${data.nearby_address} (same street)`;
+          } else {
+            nearbyAddress = Number.isFinite(feet) ? `${data.nearby_address} (~${feet} ft)` : data.nearby_address;
+          }
+          nearbyAddressState = 'ok';
+        } else {
+          nearbyAddress = null;
+          nearbyAddressState = data?.reason || 'no_nearby_match';
+        }
+      } catch {
+        nearbyAddress = null;
+        nearbyAddressState = 'error';
+      }
+    }
+
     async function loadSession() {
       try {
         const data = await window.apiGet('field-sessions/me');
         session = data?.session || null;
+        await loadNearbyAddress();
         render();
         renderTasks(data?.tasks || []);
         schedulePoll();
@@ -251,7 +307,7 @@
     async function reverseGeocode(lat, lng) {
       const coords = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
       try {
-        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`;
+        const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`;
         window.__lastReverseGeocode = { at: new Date().toISOString(), coords, url };
         const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
         if (!res.ok) {
@@ -260,7 +316,9 @@
         }
         const data = await res.json();
         const addr = data.address || {};
-        const street = addr.road || addr.pedestrian || addr.footway || addr.path || null;
+        const road = addr.road || addr.pedestrian || addr.footway || addr.path || null;
+        const houseNumber = addr.house_number || null;
+        const street = road ? [houseNumber, road].filter(Boolean).join(' ') : null;
         const city = addr.city || addr.town || addr.village || addr.hamlet || addr.county || null;
         window.__lastReverseGeocode.result = data.display_name || `${street || ''} ${city || ''}`.trim() || 'no address fields';
         return { street_hint: street, city_hint: city };
@@ -288,6 +346,7 @@
       };
       const data = await window.apiPost(`field-sessions/${session.id}/location`, payload);
       session = data.session;
+      await loadNearbyAddress();
       render();
       setStatus(`Location shared (${lat.toFixed(6)}, ${lng.toFixed(6)}).`, 'ok');
     }
@@ -328,10 +387,37 @@
         if (!session?.id) return;
         const data = await window.apiPost(`field-sessions/${session.id}/stop-sharing`, {});
         session = data.session;
+        nearbyAddress = null;
+        nearbyAddressState = null;
         render();
         setStatus('Sharing stopped and latest location cleared.', 'ok');
       } catch (err) {
         setStatus(`Unable to stop sharing: ${err.message}`, 'error');
+      }
+    }
+
+    async function submitNearbyAddressHint() {
+      if (!session?.id) return;
+      const entered = window.prompt('Enter a nearby address (example: 5685 Hanly St)');
+      const address = String(entered || '').trim();
+      if (!address) return;
+      try {
+        setStatus('Saving nearby address and geocoding...', 'warn');
+        const data = await window.apiPost(`field-sessions/${session.id}/nearby-address-hint`, {
+          address,
+          city: session?.city_hint || '',
+        });
+        session = data?.session || session;
+        await loadNearbyAddress();
+        render();
+        if (data?.geocoded) {
+          const count = Number(data?.updated_rows || 0);
+          setStatus(`Nearby address saved. Updated ${count} voter address geocode row(s).`, 'ok');
+        } else {
+          setStatus('Address saved, but geocode match was not found.', 'warn');
+        }
+      } catch (err) {
+        setStatus(`Unable to save nearby address: ${err.message}`, 'error');
       }
     }
 
@@ -355,6 +441,7 @@
     els.live.addEventListener('click', startLive);
     els.stop.addEventListener('click', stopSharing);
     els.end.addEventListener('click', endSession);
+    els.addNearbyAddressBtn.addEventListener('click', submitNearbyAddressHint);
     window.addEventListener('pagehide', () => { stopWatch(); clearTimeout(taskPollTimer); });
     loadSession();
   </script>

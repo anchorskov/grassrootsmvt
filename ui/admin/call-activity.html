@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Call Activity — Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      margin: 0;
+      background: #f8fafc;
+    }
+    .header {
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      color: white;
+      padding: 1rem 1.5rem;
+    }
+    .header h1 { margin: 0; font-size: 1.4rem; font-weight: 700; }
+    .header-sub { display: flex; gap: 1rem; align-items: center; margin-top: 0.6rem; flex-wrap: wrap; }
+    .back-link { color: #94a3b8; text-decoration: none; font-size: 0.9rem; }
+    .back-link:hover { color: white; }
+
+    .content { max-width: 1400px; margin: 0 auto; padding: 1.5rem; }
+
+    .stats-row { display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
+    .stat-card {
+      background: white;
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+      min-width: 120px;
+      flex: 1;
+    }
+    .stat-card .label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-card .value { font-size: 1.6rem; font-weight: 700; color: #0f172a; margin-top: 0.2rem; }
+
+    .filters {
+      background: white;
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+      margin-bottom: 1.5rem;
+      display: flex;
+      gap: 1rem;
+      align-items: flex-end;
+      flex-wrap: wrap;
+    }
+    .filter-group { display: flex; flex-direction: column; gap: 0.3rem; }
+    .filter-group label { font-size: 0.8rem; font-weight: 600; color: #374151; }
+    .filter-group select, .filter-group input {
+      padding: 0.45rem 0.75rem;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      min-width: 160px;
+    }
+    .btn {
+      padding: 0.5rem 1.1rem;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .btn-primary { background: #0ea5e9; color: white; }
+    .btn-primary:hover { background: #0284c7; }
+    .btn-ghost { background: #f1f5f9; color: #374151; }
+    .btn-ghost:hover { background: #e2e8f0; }
+
+    .table-card {
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+      overflow: hidden;
+    }
+    .table-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #e5e7eb;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .table-header h2 { margin: 0; font-size: 1rem; font-weight: 600; color: #0f172a; }
+    .record-count { font-size: 0.85rem; color: #64748b; }
+
+    table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    th {
+      background: #f8fafc;
+      padding: 0.6rem 1rem;
+      text-align: left;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #64748b;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    td { padding: 0.65rem 1rem; border-bottom: 1px solid #f1f5f9; color: #1e293b; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8fafc; }
+
+    .badge {
+      display: inline-block;
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .badge-reached    { background: #dcfce7; color: #166534; }
+    .badge-not-home   { background: #fef9c3; color: #713f12; }
+    .badge-dnc        { background: #fee2e2; color: #991b1b; }
+    .badge-followup   { background: #e0e7ff; color: #3730a3; }
+    .badge-other      { background: #f1f5f9; color: #475569; }
+
+    .pulse-yes { color: #16a34a; font-weight: 600; }
+    .followup-yes { color: #7c3aed; font-weight: 600; }
+
+    .pagination {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1.25rem;
+      border-top: 1px solid #e5e7eb;
+      font-size: 0.85rem;
+      color: #64748b;
+    }
+    .pagination-btns { display: flex; gap: 0.5rem; }
+
+    .empty { text-align: center; padding: 3rem 1rem; color: #94a3b8; }
+    .loading { text-align: center; padding: 3rem 1rem; color: #64748b; }
+    .error-msg { background: #fef2f2; color: #991b1b; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>📞 Phone Call Activity</h1>
+  <div class="header-sub">
+    <a href="/admin/" class="back-link">← Admin Dashboard</a>
+    <span id="admin-email" style="font-size:0.85rem; color:#94a3b8;"></span>
+  </div>
+</div>
+
+<div class="content">
+
+  <div id="error-banner" class="error-msg" style="display:none;"></div>
+
+  <!-- Summary stats -->
+  <div class="stats-row" id="stats-row">
+    <div class="stat-card">
+      <div class="label">Total Calls</div>
+      <div class="value" id="stat-total">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Reached</div>
+      <div class="value" id="stat-reached" style="color:#16a34a;">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Not Home</div>
+      <div class="value" id="stat-not-home" style="color:#ca8a04;">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Do Not Contact</div>
+      <div class="value" id="stat-dnc" style="color:#dc2626;">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Follow-Up</div>
+      <div class="value" id="stat-followup" style="color:#7c3aed;">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="label">Pulse Opt-Ins</div>
+      <div class="value" id="stat-pulse" style="color:#0ea5e9;">—</div>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="filters">
+    <div class="filter-group">
+      <label>Call Result</label>
+      <select id="filter-result">
+        <option value="">All Results</option>
+        <option value="Reached">Reached</option>
+        <option value="Not Home">Not Home</option>
+        <option value="Do Not Contact">Do Not Contact</option>
+        <option value="Follow-Up">Follow-Up</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Follow-Up Needed</label>
+      <select id="filter-followup">
+        <option value="">All</option>
+        <option value="true">Yes</option>
+        <option value="false">No</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <label>Volunteer Email</label>
+      <input type="text" id="filter-volunteer" placeholder="volunteer@example.com">
+    </div>
+    <button class="btn btn-primary" id="apply-filters">Apply</button>
+    <button class="btn btn-ghost" id="clear-filters">Clear</button>
+  </div>
+
+  <!-- Table -->
+  <div class="table-card">
+    <div class="table-header">
+      <h2>Call Records</h2>
+      <span class="record-count" id="record-count"></span>
+    </div>
+    <div id="table-body">
+      <div class="loading">Loading call activity…</div>
+    </div>
+    <div class="pagination" id="pagination" style="display:none;">
+      <span id="page-info"></span>
+      <div class="pagination-btns">
+        <button class="btn btn-ghost" id="btn-prev" disabled>← Prev</button>
+        <button class="btn btn-ghost" id="btn-next" disabled>Next →</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="/config/environments.js"></script>
+<script src="/src/apiClient.v2.js?v=2025-10-30a"></script>
+<script src="/shared/authGlobal.js"></script>
+<script>
+  const PAGE_SIZE = 50;
+  let currentOffset = 0;
+  let totalRecords = 0;
+
+  function getBaseUrl() {
+    return (window.GRASSROOTS_CONFIG && window.GRASSROOTS_CONFIG.apiBase) || '';
+  }
+
+  function getToken() {
+    return localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token') || '';
+  }
+
+  function resultBadge(result) {
+    if (!result) return '<span class="badge badge-other">—</span>';
+    const r = result.toLowerCase();
+    if (r === 'reached') return `<span class="badge badge-reached">Reached</span>`;
+    if (r === 'not home') return `<span class="badge badge-not-home">Not Home</span>`;
+    if (r.includes('not contact') || r.includes('dnc')) return `<span class="badge badge-dnc">DNC</span>`;
+    if (r.includes('follow')) return `<span class="badge badge-followup">Follow-Up</span>`;
+    return `<span class="badge badge-other">${result}</span>`;
+  }
+
+  function buildQuery() {
+    const params = new URLSearchParams();
+    params.set('limit', PAGE_SIZE);
+    params.set('offset', currentOffset);
+    const result = document.getElementById('filter-result').value;
+    const followup = document.getElementById('filter-followup').value;
+    const volunteer = document.getElementById('filter-volunteer').value.trim();
+    if (result) params.set('call_result', result);
+    if (followup) params.set('followup_needed', followup);
+    if (volunteer) params.set('volunteer', volunteer);
+    return params.toString();
+  }
+
+  async function loadData() {
+    document.getElementById('table-body').innerHTML = '<div class="loading">Loading…</div>';
+    document.getElementById('pagination').style.display = 'none';
+    document.getElementById('error-banner').style.display = 'none';
+
+    try {
+      const token = getToken();
+      const res = await fetch(`${getBaseUrl()}/admin/call-activity?${buildQuery()}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      const data = await res.json();
+
+      if (!data.ok) {
+        showError(data.error || 'Failed to load call activity');
+        document.getElementById('table-body').innerHTML = '<div class="empty">No data available.</div>';
+        return;
+      }
+
+      totalRecords = data.total || 0;
+      renderStats(data);
+      renderTable(data.calls || []);
+      renderPagination();
+    } catch (err) {
+      showError('Network error: ' + err.message);
+      document.getElementById('table-body').innerHTML = '<div class="empty">Could not load records.</div>';
+    }
+  }
+
+  async function loadPulseCount() {
+    try {
+      const token = getToken();
+      const res = await fetch(`${getBaseUrl()}/admin/call-activity?limit=500&offset=0`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const pulseCount = (data.calls || []).filter(c => c.pulse_opt_in == 1).length;
+        document.getElementById('stat-pulse').textContent = pulseCount;
+      }
+    } catch (_) {}
+  }
+
+  function renderStats(data) {
+    document.getElementById('stat-total').textContent = data.total ?? '—';
+    const byResult = {};
+    (data.by_result || []).forEach(r => { byResult[r.call_result] = r.count; });
+    document.getElementById('stat-reached').textContent = byResult['Reached'] ?? 0;
+    document.getElementById('stat-not-home').textContent = byResult['Not Home'] ?? 0;
+    document.getElementById('stat-dnc').textContent = byResult['Do Not Contact'] ?? 0;
+    document.getElementById('stat-followup').textContent = byResult['Follow-Up'] ?? 0;
+  }
+
+  function renderTable(calls) {
+    const count = totalRecords;
+    document.getElementById('record-count').textContent =
+      count === 1 ? '1 record' : `${count.toLocaleString()} records`;
+
+    if (!calls.length) {
+      document.getElementById('table-body').innerHTML = '<div class="empty">No call records match your filters.</div>';
+      return;
+    }
+
+    const rows = calls.map(c => {
+      const date = c.created_at ? new Date(c.created_at).toLocaleString() : '—';
+      const notes = c.notes ? `<span title="${c.notes.replace(/"/g, '&quot;')}">${c.notes.substring(0, 60)}${c.notes.length > 60 ? '…' : ''}</span>` : '—';
+      const pulse = c.pulse_opt_in == 1 ? '<span class="pulse-yes">Yes</span>' : 'No';
+      const followup = c.followup_needed == 1 ? `<span class="followup-yes">Yes${c.followup_date ? ' · ' + c.followup_date : ''}</span>` : 'No';
+      return `<tr>
+        <td>${c.voter_id || '—'}</td>
+        <td>${c.volunteer_email || '—'}</td>
+        <td>${resultBadge(c.call_result)}</td>
+        <td>${c.pitch_used || '—'}</td>
+        <td>${notes}</td>
+        <td>${pulse}</td>
+        <td>${followup}</td>
+        <td style="color:#64748b; font-size:0.8rem;">${date}</td>
+      </tr>`;
+    }).join('');
+
+    document.getElementById('table-body').innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Voter ID</th>
+            <th>Volunteer</th>
+            <th>Result</th>
+            <th>Pitch Used</th>
+            <th>Notes</th>
+            <th>Pulse Opt-In</th>
+            <th>Follow-Up</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+
+  function renderPagination() {
+    const pagination = document.getElementById('pagination');
+    const prevBtn = document.getElementById('btn-prev');
+    const nextBtn = document.getElementById('btn-next');
+    const pageInfo = document.getElementById('page-info');
+
+    const start = totalRecords === 0 ? 0 : currentOffset + 1;
+    const end = Math.min(currentOffset + PAGE_SIZE, totalRecords);
+    pageInfo.textContent = `${start}–${end} of ${totalRecords.toLocaleString()}`;
+
+    prevBtn.disabled = currentOffset === 0;
+    nextBtn.disabled = currentOffset + PAGE_SIZE >= totalRecords;
+    pagination.style.display = 'flex';
+  }
+
+  function showError(msg) {
+    const banner = document.getElementById('error-banner');
+    banner.textContent = msg;
+    banner.style.display = 'block';
+  }
+
+  document.getElementById('apply-filters').addEventListener('click', () => {
+    currentOffset = 0;
+    loadData();
+  });
+
+  document.getElementById('clear-filters').addEventListener('click', () => {
+    document.getElementById('filter-result').value = '';
+    document.getElementById('filter-followup').value = '';
+    document.getElementById('filter-volunteer').value = '';
+    currentOffset = 0;
+    loadData();
+  });
+
+  document.getElementById('btn-prev').addEventListener('click', () => {
+    currentOffset = Math.max(0, currentOffset - PAGE_SIZE);
+    loadData();
+  });
+
+  document.getElementById('btn-next').addEventListener('click', () => {
+    currentOffset += PAGE_SIZE;
+    loadData();
+  });
+
+  // Load on init
+  document.addEventListener('DOMContentLoaded', () => {
+    const token = getToken();
+    if (!token) {
+      showError('Not authenticated. Please log in.');
+      document.getElementById('table-body').innerHTML = '<div class="empty">Authentication required.</div>';
+      return;
+    }
+
+    // Show admin email if available
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      if (payload.email) document.getElementById('admin-email').textContent = payload.email;
+    } catch (_) {}
+
+    loadData();
+    loadPulseCount();
+  });
+</script>
+</body>
+</html>
