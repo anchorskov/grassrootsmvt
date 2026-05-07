@@ -245,25 +245,46 @@ npx wrangler d1 execute wy --env production --remote --config worker/wrangler.to
   --json > exports/YYYYMMDD_action_email_optins.json
 ```
 
-### 4c. Follow-ups needed (phone + canvass)
+### 4c. Follow-ups needed — with phone numbers
+
+Pulls voters flagged `ok_callback=1` from `voter_contacts`, plus `followup_needed=1` from
+`call_activity` and `canvass_activity`. Joins `best_phone` so every row has a callable number.
 
 ```bash
 npx wrangler d1 execute wy --env production --remote --config worker/wrangler.toml \
   --command "SELECT
-    ca.voter_id,
+    vc.voter_id,
     va.fn AS first_name,
     va.ln AS last_name,
     va.city,
     v.county,
-    ca.call_result,
-    ca.notes,
-    ca.followup_date,
-    ca.volunteer_email,
+    bp.phone_e164,
+    vc.method,
+    vc.outcome,
+    vc.comments,
+    vc.created_at,
+    'voter_contacts' AS source
+  FROM voter_contacts vc
+  LEFT JOIN voters v ON v.voter_id = vc.voter_id
+  LEFT JOIN voters_addr_norm va ON va.voter_id = vc.voter_id
+  LEFT JOIN best_phone bp ON bp.voter_id = vc.voter_id
+  WHERE vc.ok_callback = 1
+
+  UNION ALL
+
+  SELECT
+    ca.voter_id,
+    va.fn, va.ln, va.city, v.county,
+    bp.phone_e164,
+    'phone' AS method,
+    ca.call_result AS outcome,
+    ca.notes AS comments,
     ca.created_at,
-    'phone' AS contact_type
+    'call_activity' AS source
   FROM call_activity ca
   LEFT JOIN voters v ON v.voter_id = ca.voter_id
   LEFT JOIN voters_addr_norm va ON va.voter_id = ca.voter_id
+  LEFT JOIN best_phone bp ON bp.voter_id = ca.voter_id
   WHERE ca.followup_needed = 1
 
   UNION ALL
@@ -271,15 +292,16 @@ npx wrangler d1 execute wy --env production --remote --config worker/wrangler.to
   SELECT
     can.voter_id,
     va.fn, va.ln, va.city, v.county,
-    can.result AS call_result,
-    can.notes,
-    NULL AS followup_date,
-    can.volunteer_email,
+    bp.phone_e164,
+    'canvass' AS method,
+    can.result AS outcome,
+    can.notes AS comments,
     can.created_at,
-    'canvass' AS contact_type
+    'canvass_activity' AS source
   FROM canvass_activity can
   LEFT JOIN voters v ON v.voter_id = can.voter_id
   LEFT JOIN voters_addr_norm va ON va.voter_id = can.voter_id
+  LEFT JOIN best_phone bp ON bp.voter_id = can.voter_id
   WHERE can.followup_needed = 1
 
   ORDER BY created_at DESC" \
