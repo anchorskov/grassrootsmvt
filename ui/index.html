@@ -69,6 +69,14 @@
 
   /* Wrapper to keep action button + its "?" together */
   .btn-help-wrap { display: inline-flex; align-items: center; gap: .3rem; }
+
+  /* Admin banner */
+  .admin-banner { display:none; background:#1e1b4b; border-radius:12px; padding:.75rem 1rem; margin:1rem 0; align-items:center; justify-content:space-between; gap:1rem; }
+  .admin-banner.is-visible { display:flex; }
+  .admin-banner__left { display:flex; align-items:center; gap:.6rem; color:#c7d2fe; font-size:.95rem; }
+  .admin-banner__left strong { color:#e0e7ff; }
+  .admin-banner__link { background:#e0e7ff; color:#1e1b4b; font-weight:700; font-size:.9rem; padding:.45rem 1rem; border-radius:8px; text-decoration:none; white-space:nowrap; }
+  .admin-banner__link:hover { background:#c7d2fe; }
 </style>
 </head>
 
@@ -86,6 +94,15 @@
 
 <h1>Volunteer Hub</h1>
 <p class="muted">Pick your target set, then start calling or canvassing.</p>
+
+<!-- Admin banner — revealed by JS only for admin users -->
+<div id="admin-banner" class="admin-banner">
+  <div class="admin-banner__left">
+    <span>🔐</span>
+    <span><strong>Admin access</strong> — manage contacts, call activity, volunteers, and field support.</span>
+  </div>
+  <a href="/admin/" class="admin-banner__link">Admin Dashboard →</a>
+</div>
 
 <!-- Quick Actions Section -->
 <div class="quick-actions">
@@ -733,9 +750,24 @@
       }
     }
 
+    let adminChecked = false;
+    async function checkAdminStatus() {
+      if (adminChecked) return;
+      adminChecked = true;
+      try {
+        const res = await fetch('/api/admin/whoami', { credentials: 'include', headers: { Accept: 'application/json' } });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.isAdmin) {
+          document.getElementById('admin-banner')?.classList.add('is-visible');
+        }
+      } catch (_) {}
+    }
+
     function applyState(state) {
       updateIndicator(state);
       updateUserBadge(state);
+      if (state?.authenticated) checkAdminStatus();
 
       if (!banner) return;
 
