@@ -7,7 +7,8 @@ Instructions for AI tools to extract volunteer-collected data from the Grassroot
 - CSV filenames include a date stamp so exports accumulate without overwriting history: `YYYYMMDD_tablename.csv`.
 - Before exporting, check if today's file already exists — skip if it does (avoid repeating the same pull).
 - All `wrangler d1 execute` commands run from the **project root** using `--config worker/wrangler.toml`.
-- Use `--env production` to pull live data. Use `--local` to pull from the local mirror instead.
+- **Always include `--remote`** — without it, wrangler silently queries a local empty stub instead of the real database.
+- Use `--env production --remote` for live data. Use `--local` (no `--remote`) for the local mirror.
 - After each export, run the action-item queries against the CSV (or re-query D1) and write a dated summary to `exports/YYYYMMDD_action_items.md`.
 
 ---
@@ -29,7 +30,7 @@ Run each block in order. Replace `YYYYMMDD` with today's date (e.g. `20260507`).
 Full volunteer interaction records — opt-ins, outcomes, DNC flags, issues.
 
 ```bash
-npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
+npx wrangler d1 execute wy --env production --remote --config worker/wrangler.toml \
   --command "SELECT
     vc.id,
     vc.voter_id,
@@ -67,7 +68,7 @@ npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
 Every phone banking call logged — results, notes, pulse opt-ins, follow-up flags.
 
 ```bash
-npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
+npx wrangler d1 execute wy --env production --remote --config worker/wrangler.toml \
   --command "SELECT
     ca.id,
     ca.voter_id,
@@ -98,7 +99,7 @@ npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
 Every door-knock logged — results, pulse opt-ins, follow-up flags, GPS.
 
 ```bash
-npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
+npx wrangler d1 execute wy --env production --remote --config worker/wrangler.toml \
   --command "SELECT
     ca.id,
     ca.voter_id,
@@ -128,7 +129,7 @@ npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
 Explicit consent records for SMS/email — source of truth for text/email lists.
 
 ```bash
-npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
+npx wrangler d1 execute wy --env production --remote --config worker/wrangler.toml \
   --command "SELECT
     po.id,
     po.voter_id,
@@ -191,7 +192,7 @@ Run these after exporting. Each surfaces a specific admin task.
 Sources: `voter_contacts.optin_sms = 1` AND `call_activity.pulse_opt_in = 1` AND `pulse_optins` table.
 
 ```bash
-npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
+npx wrangler d1 execute wy --env production --remote --config worker/wrangler.toml \
   --command "SELECT DISTINCT
     vc.voter_id,
     va.fn AS first_name,
@@ -226,7 +227,7 @@ npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
 ### 4b. Email opt-ins
 
 ```bash
-npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
+npx wrangler d1 execute wy --env production --remote --config worker/wrangler.toml \
   --command "SELECT
     vc.voter_id,
     va.fn AS first_name,
@@ -247,7 +248,7 @@ npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
 ### 4c. Follow-ups needed (phone + canvass)
 
 ```bash
-npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
+npx wrangler d1 execute wy --env production --remote --config worker/wrangler.toml \
   --command "SELECT
     ca.voter_id,
     va.fn AS first_name,
@@ -288,7 +289,7 @@ npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
 ### 4d. Do Not Contact requests
 
 ```bash
-npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
+npx wrangler d1 execute wy --env production --remote --config worker/wrangler.toml \
   --command "SELECT
     vc.voter_id,
     va.fn AS first_name,
@@ -309,7 +310,7 @@ npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
 ### 4e. Voters who want to volunteer
 
 ```bash
-npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
+npx wrangler d1 execute wy --env production --remote --config worker/wrangler.toml \
   --command "SELECT
     vc.voter_id,
     va.fn AS first_name,
@@ -330,7 +331,7 @@ npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
 ### 4f. Issue interest summary (term limits, public lands)
 
 ```bash
-npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
+npx wrangler d1 execute wy --env production --remote --config worker/wrangler.toml \
   --command "SELECT
     vc.voter_id,
     va.fn AS first_name,

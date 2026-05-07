@@ -127,14 +127,40 @@ Local uses `wy_local` D1 database (mirrored from production). No `--env` flag = 
 
 ---
 
+## Weekly admin data export (run every Monday)
+
+Follow `instructions/DATA_EXPORT_ANALYSIS.md` to pull live volunteer data and surface action items.
+
+**Quick run:**
+```bash
+mkdir -p exports
+# Export voter_contacts (110+ rows as of 2026-05-07)
+npx wrangler d1 execute wy --env production --remote --config worker/wrangler.toml \
+  --command "SELECT vc.*, v.county, va.fn, va.ln, va.city FROM voter_contacts vc LEFT JOIN voters v ON v.voter_id=vc.voter_id LEFT JOIN voters_addr_norm va ON va.voter_id=vc.voter_id ORDER BY vc.created_at DESC" \
+  --json 2>/dev/null > /tmp/vc.json
+```
+Then run the full action-item queries from the instruction file and update `exports/action_items_current.md`.
+
+**Current action items as of 2026-05-07** (`exports/action_items_current.md`):
+- 4 voters with **email opt-ins** to add to campaign email list (all Casper)
+- 4 voters **OK for callback** — connected by phone, need follow-up
+- 1 voter **wants to volunteer** — contact Kevin at 307-247-6113
+- 1 voter **Do Not Contact** — remove from all lists (voter_id 200020720)
+- 7 unique voters with **SMS opt-ins** in pulse_optins (10 records, has duplicates — deduplicate before importing)
+- `call_activity` table is **empty** — phone banking app not yet used in production
+
+**Always use `--remote`** when querying production D1 — without it wrangler silently hits an empty local stub.
+
+---
+
 ## Useful one-liners
 
 ```bash
 # Tail production Worker logs
 npx wrangler tail --env production
 
-# Run a D1 query against production
-npx wrangler d1 execute wy --env production --config worker/wrangler.toml \
+# Run a D1 query against production (--remote required or it hits local empty stub)
+npx wrangler d1 execute wy --env production --remote --config worker/wrangler.toml \
   --command "SELECT COUNT(*) FROM call_activity;"
 
 # List production secrets
