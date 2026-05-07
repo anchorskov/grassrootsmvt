@@ -199,12 +199,14 @@ npx wrangler d1 execute wy --env production --remote --config worker/wrangler.to
     va.ln AS last_name,
     va.city,
     v.county,
+    bp.phone_e164,
     vc.optin_sms,
     vc.created_at,
     'voter_contacts' AS source
   FROM voter_contacts vc
   LEFT JOIN voters v ON v.voter_id = vc.voter_id
   LEFT JOIN voters_addr_norm va ON va.voter_id = vc.voter_id
+  LEFT JOIN best_phone bp ON bp.voter_id = vc.voter_id
   WHERE vc.optin_sms = 1
 
   UNION
@@ -212,12 +214,14 @@ npx wrangler d1 execute wy --env production --remote --config worker/wrangler.to
   SELECT DISTINCT
     ca.voter_id,
     va.fn, va.ln, va.city, v.county,
+    bp.phone_e164,
     1 AS optin_sms,
     ca.created_at,
     'call_activity' AS source
   FROM call_activity ca
   LEFT JOIN voters v ON v.voter_id = ca.voter_id
   LEFT JOIN voters_addr_norm va ON va.voter_id = ca.voter_id
+  LEFT JOIN best_phone bp ON bp.voter_id = ca.voter_id
   WHERE ca.pulse_opt_in = 1
 
   ORDER BY created_at DESC" \
@@ -236,10 +240,12 @@ npx wrangler d1 execute wy --env production --remote --config worker/wrangler.to
     v.county,
     vc.email,
     vc.optin_email,
+    bp.phone_e164,
     vc.created_at
   FROM voter_contacts vc
   LEFT JOIN voters v ON v.voter_id = vc.voter_id
   LEFT JOIN voters_addr_norm va ON va.voter_id = vc.voter_id
+  LEFT JOIN best_phone bp ON bp.voter_id = vc.voter_id
   WHERE vc.optin_email = 1
   ORDER BY vc.created_at DESC" \
   --json > exports/YYYYMMDD_action_email_optins.json
@@ -340,11 +346,13 @@ npx wrangler d1 execute wy --env production --remote --config worker/wrangler.to
     va.city,
     v.county,
     vc.email,
+    bp.phone_e164,
     vc.comments,
     vc.created_at
   FROM voter_contacts vc
   LEFT JOIN voters v ON v.voter_id = vc.voter_id
   LEFT JOIN voters_addr_norm va ON va.voter_id = vc.voter_id
+  LEFT JOIN best_phone bp ON bp.voter_id = vc.voter_id
   WHERE vc.wants_volunteer = 1
   ORDER BY vc.created_at DESC" \
   --json > exports/YYYYMMDD_action_wants_volunteer.json
