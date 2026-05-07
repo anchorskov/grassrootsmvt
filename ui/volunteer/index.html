@@ -54,6 +54,23 @@
       <p class="text-gray-600 text-lg">Select your activity and region to begin outreach.</p>
     </div>
 
+    <!-- Admin Panel (hidden until admin status confirmed) -->
+    <div id="adminPanel" class="hidden mb-6">
+      <div class="bg-indigo-900 rounded-xl p-4 flex items-center justify-between shadow-lg">
+        <div class="flex items-center gap-3">
+          <span class="text-2xl">🔐</span>
+          <div>
+            <div class="text-white font-semibold text-sm">Admin Access</div>
+            <div class="text-indigo-300 text-xs">You have admin privileges</div>
+          </div>
+        </div>
+        <a href="/admin/"
+           class="bg-white text-indigo-900 font-semibold text-sm px-4 py-2 rounded-lg hover:bg-indigo-50 transition-colors duration-200">
+          Admin Dashboard →
+        </a>
+      </div>
+    </div>
+
     <!-- Loading State -->
     <div id="loadingState" class="bg-white rounded-xl shadow-lg p-8 text-center">
       <div class="inline-flex items-center">
@@ -754,18 +771,32 @@
       document.getElementById('errorState').classList.remove('hidden');
     }
 
+    // Check admin status and reveal admin panel if applicable
+    async function checkAdminStatus() {
+      try {
+        const data = await window.apiGet('admin/whoami');
+        if (data && data.isAdmin) {
+          document.getElementById('adminPanel').classList.remove('hidden');
+        }
+      } catch (_) {
+        // Non-admins get a 403 — silently ignore, panel stays hidden
+      }
+    }
+
     // Initialize page with authentication check
     document.addEventListener('DOMContentLoaded', async function() {
       try {
         initElements();
-        
+
         // Check authentication first
         const isAuthenticated = await checkAuthentication();
         if (!isAuthenticated) {
           return; // Stop initialization if not authenticated
         }
-        
-        metadata = await fetchMetadata();
+
+        // Run admin check and metadata fetch in parallel
+        const [_, meta] = await Promise.all([checkAdminStatus(), fetchMetadata()]);
+        metadata = meta;
         showCard();
         setupEventListeners();
         console.log('✅ Authenticated volunteer portal initialized successfully');
