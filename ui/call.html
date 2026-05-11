@@ -69,6 +69,69 @@
     padding: 0.5rem 0.75rem;
     margin: 0.5rem 0 0;
   }
+  .share-panel {
+    border: 1px solid #bae6fd;
+    background: #f0f9ff;
+    border-radius: 10px;
+    padding: 0.85rem;
+    margin-top: 0.6rem;
+  }
+  .share-panel h4 {
+    margin: 0 0 0.4rem;
+    color: #0f172a;
+    font-size: 0.98rem;
+  }
+  .share-chip-wrap {
+    border: 1px solid #93c5fd;
+    background: #fff;
+    border-radius: 8px;
+    padding: 0.45rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    align-items: center;
+  }
+  .share-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    background: #dbeafe;
+    color: #1e3a8a;
+    padding: 0.25rem 0.55rem;
+    font-size: 0.82rem;
+  }
+  .share-chip button {
+    border: none;
+    background: transparent;
+    color: #1e3a8a;
+    font-size: 0.85rem;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+  }
+  .share-chip-input {
+    border: none;
+    min-width: 180px;
+    flex: 1 1 180px;
+    padding: 0.35rem;
+    outline: none;
+    font-size: 0.9rem;
+  }
+  .share-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 0.6rem;
+  }
+  .share-actions button {
+    flex: 1 1 200px;
+    padding: 0.6rem 0.75rem;
+  }
+  .share-status {
+    margin-top: 0.45rem;
+    font-size: 0.88rem;
+  }
 </style>
 
 <h1>
@@ -186,6 +249,39 @@
   <input type="text" id="email" placeholder="name@example.com"/>
   <p class="help-text error-text" id="email-error" style="display:none;"></p>
 
+  <div id="share-panel" class="share-panel" style="display:none;">
+    <h4>Send intro email</h4>
+    <p class="help-text" style="margin-top:0;margin-bottom:0.45rem;">
+      One-time campaign intro only. Recipients are not added to any mailing list.
+    </p>
+    <div class="share-chip-wrap" id="share-recipient-wrap">
+      <div id="share-recipient-chips"></div>
+      <input type="text" id="share-recipient-input" class="share-chip-input" placeholder="Add email(s), press Enter or comma" />
+    </div>
+    <div class="row" style="margin-top:0.5rem;">
+      <div>
+        <label for="share-sender-name">Your name (optional)</label>
+        <input type="text" id="share-sender-name" placeholder="e.g. Sarah" />
+      </div>
+      <div>
+        <button type="button" class="secondary" id="share-contact-picker-btn" style="margin-top:1.75rem;display:none;">Pick from contacts</button>
+      </div>
+    </div>
+    <input
+      type="text"
+      id="share-honeypot"
+      name="company"
+      tabindex="-1"
+      autocomplete="off"
+      style="position:absolute;left:-9999px;opacity:0;"
+    />
+    <div class="share-actions">
+      <button type="button" id="share-mailto-btn" class="secondary">Send with my email app</button>
+      <button type="button" id="share-worker-btn">Send intro via campaign email</button>
+    </div>
+    <div id="share-status" class="share-status muted"></div>
+  </div>
+
   <div class="row">
     <label><input type="checkbox" id="wants_volunteer"> Wants to volunteer</label>
     <label><input type="checkbox" id="share_insights_ok"> OK to share insights</label>
@@ -290,6 +386,16 @@ const scriptCta = document.getElementById('scriptCta');
 const scriptMeta = document.getElementById('scriptMeta');
 const emailInput = document.getElementById('email');
 const emailError = document.getElementById('email-error');
+const sharePanel = document.getElementById('share-panel');
+const shareRecipientWrap = document.getElementById('share-recipient-wrap');
+const shareRecipientChips = document.getElementById('share-recipient-chips');
+const shareRecipientInput = document.getElementById('share-recipient-input');
+const shareSenderNameInput = document.getElementById('share-sender-name');
+const shareContactPickerBtn = document.getElementById('share-contact-picker-btn');
+const shareMailtoBtn = document.getElementById('share-mailto-btn');
+const shareWorkerBtn = document.getElementById('share-worker-btn');
+const shareStatus = document.getElementById('share-status');
+const shareHoneypotInput = document.getElementById('share-honeypot');
 let districtMetadata = null;
 let currentVoterPhone = '';
 const SCRIPT_TOGGLE_KEY = 'vol.call.use_script';
@@ -303,6 +409,7 @@ let scriptTopics = [];
 let currentVoterId = null;
 let currentVoterData = null;
 let legislatorCache = new Map();
+let shareRecipients = [];
 
 currentTouchpointOverride = localStorage.getItem(SCRIPT_TOPIC_KEY) || '';
 if (scriptSelect && currentTouchpointOverride) {
@@ -578,6 +685,230 @@ function validateEmailOptIn() {
   return true;
 }
 
+function normalizeShareEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function parseRecipientInput(value) {
+  return String(value || '')
+    .split(',')
+    .map(part => normalizeShareEmail(part))
+    .filter(Boolean);
+}
+
+function renderShareRecipients() {
+  if (!shareRecipientChips) return;
+  shareRecipientChips.innerHTML = '';
+  shareRecipients.forEach((email, index) => {
+    const chip = document.createElement('span');
+    chip.className = 'share-chip';
+    chip.textContent = email;
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.setAttribute('aria-label', `Remove ${email}`);
+    removeBtn.textContent = 'x';
+    removeBtn.addEventListener('click', () => {
+      shareRecipients = shareRecipients.filter((_, i) => i !== index);
+      renderShareRecipients();
+      setShareStatus('Recipient removed.', 'muted');
+    });
+
+    chip.appendChild(removeBtn);
+    shareRecipientChips.appendChild(chip);
+  });
+}
+
+function setShareStatus(text, kind = 'muted') {
+  if (!shareStatus) return;
+  shareStatus.className = `share-status ${kind}`;
+  shareStatus.textContent = text || '';
+}
+
+function syncSharePrimaryRecipient() {
+  const email = normalizeShareEmail(emailInput?.value || '');
+  if (!email || !isValidEmail(email)) {
+    shareRecipients = shareRecipients.filter(item => item !== email);
+    renderShareRecipients();
+    if (sharePanel) sharePanel.style.display = 'none';
+    return;
+  }
+
+  if (!shareRecipients.includes(email)) {
+    shareRecipients = [email, ...shareRecipients.filter(item => item !== email)].slice(0, 10);
+  }
+  renderShareRecipients();
+  if (sharePanel) sharePanel.style.display = '';
+}
+
+function addShareRecipients(candidates = []) {
+  const valid = [];
+  const invalid = [];
+
+  for (const candidate of candidates) {
+    const email = normalizeShareEmail(candidate);
+    if (!email) continue;
+    if (!isValidEmail(email)) {
+      invalid.push(email);
+      continue;
+    }
+    if (!shareRecipients.includes(email)) {
+      valid.push(email);
+    }
+  }
+
+  if (valid.length) {
+    shareRecipients = [...shareRecipients, ...valid].slice(0, 10);
+    renderShareRecipients();
+  }
+
+  if (shareRecipients.length >= 10) {
+    setShareStatus('Recipient limit reached (10 max).', 'error-text');
+  } else if (invalid.length) {
+    setShareStatus(`Invalid email skipped: ${invalid[0]}`, 'error-text');
+  } else if (valid.length) {
+    setShareStatus(`${valid.length} recipient${valid.length === 1 ? '' : 's'} added.`, 'muted');
+  }
+}
+
+function clearShareState() {
+  shareRecipients = [];
+  renderShareRecipients();
+  if (shareRecipientInput) shareRecipientInput.value = '';
+  if (shareHoneypotInput) shareHoneypotInput.value = '';
+  setShareStatus('');
+  if (sharePanel) sharePanel.style.display = 'none';
+}
+
+function buildShareLinks() {
+  const origin = 'https://volunteers.grassrootsmvt.org';
+  return {
+    learnMore: `${origin}/`,
+    volunteer: `${origin}/volunteer/`,
+    donate: `${origin}/contact.html`,
+  };
+}
+
+function buildShareText(senderName) {
+  const links = buildShareLinks();
+  const sender = String(senderName || '').trim();
+  const intro = sender
+    ? `${sender} wanted to share this with you.`
+    : 'A Grassroots MVT volunteer wanted to share this with you.';
+
+  return [
+    intro,
+    '',
+    'Grassroots MVT is a Wyoming grassroots campaign focused on accountability, tax fairness, and practical solutions for working families.',
+    'Volunteers are reaching out statewide to listen, share campaign priorities, and connect neighbors to meaningful ways to participate.',
+    '',
+    `Learn more: ${links.learnMore}`,
+    `Volunteer: ${links.volunteer}`,
+    `Donate: ${links.donate}`,
+    '',
+    `Paid for by Grassroots MVT Committee. You received this because ${sender || 'a volunteer'} shared it with you. This is a one-time message; you are not being added to any mailing list.`,
+  ].join('\n');
+}
+
+function initShareContactPicker() {
+  if (!shareContactPickerBtn) return;
+  const supported = typeof navigator !== 'undefined' && 'contacts' in navigator && navigator.contacts?.select;
+  if (!supported) {
+    shareContactPickerBtn.style.display = 'none';
+    return;
+  }
+
+  shareContactPickerBtn.style.display = '';
+  shareContactPickerBtn.addEventListener('click', async () => {
+    try {
+      const results = await navigator.contacts.select(['name', 'email'], { multiple: true });
+      const picked = [];
+      for (const entry of results || []) {
+        if (Array.isArray(entry?.email)) {
+          picked.push(...entry.email);
+        }
+      }
+      addShareRecipients(picked);
+    } catch (err) {
+      const message = String(err?.message || err || 'Unable to open contacts.');
+      setShareStatus(message, 'error-text');
+    }
+  });
+}
+
+function initShareActions() {
+  if (!shareRecipientInput || !shareMailtoBtn || !shareWorkerBtn) return;
+
+  shareRecipientInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ',') {
+      event.preventDefault();
+      addShareRecipients(parseRecipientInput(shareRecipientInput.value));
+      shareRecipientInput.value = '';
+    }
+  });
+
+  shareRecipientInput.addEventListener('paste', event => {
+    const pasteText = event.clipboardData?.getData('text') || '';
+    if (!pasteText.includes(',')) return;
+    event.preventDefault();
+    addShareRecipients(parseRecipientInput(pasteText));
+  });
+
+  shareRecipientInput.addEventListener('blur', () => {
+    if (!shareRecipientInput.value.trim()) return;
+    addShareRecipients(parseRecipientInput(shareRecipientInput.value));
+    shareRecipientInput.value = '';
+  });
+
+  shareMailtoBtn.addEventListener('click', () => {
+    if (!shareRecipients.length) {
+      setShareStatus('Add at least one recipient first.', 'error-text');
+      return;
+    }
+    const senderName = (shareSenderNameInput?.value || volunteerDisplayName || '').trim();
+    const subject = 'A quick intro to Grassroots MVT';
+    const body = buildShareText(senderName);
+    const href = `mailto:${shareRecipients.join(',')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = href;
+    setShareStatus('Opening your email app...', 'muted');
+  });
+
+  shareWorkerBtn.addEventListener('click', async () => {
+    if (!shareRecipients.length) {
+      setShareStatus('Add at least one recipient first.', 'error-text');
+      return;
+    }
+
+    const senderName = (shareSenderNameInput?.value || volunteerDisplayName || '').trim();
+    const honeypot = shareHoneypotInput?.value || '';
+
+    try {
+      shareWorkerBtn.disabled = true;
+      setShareStatus('Sending intro email...', 'muted');
+      const result = await jsonFetch(API('/share'), {
+        method: 'POST',
+        body: JSON.stringify({
+          recipients: shareRecipients,
+          sender_name: senderName,
+          website: honeypot,
+        }),
+      });
+      const failedCount = Array.isArray(result?.failed) ? result.failed.length : Number(result?.failed || 0);
+      setShareStatus(`Sent ${result?.sent || 0} email${result?.sent === 1 ? '' : 's'}${failedCount ? `, ${failedCount} failed` : ''}.`, 'muted');
+    } catch (err) {
+      const isLocal = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
+      const localApiHint = 'Local API unavailable. Start Worker with: cd worker && npx wrangler dev --local --port 8787';
+      if (isLocal && (!err?.status || err?.status === 404 || err?.status >= 500)) {
+        setShareStatus(localApiHint, 'error-text');
+      } else {
+        setShareStatus(`Send failed: ${err.message}`, 'error-text');
+      }
+    } finally {
+      shareWorkerBtn.disabled = false;
+    }
+  });
+}
+
 async function recordPulseOptIn(voterId, digits) {
   if (!voterId || !digits) return;
   const e164 = digits.startsWith('+') ? digits : `+1${digits}`;
@@ -823,6 +1154,9 @@ async function loadVolunteerProfile() {
       volunteerProfile,
       result?.email || currentUserEmail
     );
+    if (shareSenderNameInput && !shareSenderNameInput.value) {
+      shareSenderNameInput.value = volunteerDisplayName || '';
+    }
     if (latestScriptPayload) {
       renderScriptPayload(latestScriptPayload);
     }
@@ -830,6 +1164,9 @@ async function loadVolunteerProfile() {
     console.warn('Volunteer profile unavailable:', err);
     if (!volunteerDisplayName) {
       volunteerDisplayName = deriveNameFromEmail(currentUserEmail);
+    }
+    if (shareSenderNameInput && !shareSenderNameInput.value) {
+      shareSenderNameInput.value = volunteerDisplayName || '';
     }
   }
 }
@@ -867,6 +1204,10 @@ async function loadVolunteerProfile() {
     syncPulseOptIn(false, { resetPhone: true });
     if (pulsePhoneInput) {
       pulsePhoneInput.value = '';
+    }
+    clearShareState();
+    if (shareSenderNameInput) {
+      shareSenderNameInput.value = volunteerDisplayName || '';
     }
   }
 
@@ -953,6 +1294,11 @@ async function loadVolunteerProfile() {
       voterCard.dataset.voter = v.voter_id;
       currentVoterId = v.voter_id;
       currentVoterData = v;
+      const voterEmail = (v.email || v.email_address || '').trim();
+      if (emailInput && voterEmail) {
+        emailInput.value = voterEmail;
+      }
+      syncSharePrimaryRecipient();
       const name = [v.first_name, v.last_name].filter(Boolean).join(" ");
       const phone = v.phone_1 ? ('Phone: ' + v.phone_1) : 'Phone: —';
       const districtBits = [
@@ -1131,6 +1477,8 @@ const filters = getFilters();
 showFiltersBadge(filters);
 initDistrictControl();
 initScriptToggle();
+initShareContactPicker();
+initShareActions();
 hideScriptCard('Waiting for voter...');
 if (optInSmsCheckbox) {
   optInSmsCheckbox.addEventListener('change', () => {
@@ -1145,8 +1493,12 @@ if (pulseOptInCheckbox) {
 if (optInEmailCheckbox && emailInput) {
   optInEmailCheckbox.addEventListener('change', () => {
     validateEmailOptIn();
+    syncSharePrimaryRecipient();
   });
-  emailInput.addEventListener('blur', () => validateEmailOptIn());
+  emailInput.addEventListener('blur', () => {
+    validateEmailOptIn();
+    syncSharePrimaryRecipient();
+  });
   emailInput.addEventListener('input', () => {
     if (optInEmailCheckbox.checked) {
       validateEmailOptIn();
@@ -1154,6 +1506,7 @@ if (optInEmailCheckbox && emailInput) {
       emailError.style.display = 'none';
       emailError.textContent = '';
     }
+    syncSharePrimaryRecipient();
   });
 }
 
@@ -1194,6 +1547,7 @@ if (optInEmailCheckbox && emailInput) {
       field.disabled = field.dataset.prevDisabled === '1';
       delete field.dataset.prevDisabled;
     });
+      syncSharePrimaryRecipient();
       if (dncNote) dncNote.style.display = 'none';
       return;
     }
@@ -1223,6 +1577,8 @@ if (optInEmailCheckbox && emailInput) {
         field.value = '';
       }
     });
+
+    syncSharePrimaryRecipient();
 
     if (dncNote) dncNote.style.display = 'block';
   }

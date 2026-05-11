@@ -7,7 +7,7 @@
     "dev": "./scripts/startDev.sh",
     "stop": "./scripts/stopDev.sh",
     "dev:worker": "cd worker && wrangler dev --env preview --port 8787",
-    "dev:pages": "cd ui && wrangler pages dev . --port 8788 --compatibility-date 2024-01-01",
+    "dev:pages": "cd ui && wrangler pages dev . --port 8788 --proxy 8787 --compatibility-date 2024-01-01",
     "build": "npm run build:worker && npm run build:pages",
     "build:worker": "cd worker && wrangler deploy --env production",
     "build:pages": "cd ui && wrangler pages deploy . --project-name grassrootsmvt-ui",

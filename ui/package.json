@@ -6,7 +6,7 @@
   "description": "Cloudflare Pages Functions for the GrassrootsMVT volunteer hub",
   "main": "index.js",
   "scripts": {
-    "dev": "wrangler pages dev .. --compatibility-date=2025-10-08",
+    "dev": "wrangler pages dev .. --proxy 8787 --compatibility-date=2025-10-08",
     "build": "wrangler pages functions build functions --outdir .wrangler/functions-build",
     "lint": "eslint \"functions/**/*.js\"",
     "test": "node ../scripts/verify_local_routes.mjs"

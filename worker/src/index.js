@@ -4,6 +4,7 @@ import { getEnvironmentConfig } from './utils/env.js';
 import { pickAllowedOrigin, preflightResponse, parseAllowedOrigins } from './utils/cors.js';
 import { requireAuth, requireAdmin, isAdmin } from './auth.js';
 import { searchSimilarNames } from './api/contact-form.js';
+import { sendResendEmail } from './resend.js';
 
 const JSON_CONTENT_TYPE = 'application/json; charset=utf-8';
 const tableCache = new Map();
@@ -314,6 +315,73 @@ function sanitizeReturnTarget(rawTarget, baseUrl) {
     }
   }
   return '/';
+}
+
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const MAX_SHARE_RECIPIENTS = 10;
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isValidEmailAddress(value) {
+  return EMAIL_REGEX.test(normalizeEmail(value));
+}
+
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function buildShareMessage(senderName, links) {
+  const sender = String(senderName || '').trim();
+  const senderLine = sender
+    ? `${sender} wanted to share this with you.`
+    : 'A Grassroots MVT volunteer wanted to share this with you.';
+
+  const committeeName = links.committeeName;
+
+  const text = [
+    senderLine,
+    '',
+    'Grassroots MVT is a Wyoming grassroots campaign focused on accountability, tax fairness, and practical solutions that help working families.',
+    'Our volunteers are meeting voters across the state to listen first, share campaign priorities, and connect people with ways to take action.',
+    'If you want to stay involved, you can learn more, volunteer, or donate using the links below.',
+    '',
+    `Learn more: ${links.learnMoreUrl}`,
+    `Volunteer: ${links.volunteerUrl}`,
+    `Donate: ${links.donateUrl}`,
+    '',
+    `Paid for by ${committeeName}. You received this because ${sender || 'a volunteer'} shared it with you. This is a one-time message; you are not being added to any mailing list.`,
+  ].join('\n');
+
+  const html = `
+  <div style="margin:0;padding:0;background:#f4f8fb;font-family:Arial,sans-serif;color:#102030;">
+    <div style="max-width:640px;margin:0 auto;padding:24px 16px;">
+      <div style="background:#0b2239;border-radius:14px 14px 0 0;padding:18px 20px;color:#ffffff;">
+        <div style="font-size:13px;opacity:0.9;letter-spacing:0.4px;text-transform:uppercase;">Grassroots MVT</div>
+        <div style="font-size:26px;font-weight:700;line-height:1.2;margin-top:4px;">Wyoming Voter Outreach 2026</div>
+      </div>
+      <div style="background:#ffffff;border:1px solid #d8e4ef;border-top:none;border-radius:0 0 14px 14px;padding:22px 20px;">
+        <p style="margin:0 0 14px 0;font-size:16px;line-height:1.5;"><strong>${escapeHtml(senderLine)}</strong></p>
+        <p style="margin:0 0 12px 0;font-size:15px;line-height:1.6;">Grassroots MVT is a Wyoming grassroots campaign focused on accountability, tax fairness, and practical solutions that help working families.</p>
+        <p style="margin:0 0 12px 0;font-size:15px;line-height:1.6;">Our volunteers are meeting voters across the state to listen first, share campaign priorities, and connect people with ways to take action.</p>
+        <p style="margin:0 0 18px 0;font-size:15px;line-height:1.6;">If you want to stay involved, you can learn more, volunteer, or donate below.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px;">
+          <a href="${escapeHtml(links.learnMoreUrl)}" style="display:inline-block;padding:10px 14px;background:#0ea5e9;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">Learn More</a>
+          <a href="${escapeHtml(links.volunteerUrl)}" style="display:inline-block;padding:10px 14px;background:#0f766e;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">Volunteer</a>
+          <a href="${escapeHtml(links.donateUrl)}" style="display:inline-block;padding:10px 14px;background:#c2410c;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:600;">Donate</a>
+        </div>
+        <p style="margin:0;font-size:12px;line-height:1.6;color:#4a5568;">Paid for by ${escapeHtml(committeeName)}. You received this because ${escapeHtml(sender || 'a volunteer')} shared it with you. This is a one-time message; you are not being added to any mailing list.</p>
+      </div>
+    </div>
+  </div>`;
+
+  return { html, text };
 }
 
 async function handleApiRequest(request, env, cfCtx) {
@@ -1980,6 +2048,89 @@ router.post('/contact', async (request, env, ctx) => {
       ctx.allowedOrigin
     );
   }
+});
+
+router.post('/share', async (request, env, ctx) => {
+  if (String(env?.SHARE_ENABLED || '').trim() !== '1') {
+    return ctx.jsonResponse({ ok: false, error: 'share_disabled' }, 503, ctx.allowedOrigin);
+  }
+
+  let body;
+  try {
+    body = await readJson(request);
+  } catch (err) {
+    if (err instanceof BadRequestError) {
+      return ctx.jsonResponse({ ok: false, error: err.message }, err.status, ctx.allowedOrigin);
+    }
+    throw err;
+  }
+
+  const honeypot = String(body?.website || body?.company || '').trim();
+  if (honeypot) {
+    return ctx.jsonResponse({ ok: true, sent: 0, failed: 0 }, 200, ctx.allowedOrigin);
+  }
+
+  let auth;
+  try {
+    auth = await ensureAuth(request, env, ctx.config);
+  } catch (err) {
+    const status = err?.status && Number.isInteger(err.status) ? err.status : 401;
+    return ctx.jsonResponse({ ok: false, error: 'unauthorized' }, status, ctx.allowedOrigin);
+  }
+
+  const rawRecipients = Array.isArray(body?.recipients)
+    ? body.recipients
+    : [body?.recipient].filter(Boolean);
+  const recipients = [...new Set(rawRecipients.map(normalizeEmail).filter(Boolean))].slice(0, MAX_SHARE_RECIPIENTS);
+
+  if (!recipients.length) {
+    return ctx.jsonResponse({ ok: false, error: 'at least one recipient is required' }, 400, ctx.allowedOrigin);
+  }
+
+  const invalid = recipients.filter(recipient => !isValidEmailAddress(recipient));
+  if (invalid.length) {
+    return ctx.jsonResponse({ ok: false, error: `invalid recipient email: ${invalid[0]}` }, 400, ctx.allowedOrigin);
+  }
+
+  const senderName = String(body?.sender_name || '').trim() || deriveVolunteerDisplayName(null, auth?.email || null);
+  const links = {
+    learnMoreUrl: String(env?.SHARE_LEARN_MORE_URL || 'https://volunteers.grassrootsmvt.org/').trim(),
+    volunteerUrl: String(env?.SHARE_VOLUNTEER_URL || 'https://volunteers.grassrootsmvt.org/volunteer/').trim(),
+    donateUrl: String(env?.SHARE_DONATE_URL || 'https://volunteers.grassrootsmvt.org/contact.html').trim(),
+    committeeName: String(env?.SHARE_COMMITTEE_NAME || 'Grassroots MVT Committee').trim(),
+  };
+  const subject = String(env?.SHARE_SUBJECT || 'A quick intro to Grassroots MVT').trim();
+  const message = buildShareMessage(senderName, links);
+
+  const sent = [];
+  const failed = [];
+  for (const recipient of recipients) {
+    try {
+      await sendResendEmail(env, {
+        to: recipient,
+        subject,
+        html: message.html,
+        text: message.text,
+      });
+      sent.push(recipient);
+    } catch (err) {
+      failed.push({ recipient, error: String(err?.message || err) });
+    }
+  }
+
+  if (!sent.length) {
+    return ctx.jsonResponse(
+      { ok: false, error: 'unable to send email', failed },
+      502,
+      ctx.allowedOrigin
+    );
+  }
+
+  return ctx.jsonResponse(
+    { ok: true, sent: sent.length, failed },
+    200,
+    ctx.allowedOrigin
+  );
 });
 
 router.post('/script', async (request, env, ctx) => {
