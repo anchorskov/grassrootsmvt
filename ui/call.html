@@ -894,7 +894,7 @@ function initShareActions() {
         }),
       });
       const failedCount = Array.isArray(result?.failed) ? result.failed.length : Number(result?.failed || 0);
-      setShareStatus(`Sent ${result?.sent || 0} email${result?.sent === 1 ? '' : 's'}${failedCount ? `, ${failedCount} failed` : ''}.`, 'muted');
+      setShareStatus(`${result?.sent || 0} address${result?.sent === 1 ? '' : 'es'} submitted${failedCount ? `, ${failedCount} failed` : ''}.`, 'muted');
     } catch (err) {
       const isLocal = /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname);
       const localApiHint = 'Local API unavailable. Start Worker with: cd worker && npx wrangler dev --local --port 8787';
