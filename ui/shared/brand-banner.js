@@ -21,7 +21,8 @@
       '</div>';
 
     document.body.insertBefore(banner, document.body.firstChild);
-    document.body.style.paddingTop = banner.offsetHeight + 'px';
+    // Expose banner height so fixed overlays (logout pill, etc.) can offset below it
+    document.documentElement.style.setProperty('--us-banner-height', banner.offsetHeight + 'px');
   }
 
   if (document.readyState === 'loading') {

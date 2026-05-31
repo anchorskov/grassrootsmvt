@@ -14,7 +14,7 @@
 .us-banner {
   position: sticky;
   top: 0;
-  z-index: 999;
+  z-index: 300;
   background: var(--color-wy-bone);
   border-bottom: 2px solid var(--color-wy-ember);
   padding: 0.4rem 1rem;

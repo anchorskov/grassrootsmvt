@@ -3,9 +3,9 @@ const STACK_STYLE_ID = 'floating-ui-stack-styles';
 const STACK_CLASS = 'floating-ui-stack';
 
 const STACK_POSITIONS = {
-  'top-left':   { top: '12px', left: '12px' },
-  'top-right':  { top: '12px', right: '12px' },
-  'bottom-left': { bottom: '12px', left: '12px' },
+  'top-left':    { top: 'calc(var(--us-banner-height, 0px) + 12px)', left: '12px' },
+  'top-right':   { top: 'calc(var(--us-banner-height, 0px) + 12px)', right: '12px' },
+  'bottom-left':  { bottom: '12px', left: '12px' },
   'bottom-right': { bottom: '12px', right: '12px' },
 };
 

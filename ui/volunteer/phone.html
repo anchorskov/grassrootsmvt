@@ -1,9 +1,10 @@
+<!-- File: ui/volunteer/phone.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <title>Untrammeled Suffrage — Phone Banking</title>
+  <title>Grassroots Movement — Phone Banking</title>
   
   <!-- Favicon -->
   <link rel="icon" type="image/x-icon" href="../favicon.ico">
@@ -13,10 +14,10 @@
   
   <!-- Theme and Meta Tags -->
   <meta name="theme-color" content="#1d4ed8">
-  <meta name="description" content="GrassrootsMVT Volunteer Portal for voter outreach and engagement in Wyoming.">
+  <meta name="description" content="Grassroots Movement Volunteer Portal for voter outreach and engagement in Wyoming.">
   
   <!-- Open Graph Meta Tags -->
-  <meta property="og:title" content="GrassrootsMVT Volunteer Portal">
+  <meta property="og:title" content="Grassroots Movement Volunteer Portal">
   <meta property="og:description" content="Join Wyoming volunteers in connecting with voters statewide.">
   <meta property="og:image" content="../assets/preview.png">
   <meta property="og:type" content="website">
@@ -50,7 +51,7 @@
         <h1 class="text-3xl font-bold text-gray-800">
           📞 Grassroots Phone Banking
         </h1>
-        <div class="flex items-center space-x-4">
+        <div class="flex items-center space-x-4 flex-wrap justify-end gap-y-2">
           <!-- Connection Status -->
           <div class="flex items-center space-x-2">
             <span class="online-indicator text-green-600">🌐 Online</span>
@@ -59,6 +60,10 @@
           <a href="/volunteer/" 
              class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors duration-200 text-sm font-medium">
             ← Back to Volunteer Portal
+          </a>
+          <a href="/help/" 
+             class="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg transition-colors duration-200 text-sm font-semibold">
+            Need help?
           </a>
         </div>
       </div>
@@ -181,6 +186,9 @@
                 <input type="checkbox" id="pulseOptIn" class="mr-2 text-grassroots-500 focus:ring-grassroots-500">
                 <span class="text-sm font-medium text-gray-700">📱 Pulse Opt-In (SMS Updates)</span>
               </label>
+              <p class="text-xs text-gray-500 mt-2">
+                Check this only after the voter clearly agrees to receive campaign texts or email updates. Say: "Message/data rates may apply, and you can reply STOP any time."
+              </p>
             </div>
             
             <!-- Notes -->
@@ -229,6 +237,31 @@
     let currentVoter = null;
     let voters = [];
     let templates = [];
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function phoneHref(phone) {
+      const digits = String(phone || '').replace(/[^\d+]/g, '');
+      return digits ? `tel:${digits}` : '';
+    }
+
+    function voterName(voter) {
+      return voter?.name || [voter?.first_name, voter?.last_name].filter(Boolean).join(' ') || 'Name not listed';
+    }
+
+    function voterContext(voter) {
+      const place = [voter?.city, voter?.county].filter(Boolean).join(', ') || 'Location not listed';
+      const house = voter?.house || voter?.house_district || 'N/A';
+      const senate = voter?.senate || voter?.senate_district || 'N/A';
+      return `${place} • House ${house} / Senate ${senate}`;
+    }
 
     // Parse URL parameters as specified
     function parseUrlParams() {
@@ -355,17 +388,25 @@
     function populateVoterList(voterData) {
       const voterList = document.getElementById('voter-list');
       
-      voterList.innerHTML = voterData.map(voter => `
+      voterList.innerHTML = voterData.map(voter => {
+        const phone = voter.phone || voter.phone_e164 || '';
+        const phoneLink = phoneHref(phone);
+        const phoneHtml = phoneLink
+          ? `<a href="${escapeHtml(phoneLink)}" class="inline-flex mt-2 text-base font-semibold text-blue-700 underline" onclick="event.stopPropagation()">${escapeHtml(phone)}</a>`
+          : '<span class="inline-flex mt-2 text-sm font-medium text-gray-500">No phone on file</span>';
+        return `
         <div class="voter-card bg-gray-50 hover:bg-grassroots-50 border border-gray-200 hover:border-grassroots-300 rounded-lg p-4 cursor-pointer transition-all duration-200"
-             onclick="selectVoter('${voter.voter_id}', this)">
-          <div class="flex items-center justify-between">
+             data-voter-id="${escapeHtml(voter.voter_id)}">
+          <div class="flex items-start justify-between gap-3">
             <div>
-              <div class="font-semibold text-gray-800">Voter ID: ${voter.voter_id}</div>
+              <div class="font-semibold text-gray-800">${escapeHtml(voterName(voter))}</div>
+              <div class="text-xs text-gray-500">Voter ID: ${escapeHtml(voter.voter_id)}</div>
+              ${phoneHtml}
               <div class="text-sm text-gray-600 mt-1">
-                ${voter.county || 'Unknown County'} • ${voter.political_party || 'No Party'}
+                ${escapeHtml(voterContext(voter))}
               </div>
               <div class="text-xs text-gray-500 mt-1">
-                House: ${voter.house || 'N/A'} | Senate: ${voter.senate || 'N/A'}
+                ${escapeHtml(voter.political_party || 'No Party')}${voter.phone_confidence ? ` • Phone confidence ${escapeHtml(voter.phone_confidence)}` : ''}
               </div>
             </div>
             <div class="text-right">
@@ -375,7 +416,12 @@
             </div>
           </div>
         </div>
-      `).join('');
+      `;
+      }).join('');
+
+      voterList.querySelectorAll('.voter-card').forEach(card => {
+        card.addEventListener('click', () => selectVoter(card.dataset.voterId, card));
+      });
     }
 
     // Select a voter for calling
@@ -395,12 +441,12 @@
       // Update selected voter info
       document.getElementById('selected-voter').innerHTML = `
         <div class="bg-grassroots-50 border border-grassroots-200 rounded-lg p-4">
-          <h3 class="font-semibold text-grassroots-700 mb-2">Selected Voter</h3>
+          <h3 class="font-semibold text-grassroots-700 mb-2">${escapeHtml(voterName(currentVoter))}</h3>
           <div class="text-sm text-grassroots-600">
-            <div><strong>ID:</strong> ${currentVoter.voter_id}</div>
-            <div><strong>County:</strong> ${currentVoter.county || 'Unknown'}</div>
-            <div><strong>Party:</strong> ${currentVoter.political_party || 'No Party'}</div>
-            <div><strong>Districts:</strong> H${currentVoter.house || 'N/A'} / S${currentVoter.senate || 'N/A'}</div>
+            <div><strong>ID:</strong> ${escapeHtml(currentVoter.voter_id)}</div>
+            <div><strong>Phone:</strong> ${currentVoter.phone ? `<a href="${escapeHtml(phoneHref(currentVoter.phone))}" class="text-blue-700 underline">${escapeHtml(currentVoter.phone)}</a>` : 'No phone on file'}</div>
+            <div><strong>Context:</strong> ${escapeHtml(voterContext(currentVoter))}</div>
+            <div><strong>Party:</strong> ${escapeHtml(currentVoter.political_party || 'No Party')}</div>
           </div>
         </div>
       `;
@@ -535,57 +581,64 @@
       }, 5000);
     }
 
-    // Initialize page
-    document.addEventListener('DOMContentLoaded', function() {
-      // Parse URL parameters
+    // Initialize page — wait for authGlobal.refresh() to resolve before checking token
+    function initPage() {
       const urlParams = parseUrlParams();
       console.log('📋 URL Parameters:', urlParams);
-      
-      // Check authentication status
+
       const authStatus = getAuthStatus();
       console.log('🔐 Authentication Status:', authStatus);
-      
+
       if (!authStatus.hasToken) {
         showMessage('Authentication required. Please log in.', 'error');
         return;
       }
-      
-      // Update targeting info
+
       const targetLabel = buildTargetingInfo(urlParams);
       document.getElementById('target-label').textContent = targetLabel;
-      
-      // Set up form submission
+
       document.getElementById('call-form').addEventListener('submit', function(e) {
         e.preventDefault();
         submitCall();
       });
-      
-      // Set up retry button
+
       document.getElementById('retry-voters').addEventListener('click', fetchVoters);
-      
-      // Set up offline/online event listeners
+
       window.addEventListener('connection-lost', () => {
         showOfflineMessage('Connection lost. Submissions will be queued for sync.');
       });
-      
+
       window.addEventListener('connection-restored', () => {
         showOfflineMessage('Connection restored. Syncing queued submissions...');
         updateOfflineQueue();
       });
-      
-      // Fetch data
+
       fetchVoters();
       fetchTemplates();
-      
-      // Update offline queue status
       updateOfflineQueue();
-      
+
       console.log('✅ Authenticated phone banking page initialized successfully');
-    });
+    }
+
+    // authGlobal.js fires authGlobalReady after the whoami call resolves.
+    // If it already fired (e.g. cached), fall through to initPage directly.
+    if (window.authGlobal?.ready) {
+      initPage();
+    } else {
+      window.addEventListener('authGlobalReady', initPage, { once: true });
+    }
 
     // Make functions globally available
     window.selectVoter = selectVoter;
     window.submitCall = submitCall;
+  </script>
+  <script type="module">
+    import { initHelpModal } from '../shared/helpModal.js';
+    initHelpModal({
+      helpPath: '/help/volunteer-phone.md',
+      title: 'Phone Banking Help',
+      toggleLabel: 'Help',
+    });
   </script>
 
   <!-- Service Worker Registration -->
