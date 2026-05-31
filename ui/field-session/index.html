@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Field Session | GrassrootsMVT</title>
+  <title>Field Session | Untrammeled Suffrage</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico" />
   <script src="/config/environments.js"></script>
   <style>
@@ -55,6 +55,7 @@
     .empty-tasks { color: #64748b; font-style: italic; }
     .refresh-hint { font-size: .8rem; color: #94a3b8; margin-top: .4rem; }
   </style>
+  <link rel="stylesheet" href="/shared/brand.css">
 </head>
 <body>
   <h1>Field Session</h1>
@@ -445,5 +446,6 @@
     window.addEventListener('pagehide', () => { stopWatch(); clearTimeout(taskPollTimer); });
     loadSession();
   </script>
+<script src="/shared/brand-banner.js"></script>
 </body>
 </html>

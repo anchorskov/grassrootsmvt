@@ -30,6 +30,8 @@ SHARE_COMMITTEE_NAME = "Skovgard for Senate"
 SHARE_LEARN_MORE_URL = "https://skovgard2026.org/"
 SHARE_VOLUNTEER_URL = "https://skovgard2026.org/volunteer/"
 SHARE_DONATE_URL = "https://skovgard2026.org/donate/"
+TEXTING_WELCOME_ENABLED = "0"
+TEXTING_WELCOME_TEXT = "Thanks for signing up for Skovgard for Senate text updates! Reply STOP to opt out."
 
 # ===== PREVIEW =====
 [env.preview]
@@ -45,6 +47,8 @@ SHARE_COMMITTEE_NAME = "Skovgard for Senate"
 SHARE_LEARN_MORE_URL = "https://skovgard2026.org/"
 SHARE_VOLUNTEER_URL = "https://skovgard2026.org/volunteer/"
 SHARE_DONATE_URL = "https://skovgard2026.org/donate/"
+TEXTING_WELCOME_ENABLED = "0"
+TEXTING_WELCOME_TEXT = "Thanks for signing up for Skovgard for Senate text updates! Reply STOP to opt out."
 
 [[env.preview.d1_databases]]
 binding = "d1"
@@ -67,6 +71,8 @@ SHARE_COMMITTEE_NAME = "Skovgard for Senate"
 SHARE_LEARN_MORE_URL = "https://skovgard2026.org/"
 SHARE_VOLUNTEER_URL = "https://skovgard2026.org/volunteer/"
 SHARE_DONATE_URL = "https://skovgard2026.org/donate/"
+TEXTING_WELCOME_ENABLED = "1"
+TEXTING_WELCOME_TEXT = "Thanks for signing up for Skovgard for Senate text updates! Reply STOP to opt out."
 
 # Route ALL requests (UI + API) to this Worker
 routes = [

@@ -1,0 +1,75 @@
+@import url('https://fonts.googleapis.com/css2?family=Bitter:wght@600;700&family=Source+Sans+3:wght@400;500;600&display=swap');
+
+:root {
+  --color-wy-charcoal: #2B2B2B;
+  --color-wy-ember: #B22234;
+  --color-wy-ember-dark: #8B1A26;
+  --color-wy-sandstone: #C68A4A;
+  --color-wy-sage: #7A8A6B;
+  --color-wy-bone: #F1ECE1;
+  --color-wy-rust: #8A3D23;
+  --color-wy-dust: #B7A88A;
+}
+
+.us-banner {
+  position: sticky;
+  top: 0;
+  z-index: 999;
+  background: var(--color-wy-bone);
+  border-bottom: 2px solid var(--color-wy-ember);
+  padding: 0.4rem 1rem;
+  font-family: 'Source Sans 3', Inter, system-ui, sans-serif;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+
+.us-banner-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 1200px;
+  margin: 0 auto;
+  gap: 1rem;
+}
+
+.us-brand {
+  font-family: 'Bitter', Merriweather, Georgia, serif;
+  font-weight: 700;
+  color: var(--color-wy-ember);
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+}
+
+.us-definition {
+  color: var(--color-wy-charcoal);
+  font-style: italic;
+  opacity: 0.75;
+}
+
+.us-support {
+  color: var(--color-wy-sandstone);
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.us-support a {
+  color: var(--color-wy-sandstone);
+  text-decoration: none;
+  border-bottom: 1px solid var(--color-wy-dust);
+}
+
+.us-support a:hover {
+  color: var(--color-wy-rust);
+  border-bottom-color: var(--color-wy-rust);
+}
+
+@media (max-width: 600px) {
+  .us-banner-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.15rem;
+  }
+  .us-support {
+    text-align: left;
+  }
+}

@@ -328,6 +328,58 @@ function isValidEmailAddress(value) {
   return EMAIL_REGEX.test(normalizeEmail(value));
 }
 
+function normalizePulsePhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return '';
+}
+
+async function sendSmsViaTelnyx({ apiKey, fromNumber, to, text }) {
+  const response = await fetch('https://api.telnyx.com/v2/messages', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ from: fromNumber, to, text }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = body?.errors?.[0]?.detail || `Telnyx error ${response.status}`;
+    const err = new Error(message);
+    err.status = response.status;
+    throw err;
+  }
+  return { providerId: body?.data?.id || null, status: body?.data?.status || 'accepted' };
+}
+
+async function maybeSendPulseWelcomeText(db, env, phoneE164) {
+  const enabled = String(env.TEXTING_WELCOME_ENABLED || '0') === '1';
+  const welcomeText = String(env.TEXTING_WELCOME_TEXT || '').trim();
+  const apiKey = String(env.TELNYX_API_KEY || '').trim();
+  const fromNumber = String(env.TELNYX_FROM_NUMBER || '').trim();
+
+  if (!enabled || !welcomeText || !apiKey || !fromNumber || !phoneE164) {
+    return { sent: false, reason: 'disabled_or_missing_config' };
+  }
+
+  const alreadySent = await db.prepare(
+    `SELECT 1 FROM pulse_optins WHERE phone_e164 = ?1 AND welcome_sent_at IS NOT NULL LIMIT 1`
+  ).bind(phoneE164).first();
+  if (alreadySent) return { sent: false, reason: 'already_sent' };
+
+  const result = await sendSmsViaTelnyx({ apiKey, fromNumber, to: phoneE164, text: welcomeText });
+
+  await db.prepare(
+    `UPDATE pulse_optins
+        SET welcome_sent_at = datetime('now')
+      WHERE phone_e164 = ?1 AND welcome_sent_at IS NULL`
+  ).bind(phoneE164).run();
+
+  return { sent: true, providerId: result.providerId, status: result.status };
+}
+
 function escapeHtml(value) {
   return String(value || '')
     .replace(/&/g, '&amp;')
@@ -2682,6 +2734,8 @@ router.post('/pulse', async (request, env, ctx) => {
     );
   }
 
+  const phoneE164 = normalizePulsePhone(body?.phone || '');
+
   const db = getDb(env);
   if (!db) {
     // TODO: Provision D1 table pulse_optins required by /pulse route.
@@ -2698,18 +2752,39 @@ router.post('/pulse', async (request, env, ctx) => {
 
   try {
     const table = await resolveTable(env, ['pulse_optins', 'pulse']);
+    const columns = await getTableColumns(env, table);
     const normalizedMethod = String(contact_method).toLowerCase();
     let normalizedSource = String(consent_source).toLowerCase();
     const allowedSources = new Set(['call', 'canvass', 'webform']);
     if (!allowedSources.has(normalizedSource)) {
       normalizedSource = 'webform';
     }
-    await buildStatement(
-      db,
-      `INSERT INTO ${table} (voter_id, contact_method, consent_source, volunteer_email)
-       VALUES (?1, ?2, ?3, ?4)`,
-      [String(voter_id), normalizedMethod, normalizedSource, volunteerEmail]
-    ).run();
+
+    const hasPhoneCol = columns.includes('phone_e164');
+    if (hasPhoneCol) {
+      await buildStatement(
+        db,
+        `INSERT INTO ${table} (voter_id, contact_method, consent_source, volunteer_email, phone_e164)
+         VALUES (?1, ?2, ?3, ?4, ?5)`,
+        [String(voter_id), normalizedMethod, normalizedSource, volunteerEmail, phoneE164 || null]
+      ).run();
+    } else {
+      await buildStatement(
+        db,
+        `INSERT INTO ${table} (voter_id, contact_method, consent_source, volunteer_email)
+         VALUES (?1, ?2, ?3, ?4)`,
+        [String(voter_id), normalizedMethod, normalizedSource, volunteerEmail]
+      ).run();
+    }
+
+    let welcomeResult = null;
+    if (phoneE164 && hasPhoneCol) {
+      welcomeResult = await maybeSendPulseWelcomeText(db, env, phoneE164).catch(err => {
+        console.error('[pulse] welcome SMS error', String(err?.message || err));
+        return { sent: false, reason: 'error', error: String(err?.message || err) };
+      });
+    }
+
     return ctx.jsonResponse(
       {
         ok: true,
@@ -2717,6 +2792,7 @@ router.post('/pulse', async (request, env, ctx) => {
         voter_id: String(voter_id),
         contact_method: normalizedMethod,
         consent_source: normalizedSource,
+        welcome_sms: welcomeResult,
       },
       200,
       ctx.allowedOrigin
